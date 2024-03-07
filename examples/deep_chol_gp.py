@@ -12,7 +12,6 @@ from sps.gp import GP
 from sps.utils import build_grid
 from tqdm import tqdm
 
-sys.path.append("../dge")
 from dge import MLP, DeepChol
 
 
