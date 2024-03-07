@@ -3,6 +3,8 @@ import argparse
 import sys
 
 import jax
+import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import optax
 from clu import metrics
 from flax import struct
@@ -48,6 +50,13 @@ def main(kernel: str, num_batches: int):
                     metrics[f"train_{metric}"].append(value)
                 state = state.replace(metrics=state.metrics.empty())
                 pbar.set_postfix(loss=f"{metrics['train_loss'][-1]:.3f}")
+    var, ls, z, f = next(loader)
+    f_hat = state.apply_fn({"params": state.params}, z, var, ls)
+    x = jnp.linspace(0, 1, 32)
+    plt.title("f vs f_hat samples")
+    plt.plot(x, f[:5].squeeze().T, color="black")
+    plt.plot(x, f_hat[:5].T, color="red")
+    plt.savefig("f_vs_f_hat.png")
 
 
 def dataloader(key, gp, locations, batch_size=1024, approx=True):
