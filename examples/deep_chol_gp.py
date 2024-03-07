@@ -84,7 +84,7 @@ def parse_args(argv):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("-k", "--kernel", default="rbf")
-    parser.add_argument("-n", "--num_batches", default=1000)
+    parser.add_argument("-n", "--num_batches", default=1000, type=int)
     return parser.parse_args(argv[1:])
 
 
