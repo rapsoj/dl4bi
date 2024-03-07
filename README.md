@@ -22,7 +22,7 @@ pdoc --docformat google --math dge
 ```
 Example scripts can be found [here](https://github.com/danjenson/dge/tree/main/examples).
 
-## Setup
+## Development Setup
 - Install Python 3.12:
     - Install `pyenv`: `curl https://pyenv.run | bash`
     - Copy the lines it says to your `~/.bashrc` and reload `source ~/.bashrc`
