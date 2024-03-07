@@ -7,10 +7,11 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
-jaxlib = {version = "0.4.23+cuda12.cudnn89", extras = ["cuda12_pip"], source = "jax-cuda-12"}
-jax = {version = "0.4.23"}
+jaxlib = {version = "0.4.25+cuda12.cudnn89", extras = ["cuda12_pip"], source = "jax-cuda-12"}
+jax = {version = "0.4.25"}
 flax = "^0.8.0"
-optax = "^0.1.8"
+optax = "^0.2.1"
+tqdm = "^4.66.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.4"

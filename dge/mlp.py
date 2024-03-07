@@ -9,9 +9,8 @@ class MLP(nn.Module):
     act_fn: Callable = nn.relu
 
     @nn.compact
-    def __call__(self, var, ls):
+    def __call__(self, x):
         for dim in self.dims[:-1]:
-            x = nn.Dense(dim)
-            x = self.act_fn(dim)
-        x = nn.Dense(self.dims[-1])
-        return x
+            x = nn.Dense(dim)(x)
+            x = self.act_fn(x)
+        return nn.Dense(self.dims[-1])(x)

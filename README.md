@@ -1,11 +1,19 @@
 # Deep Generative Emulation (dge)
 
+## TODO
+[] Implement PriorVAE
+[] Implement piVAE
+[] Implement DeepChol
+[] Implement Diffusion
+[] Add optional installs for examples
+[] How do you properly use clu for metrics?
+
 ## Setup
-- Install Python 3.11:
+- Install Python 3.12:
     - Install `pyenv`: `curl https://pyenv.run | bash`
     - Copy the lines it says to your `~/.bashrc` and reload `source ~/.bashrc`
-    - Install Python 3.11: `pyenv install 3.11`
-    - Make Python 3.11 your default: `pyenv global 3.11`
+    - Install Python 3.12: `pyenv install 3.12`
+    - Make Python 3.12 your default: `pyenv global 3.12`
 - Install `poetry`: `curl -sSL https://install.python-poetry.org | python3 -`
 - Setup env: `cd sps && poetry install`
 - Run tests: `poetry run pytest`
