@@ -1,10 +1,10 @@
 # Deep Generative Emulation (dge)
 
 ## TODO
-- [ ] Implement PriorVAE
 - [ ] Implement piVAE
-- [X] Implement DeepChol
 - [ ] Implement Diffusion
+- [X] Implement PriorVAE
+- [X] Implement DeepChol
 - [ ] Add optional installs for examples
 - [ ] How do you properly use clu for metrics?
 

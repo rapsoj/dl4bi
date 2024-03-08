@@ -27,7 +27,7 @@ class DeepChol(nn.Module):
         ls: lengthscale to use when calculating `f`.
 
     Returns:
-        $\mathbf{f}$, an approximation of $\mathbf{Lz}$.
+        $\hat{\mathbf{f}}$, an approximation of $\mathbf{Lz}$.
     """
 
     decoder: nn.Module

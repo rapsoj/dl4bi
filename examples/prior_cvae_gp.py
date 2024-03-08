@@ -10,11 +10,12 @@ from clu import metrics
 from flax import struct
 from flax.training import train_state
 from jax import random
+from jax.scipy.stats.multivariate_normal import logpdf as mvn_logp
 from sps.gp import GP
 from sps.utils import build_grid
 from tqdm import tqdm
 
-from dge import MLP, DeepChol
+from dge import MLP, PriorCVAE
 
 
 @struct.dataclass
@@ -27,15 +28,18 @@ class TrainState(train_state.TrainState):
 
 
 def main(kernel: str, num_batches: int):
-    locations = build_grid([{"start": 0, "stop": 1, "num": 32}])
+    f_dim, z_dim = 32, 32
+    locations = build_grid([{"start": 0, "stop": 1, "num": f_dim}])
     key = random.key(42)
-    rng_data, rng_init = random.split(key, 2)
+    rng_data, rng_init, rng_z, rng_train, rng_sample = random.split(key, 5)
     loader = dataloader(rng_data, GP(kernel), locations)
-    var, ls, z, f = next(loader)
-    model = DeepChol(MLP([128, 128, 32]))
+    var, ls, _, f = next(loader)
+    encoder = MLP([128, z_dim])
+    decoder = MLP([128, f_dim])
+    model = PriorCVAE(encoder, decoder, z_dim)
     state = TrainState.create(
         apply_fn=model.apply,
-        params=model.init(rng_init, z, var, ls)["params"],
+        params=model.init(rng_init, rng_z, var, ls, f)["params"],
         tx=optax.adam(1e-3),
         metrics=Metrics.empty(),
     )
@@ -43,20 +47,21 @@ def main(kernel: str, num_batches: int):
     with tqdm(range(1, num_batches + 1), unit="batch") as pbar:
         for i in pbar:
             batch = next(loader)
-            state = train_step(state, batch)
+            rng_step, rng_train = random.split(rng_train)
+            state = train_step(rng_step, state, batch)
             if i % 100 == 0:
-                state = compute_metrics(state, batch)
+                state = compute_metrics(rng_step, state, batch)
                 for metric, value in state.metrics.compute().items():
                     metrics[f"train_{metric}"].append(value)
                 state = state.replace(metrics=state.metrics.empty())
                 pbar.set_postfix(loss=f"{metrics['train_loss'][-1]:.3f}")
-    var, ls, z, f = next(loader)
-    f_hat = state.apply_fn({"params": state.params}, z, var, ls)
-    x = jnp.linspace(0, 1, 32)
+    var, ls, _, f = next(loader)
+    f_hat, _, _ = state.apply_fn({"params": state.params}, rng_sample, var, ls, f)
+    x = jnp.linspace(0, 1, f_dim)
     plt.title("f vs f_hat samples")
     plt.plot(x, f[:5].squeeze().T, color="black")
-    plt.plot(x, f_hat[:5].T, color="red")
-    plt.savefig("deep_chol_f_vs_f_hat.png")
+    plt.plot(x, f_hat[:5].squeeze().T, color="red")
+    plt.savefig("prior_cvae_f_vs_f_hat.png")
 
 
 def dataloader(key, gp, locations, batch_size=1024, approx=True):
@@ -66,22 +71,40 @@ def dataloader(key, gp, locations, batch_size=1024, approx=True):
 
 
 @jax.jit
-def train_step(state, batch):
+def train_step(rng, state, batch):
     def loss_fn(params):
-        var, ls, z, f = batch
-        f_hat = state.apply_fn({"params": params}, z, var, ls)
-        return optax.squared_error(f_hat, f.squeeze()).mean()
+        var, ls, _, f = batch
+        f_hat, mu, log_var = state.apply_fn({"params": params}, rng, var, ls, f)
+        return neg_elbo(f, f_hat, mu, log_var)
 
     grad_fn = jax.grad(loss_fn)
     grads = grad_fn(state.params)
     return state.apply_gradients(grads=grads)
 
 
+def neg_elbo(f, f_hat, mu, log_var):
+    logp_recon = gaussian_logp(f, f_hat)
+    kl_div = kl_divergence(mu, log_var)
+    return kl_div - logp_recon
+
+
+def gaussian_logp(y, y_hat):
+    y = y.reshape(y.shape[0], -1)
+    y_hat = y_hat.reshape(y_hat.shape[0], -1)
+    mu = jnp.zeros(y.shape[1])
+    cov = jnp.eye(y.shape[1])
+    return mvn_logp(y - y_hat, mu, cov).mean()
+
+
+def kl_divergence(mu, log_var):
+    return (0.5 * (jnp.exp(log_var) + jnp.square(mu) - 1 - log_var)).mean()
+
+
 @jax.jit
-def compute_metrics(state, batch):
-    var, ls, z, f = batch
-    f_hat = state.apply_fn({"params": state.params}, z, var, ls)
-    loss = optax.squared_error(f_hat, f.squeeze()).mean()
+def compute_metrics(rng, state, batch):
+    var, ls, _, f = batch
+    f_hat, mu, log_var = state.apply_fn({"params": state.params}, rng, var, ls, f)
+    loss = neg_elbo(f, f_hat, mu, log_var)
     metric_updates = state.metrics.single_from_model_output(f_hat=f_hat, f=f, loss=loss)
     metrics = state.metrics.merge(metric_updates)
     return state.replace(metrics=metrics)
