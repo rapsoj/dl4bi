@@ -53,23 +53,24 @@ def main(kernel: str, num_batches: int):
                     metrics[f"train_{metric}"].append(value)
                 state = state.replace(metrics=state.metrics.empty())
                 pbar.set_postfix(loss=f"{metrics['train_loss'][-1]:.3f}")
-    var, ls, _, f = next(loader)
-    f_hat, _, _ = state.apply_fn({"params": state.params}, rng_sample, var, ls, f)
-    x = jnp.linspace(0, 1, f_dim)
+    s, f = next(loader)
+    f_hat, _, _ = state.apply_fn({"params": state.params}, rng_sample, s, f)
     plt.title("f vs f_hat samples")
-    plt.plot(x, f[:5].squeeze().T, color="black")
-    plt.plot(x, f_hat[:5].squeeze().T, color="red")
-    plt.savefig("prior_cvae_f_vs_f_hat.png")
+    s_5 = s[:5].squeeze().T
+    plt.plot(s_5, f[:5].squeeze().T, color="black")
+    plt.plot(s_5, f_hat[:5].squeeze().T, color="red")
+    plt.savefig("sp_vae_f_vs_f_hat.png")
 
 
-def dataloader(key, gp, loc_dim, batch_size=1024, approx=True):
+def dataloader(key, gp, loc_dim, batch_size=64, approx=True):
     while True:
         rng_gp, rng_loc, key = random.split(key, 3)
-        s = random.uniform(rng_loc, (batch_size, loc_dim)).sort(axis=1)
+        s = random.uniform(rng_loc, (batch_size, loc_dim)).sort(axis=1)[..., None]
         f = []
         for i in range(batch_size):
             rng_gp_i, rng_gp = random.split(rng_gp)
-            f += gp.simulate(rng_gp_i, s[i], 1, approx)
+            _, _, _, _f = gp.simulate(rng_gp_i, s[i], 1, approx)
+            f += [_f]
         yield s, jnp.array(f)
 
 
