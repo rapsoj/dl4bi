@@ -3,7 +3,6 @@
 ## TODO
 - [ ] Implement SPVAE
     - [ ] Keep randomness constant, change locations - smooth curve?
-    - [ ] Add dropout?
 - [ ] Implement piVAE
 - [ ] Implement Diffusion
 - [X] Implement PriorVAE
