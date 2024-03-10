@@ -8,7 +8,7 @@ from jax import Array, random
 
 @dataclass
 class SPVAE(nn.Module):
-    r"""SCVAE approximates any stochastic process.
+    r"""SPVAE approximates any stochastic process.
 
     Once trained, the module's `decoder` can be used as a generative
     model to simulate samples it was trained on.
@@ -21,7 +21,7 @@ class SPVAE(nn.Module):
         z_dim: The size of the hidden dimension.
 
     Returns:
-        $\hat{\mathbf{f}}$, a recreation of the original$\mathbf{f}$,
+        $\hat{\mathbf{f}}$, a recreation of the original $\mathbf{f}$,
         along with $\mu$ and $\log(\sigma^2)$, which are often used
         to calculate losses involving KL divergence.
     """
