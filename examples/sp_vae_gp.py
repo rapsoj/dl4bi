@@ -25,12 +25,13 @@ class Metrics(metrics.Collection):
 
 class TrainState(train_state.TrainState):
     metrics: Metrics
+    key: jax.Array
 
 
 def main(kernel: str, num_batches: int):
     f_dim, z_dim = 32, 32
     key = random.key(42)
-    rng_data, rng_init, rng_z, rng_train, rng_sample = random.split(key, 5)
+    rng_data, rng_init, rng_z, rng_train, rng_sample, rng_dropout = random.split(key, 6)
     loader = dataloader(rng_data, GP(kernel, ls=Prior("fixed", {"value": 0.2})), f_dim)
     s, f = next(loader)
     encoder = MLP([256, z_dim])
@@ -41,6 +42,7 @@ def main(kernel: str, num_batches: int):
         params=model.init(rng_init, rng_z, s, f)["params"],
         tx=optax.adam(1e-3),
         metrics=Metrics.empty(),
+        key=rng_dropout,
     )
     metrics = {"train_loss": []}
     with tqdm(range(1, num_batches + 1), unit="batch") as pbar:
@@ -77,9 +79,19 @@ def dataloader(key, gp, loc_dim, batch_size=64, approx=True):
 
 @jax.jit
 def train_step(rng, state, batch):
+    rng_dropout, rng_z = random.split(rng)
+    dropout_key = random.fold_in(key=rng_dropout, data=state.step)
+
     def loss_fn(params):
         s, f = batch
-        f_hat, mu, log_var = state.apply_fn({"params": params}, rng, s, f)
+        f_hat, mu, log_var = state.apply_fn(
+            {"params": params},
+            rng,
+            s,
+            f,
+            training=False,  # NOTE: switch to True to enable dropout
+            rngs={"dropout": dropout_key},
+        )
         return neg_elbo(f, f_hat, mu, log_var)
 
     grad_fn = jax.grad(loss_fn)

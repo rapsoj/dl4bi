@@ -31,15 +31,15 @@ class SPVAE(nn.Module):
     z_dim: int
 
     @nn.compact
-    def __call__(self, rng: Array, x: Array, f: Array):
+    def __call__(self, rng: Array, x: Array, f: Array, training: bool = False):
         batch_size = f.shape[0]
         x_flat = x.reshape(batch_size, -1)
         f_flat = f.reshape(batch_size, -1)
-        latents = self.encoder(jnp.hstack([x_flat, f_flat]))
+        latents = self.encoder(jnp.hstack([x_flat, f_flat]), training)
         mu = nn.Dense(self.z_dim)(latents)
         log_var = nn.Dense(self.z_dim)(latents)
         std = jnp.exp(log_var / 2)
         eps = random.normal(rng, log_var.shape)
         z = mu + std * eps
-        f_hat = self.decoder(jnp.hstack([x_flat, z]))
+        f_hat = self.decoder(jnp.hstack([x_flat, z]), training)
         return f_hat.reshape(f.shape), mu, log_var

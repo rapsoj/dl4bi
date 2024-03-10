@@ -3,14 +3,15 @@ from collections.abc import Callable
 from flax import linen as nn
 
 
-# TODO(danj): add dropout?
 class MLP(nn.Module):
     dims: list[int]
     act_fn: Callable = nn.relu
+    dropout_rate: float = 0.5
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, training: bool = False):
         for dim in self.dims[:-1]:
             x = nn.Dense(dim)(x)
             x = self.act_fn(x)
+            x = nn.Dropout(self.dropout_rate, deterministic=not training)(x)
         return nn.Dense(self.dims[-1])(x)
