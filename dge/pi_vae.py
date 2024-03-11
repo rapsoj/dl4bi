@@ -15,13 +15,14 @@ class PiVAE(nn.Module):
     Once trained, the module's `decoder` can be used as a generative
     model to simulate samples from the approximated process.
 
+    Note:
+        This model assumes that the total number of samples is the
+        same as batch size, so it sees the same samples over and over.
+
     Args:
         phi: An instance of the `Phi` class.
-        encoder: A module used to encode GP realizations and
-            their hyperparamters.
-        decoder: A module used to decode random vectors and
-            GP hyperparameters into GP samples.
-        beta_dim: The size of the hidden dimension.
+        encoder: Learns to encode random betas.
+        decoder: Decodes random latent vectors to betas.
 
     Returns:
         An instance of a `PiVAE` network.
@@ -30,21 +31,33 @@ class PiVAE(nn.Module):
     phi: nn.Module
     encoder: nn.Module
     decoder: nn.Module
-    z_dim: int
 
     @nn.compact
     def __call__(self, rng: Array, s: Array, f: Array):
+        r"""Run module forward.
+
+        Args:
+            rng: A psuedo-random number generator.
+            s: A location array of shape `(B,K,D)` where
+                `B` is batch size, `K` is number of locations,
+                and `D` is the dimension of each location.
+            f: A function value array of shape `(B, K)`.
+
+        Returns:
+            $\hat{\mathbf{f}}$, a recreation of the original $\mathbf{f}$,
+            along with $\mu$ and $\log(\sigma^2)$, which are often used
+            to calculate losses involving KL divergence.
+        """
         batch_size = s.shape[0]
         f_flat = f.reshape(batch_size, -1)
         s_flat = s.reshape(batch_size, -1)
-        # Try training on (s, f) -> f_enc -> z with (z, s) -> f_dec -> f_hat
         # TODO(danj): finish
-        # |phi(s)| = num features per location
-        # K tuples of (s, f) per row
-        # Thus phi(s) for each row should be K|phi(s)|
-        # Multiply betas.T x |phi(s)| for each of K locations, s
+        # s in BxKxD
+        # phi(s) in BxKxF
+        # beta in BxF
+        # beta_T_phi_s = (beta[:, None, :] * phi(s)).sum(axis=-1)
+        # jnp.einsum('BF,BKF->BK')
         phi_s = self.phi(s_flat)
-        # beta vector for each row of the batch
         betas = self.param(
             "betas",
             nn.initializers.lecun_normal(),

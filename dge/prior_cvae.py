@@ -21,7 +21,8 @@ class PriorCVAE(nn.Module):
         z_dim: The size of the hidden dimension.
 
     Returns:
-        $\hat{\mathbf{f}}$, a recreation of the original$\mathbf{f}$,
+        An instance of the PriorCVAE network.
+        $\hat{\mathbf{f}}$, a recreation of the original $\mathbf{f}$,
         along with $\mu$ and $\log(\sigma^2)$, which are often used
         to calculate losses involving KL divergence.
     """
@@ -32,6 +33,19 @@ class PriorCVAE(nn.Module):
 
     @nn.compact
     def __call__(self, rng: Array, var: float, ls: float, f: Array):
+        r"""Run module forward.
+
+        Args:
+            rng: A psuedo-random number generator.
+            var: The variance for the GP.
+            ls: The lengthscale for the GP.
+            f: The function values, an array of shape `(B, K, 1)`.
+
+        Returns:
+            $\hat{\mathbf{f}}$, a recreation of the original$\mathbf{f}$,
+            along with $\mu$ and $\log(\sigma^2)$, which are often used
+            to calculate losses involving KL divergence.
+        """
         batch_size = f.shape[0]
         var = jnp.full((batch_size, 1), var)
         ls = jnp.full((batch_size, 1), ls)

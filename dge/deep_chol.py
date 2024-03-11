@@ -27,13 +27,23 @@ class DeepChol(nn.Module):
         ls: lengthscale to use when calculating `f`.
 
     Returns:
-        $\hat{\mathbf{f}}$, an approximation of $\mathbf{Lz}$.
+        An instance of the `DeepChol` network.
     """
 
     decoder: nn.Module
 
     @nn.compact
     def __call__(self, z: Array, var: float, ls: float):
+        r"""Run module forward.
+
+        Args:
+            rng: A psuedo-random number generator.
+            var: The variance for the GP.
+            ls: The lengthscale for the GP.
+
+        Returns:
+            $\hat{\mathbf{f}}$, an approximation of $\mathbf{Lz}$.
+        """
         batch_size = z.shape[0]
         var = jnp.full((batch_size, 1), var)
         ls = jnp.full((batch_size, 1), ls)
