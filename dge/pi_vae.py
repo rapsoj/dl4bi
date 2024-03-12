@@ -15,7 +15,7 @@ class PiVAE(nn.Module):
     Once trained, the module's `decoder` can be used as a generative
     model to simulate samples from the approximated process.
 
-    Note:
+    Warning:
         This model assumes that the total number of samples is the
         same as batch size, so it sees the same samples over and over.
 
