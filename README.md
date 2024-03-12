@@ -1,16 +1,16 @@
 # Deep Generative Emulation (dge)
 
 ## TODO
-- [ ] Implement SPVAE
-    - [ ] Keep randomness constant, change locations - smooth curve?
-- [ ] Implement piVAE
 - [ ] Implement Diffusion
+- [X] Implement SPVAE
+    - [ ] Keep randomness constant, change locations - smooth curve?
+- [X] Implement piVAE
 - [X] Implement PriorVAE
 - [X] Implement DeepChol
-- [ ] Add optional installs for examples
-- [ ] How do you properly use clu for metrics?
 
 ## Install
+1. Install [jax](https://jax.readthedocs.io/en/latest/installation.html)
+2. Install the `dge` package from git:
 ```bash
 pip install git+ssh://git@github.com/danjenson/dge.git
 ```
