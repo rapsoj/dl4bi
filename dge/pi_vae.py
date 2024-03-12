@@ -57,7 +57,7 @@ class PiVAE(nn.Module):
         # NOTE: When training the VAE, the betas should be fixed, i.e. you
         # do not want the input betas being updated via backprop because they
         # weren't close enough to the predicted beta_hats. To do this, you need
-        # to extract the frozen beta parameters, not the traced jax arrays.
+        # to use the frozen beta parameters, not the traced jax arrays.
         betas_fixed = self.variables["params"]["betas"]
         latents = self.encoder(betas_fixed)
         latents = self.encoder(betas)
