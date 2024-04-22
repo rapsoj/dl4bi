@@ -37,7 +37,7 @@ class TrainState(train_state.TrainState):
 def main(key, func, embedder, scorer, p_dropout):
     num_batches, batch_size = 1000, 64
     rng_data, rng_init, rng_dropout = random.split(key, 3)
-    max_x, num_context, num_test = 100, 50, 50
+    max_x, num_context, num_test = 200, 50, 50
     s = jnp.linspace(0.0, max_x, num=max_x * 10)
     period = 15  # lengthen period for graphics
     f = func(s / period)
@@ -76,7 +76,7 @@ def main(key, func, embedder, scorer, p_dropout):
     plt.scatter(s_test, f_test, color="green", alpha=0.5)
     plt.scatter(s_test, f_test_hat, color="red", alpha=0.5)
     plt.title("f_test vs f_test_hat samples")
-    plt.savefig("kernel_regression.pdf")
+    plt.savefig(f"{embedder.__class__.__name__}.pdf")
 
 
 def dataloader(key, s, f, num_context, num_test, batch_size):
