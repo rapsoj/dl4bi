@@ -1,4 +1,7 @@
+from .attn import AdditiveScorer, Attention, DotScorer
 from .deep_chol import DeepChol
+from .embed import FixedSinusoidalEmbedding, GaussianFourierEmbedding, NeRFEmbedding
+from .kernel_regressor import KernelRegressor
 from .mlp import MLP
 from .pi_vae import Phi, PiVAE
 from .prior_cvae import PriorCVAE
