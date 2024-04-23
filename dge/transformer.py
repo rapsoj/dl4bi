@@ -66,6 +66,7 @@ class TransformerEncoder(nn.Module):
 
     Args:
         embed: Embedding module for input points.
+        scorer: Scoring module used to calculate query-key attention.
         num_heads: Number of attention heads per encoder block.
         num_blks: Number of encoder blocks.
         p_dropout: Dropout rate for output.
@@ -89,9 +90,9 @@ class TransformerEncoder(nn.Module):
     ):
         x = self.embed(x)
         for _ in range(self.num_blks):
-            x = TransformerEncoderBlock(self.scorer, self.num_heads, self.p_dropout)(
-                x, valid_lens, training
-            )
+            x = TransformerEncoderBlock(
+                self.scorer.copy(), self.num_heads, self.p_dropout
+            )(x, valid_lens, training)
         return x
 
 
@@ -99,14 +100,14 @@ class TransformerDecoderBlock(nn.Module):
     """A single decoder block from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
     Args:
-        attention: Attention module, defaults to `MultiheadAttention`.
+        scorer: Scoring module used to calculate query-key attention.
         p_dropout: Dropout rate for input `y`.
 
     Returns:
         Input transformed by a single decoder block.
     """
 
-    attention: nn.Module = MultiheadAttention()
+    scorer: nn.Module = DotScorer()
     p_dropout: float = 0.3
 
     @nn.compact
