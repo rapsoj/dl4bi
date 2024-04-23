@@ -5,6 +5,7 @@ from jax import jit, random, vmap
 from jax.tree_util import Partial
 
 from .mlp import MLP
+from collections.abc import Callable
 
 
 class FixedSinusoidalEmbedding(nn.Module):
@@ -17,21 +18,32 @@ class FixedSinusoidalEmbedding(nn.Module):
     \end{aligned}
     $$
 
-    .. warning:: This maps each element of the last dimension independently: $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times D\times E}$.
+    .. warning:: This maps each element of the last dimension independently and
+        then concatenates: $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times DE}$.
+        For example, a 3 dimensional point `(x,y,z)` will get mapped to a `3*embed_dim`
+        embedding.
     """
 
     embed_dim: int = 256
 
-    def setup(self):
-        self.pe = _pe_attn_sinusoidal(self.embed_dim)
-
+    @nn.compact
     def __call__(self, s: jax.Array):
-        return self.pe(s)
+        B, L, D = s.shape
+        return _pe_attn_sinusoidal(self.embed_dim)(s).reshape(B, L, D * self.embed_dim)
 
 
-def _pe_attn_sinusoidal(d):
-    i = jnp.arange(d // 2)
+def _pe_attn_sinusoidal(d: int):
     f = lambda i, s: s / (10000 ** (2 * i / d))
+    return _pe_sinusoidal(f, d)
+
+
+def _pe_nerf_sinusoidal(d: int):
+    f = lambda i, s: 2**i * jnp.pi * s
+    return _pe_sinusoidal(f, d)
+
+
+def _pe_sinusoidal(f: Callable, d: int):
+    i = jnp.arange(d // 2)
     vf = lambda s: jnp.apply_along_axis(vmap(Partial(vmap(f, (0, None)), i)), -1, s)
     return jit(lambda s: jnp.concatenate([jnp.sin(vf(s)), jnp.cos(vf(s))], -1))
 
@@ -46,24 +58,19 @@ class NeRFEmbedding(nn.Module):
     \end{aligned}
     $$
 
-    .. warning:: This maps each element of the last dimension independently: $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times D\times E}$.
+    .. warning:: This maps each element of the last dimension independently and
+        then concatenates: $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times DE}$.
+        For example, a 3 dimensional point `(x,y,z)` will get mapped to a `3*embed_dim`
+        embedding.
     """
 
     embed_dim: int = 256
 
-    def setup(self):
-        self.pe = _pe_nerf_sinusoidal(self.embed_dim)
-        self.f_theta = nn.Dense(self.embed_dim)
-
+    @nn.compact
     def __call__(self, s: jax.Array):
-        return self.f_theta(self.pe(s))
-
-
-def _pe_nerf_sinusoidal(d):
-    i = jnp.arange(d // 2)
-    f = lambda i, s: 2**i * jnp.pi * s
-    vf = lambda s: jnp.apply_along_axis(vmap(Partial(vmap(f, (0, None)), i)), -1, s)
-    return jit(lambda s: jnp.concatenate([jnp.sin(vf(s)), jnp.cos(vf(s))], -1))
+        B, L, D = s.shape
+        s = _pe_nerf_sinusoidal(self.embed_dim)(s).reshape(B, L, D * self.embed_dim)
+        return nn.Dense(D * self.embed_dim)(s)
 
 
 # TODO(danj): learn/optimize var?
@@ -87,15 +94,12 @@ class GaussianFourierEmbedding(nn.Module):
     B: jax.Array  # [embed_dim, input_dim]
     var: float = 10.0
 
-    def setup(self):
-        self.pe = _pe_gaussian_fourier(self.B, self.var)
-        self.embed_dim = self.B.shape[0]
-        self.f_theta = nn.Dense(self.embed_dim)
-
+    @nn.compact
     def __call__(self, s):
         embed_dim, input_dim = self.B.shape
         s = s[..., None] if input_dim == 1 else s
-        return self.f_theta(self.pe(s))
+        s = _pe_gaussian_fourier(self.B, self.var)(s)
+        return nn.Dense(embed_dim)(s)
 
 
 def _pe_gaussian_fourier(B, var):

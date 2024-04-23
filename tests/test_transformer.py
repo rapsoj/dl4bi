@@ -17,13 +17,12 @@ def test_transformer_encoder():
     B = random.normal(rng_B, (embed_dim, feature_dim))
     valid_lens = jnp.array([2, 4, 6, 3])
     for embed in [
-        # TODO(danj): think of best way to collapse multiple dimensions into 1
-        # FixedSinusoidalEmbedding(embed_dim),
-        # NeRFEmbedding(embed_dim),
+        FixedSinusoidalEmbedding(embed_dim // feature_dim),
+        NeRFEmbedding(embed_dim // feature_dim),
         GaussianFourierEmbedding(B),
     ]:
-        x, _ = TransformerEncoder(embed).init_with_output(rng_init, x, valid_lens)
-        assert x.shape == (
+        y, _ = TransformerEncoder(embed).init_with_output(rng_init, x, valid_lens)
+        assert y.shape == (
             batch_size,
             seq_len,
             embed_dim,
