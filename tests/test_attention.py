@@ -27,7 +27,7 @@ def test_multihead_attention():
     qs, ks, vs = data[0], data[1], data[2]
     valid_lens = jnp.array([2, 4, 6, 3])
     for scorer in [AdditiveScorer(), DotScorer()]:
-        (ctx, attn), _ = MultiheadAttention(Attention(scorer)).init_with_output(
+        (ctx, attn), _ = MultiheadAttention(scorer, H).init_with_output(
             rng_init, qs, ks, vs, valid_lens
         )
         assert ctx.shape == (B, L, D), "Incorrect context output shape!"

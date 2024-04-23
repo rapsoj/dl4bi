@@ -123,7 +123,7 @@ class MultiheadAttention(nn.Module):
     r"""Performs multihead (masked) query-key-value attention with dropout.
 
     Args:
-        attention: An attention module used to calculate attention for each head.
+        num_heads: Number of heads for attention module.
         p_dropout: A dropout rate.
 
     Returns:
@@ -139,8 +139,9 @@ class MultiheadAttention(nn.Module):
         $$
     """
 
-    attention: nn.Module = Attention()
+    scorer: nn.Module = DotScorer()
     num_heads: int = 4
+    p_dropout: float = 0.3
 
     @nn.compact
     def __call__(
@@ -174,7 +175,9 @@ class MultiheadAttention(nn.Module):
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
         # [B * H, Q, D_V_H], [B * H, Q, K]
-        ctx, attn = self.attention(qs, ks, vs, valid_lens, training)
+        ctx, attn = Attention(self.scorer, self.p_dropout)(
+            qs, ks, vs, valid_lens, training
+        )
         # [B * H, Q, D_V_H] -> [B, Q, D_V]
         ctx = ctx.reshape(B, H, Q, D_V_H).transpose(0, 2, 1, 3).reshape(B, Q, D_V)
         return ctx, attn.reshape(B, H, Q, K)
