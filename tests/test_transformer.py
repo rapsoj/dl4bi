@@ -2,6 +2,8 @@ import jax.numpy as jnp
 from jax import random
 
 from dge import (
+    AdditiveScorer,
+    DotScorer,
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
     NeRFEmbedding,
@@ -16,14 +18,17 @@ def test_transformer_encoder():
     x = random.normal(rng_data, (batch_size, seq_len, feature_dim))
     B = random.normal(rng_B, (embed_dim, feature_dim))
     valid_lens = jnp.array([2, 4, 6, 3])
-    for embed in [
+    for embedder in [
         FixedSinusoidalEmbedding(embed_dim // feature_dim),
         NeRFEmbedding(embed_dim // feature_dim),
         GaussianFourierEmbedding(B),
     ]:
-        y, _ = TransformerEncoder(embed).init_with_output(rng_init, x, valid_lens)
-        assert y.shape == (
-            batch_size,
-            seq_len,
-            embed_dim,
-        ), "Incorrect encoder output shape!"
+        for scorer in [DotScorer(), AdditiveScorer()]:
+            y, _ = TransformerEncoder(embedder, scorer).init_with_output(
+                rng_init, x, valid_lens
+            )
+            assert y.shape == (
+                batch_size,
+                seq_len,
+                embed_dim,
+            ), "Incorrect encoder output shape!"
