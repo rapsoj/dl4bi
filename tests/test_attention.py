@@ -1,7 +1,13 @@
 import jax.numpy as jnp
 from jax import random
 
-from dge import AdditiveScorer, Attention, DotScorer, MultiheadAttention
+from dge import (
+    AdditiveScorer,
+    Attention,
+    DotScorer,
+    MultiheadAttention,
+    MultiplicativeScorer,
+)
 
 
 def test_regular_attention():
@@ -11,7 +17,7 @@ def test_regular_attention():
     data = random.normal(rng_data, (3, B, L, D))
     qs, ks, vs = data[0], data[1], data[2]
     valid_lens = jnp.array([2, 4, 6, 3])
-    for scorer in [AdditiveScorer(), DotScorer()]:
+    for scorer in [AdditiveScorer(), MultiplicativeScorer(), DotScorer()]:
         (ctx, attn), _ = Attention(scorer).init_with_output(
             rng_init, qs, ks, vs, valid_lens
         )
@@ -26,7 +32,7 @@ def test_multihead_attention():
     data = random.normal(rng_data, (3, B, L, D))
     qs, ks, vs = data[0], data[1], data[2]
     valid_lens = jnp.array([2, 4, 6, 3])
-    for scorer in [AdditiveScorer(), DotScorer()]:
+    for scorer in [AdditiveScorer(), MultiplicativeScorer(), DotScorer()]:
         (ctx, attn), _ = MultiheadAttention(scorer, H).init_with_output(
             rng_init, qs, ks, vs, valid_lens
         )

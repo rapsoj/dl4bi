@@ -6,6 +6,7 @@ from dge import (
     DotScorer,
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
+    MultiplicativeScorer,
     NeRFEmbedding,
     TransformerEncoder,
 )
@@ -23,7 +24,7 @@ def test_transformer_encoder():
         NeRFEmbedding(embed_dim // feature_dim),
         GaussianFourierEmbedding(B),
     ]:
-        for scorer in [DotScorer(), AdditiveScorer()]:
+        for scorer in [AdditiveScorer(), MultiplicativeScorer(), DotScorer()]:
             y, _ = TransformerEncoder(embedder, scorer).init_with_output(
                 rng_init, x, valid_lens
             )

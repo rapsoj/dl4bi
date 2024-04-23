@@ -1,4 +1,10 @@
-from .attention import AdditiveScorer, Attention, DotScorer, MultiheadAttention
+from .attention import (
+    AdditiveScorer,
+    Attention,
+    DotScorer,
+    MultiheadAttention,
+    MultiplicativeScorer,
+)
 from .deep_chol import DeepChol
 from .embed import FixedSinusoidalEmbedding, GaussianFourierEmbedding, NeRFEmbedding
 from .kernel_regressor import KernelRegressor
