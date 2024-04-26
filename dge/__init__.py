@@ -5,6 +5,7 @@ from .attention import (
     MultiheadAttention,
     MultiplicativeScorer,
 )
+from .attentive_neural_process import AttentiveNeuralProcess
 from .deep_chol import DeepChol
 from .embed import FixedSinusoidalEmbedding, GaussianFourierEmbedding, NeRFEmbedding
 from .kernel_regressor import KernelRegressor
