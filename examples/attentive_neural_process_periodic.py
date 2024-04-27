@@ -35,19 +35,16 @@ class TrainState(train_state.TrainState):
     metrics: Metrics
 
 
-def main(key, func, embedder, scorer, p_dropout):
-    embed_dim, batch_size, num_batches = 128, 64, 1000
+def main(key, func, embedder, scorer, p_dropout, embed_dim, num_batches, batch_size):
     max_x, num_context, num_test, period = 200, 50, 50, 15
     rng_data, rng_init, rng_sample, rng_train = random.split(key, 4)
     s = jnp.linspace(0.0, max_x, num=max_x * 10)[..., None]
     f = func(s / period)
     loader = dataloader(key, s, f, num_context, num_test, batch_size)
     (s_ctx, f_ctx), (s_test, f_test) = next(loader)
-    scorer = DotScorer()
-    embed_s = FixedSinusoidalEmbedding(embed_dim)
-    embed_s_and_f = FixedSinusoidalEmbedding(embed_dim // 2)
-    enc_s_and_f_local = TransformerEncoder(embed_s_and_f.copy(), scorer.copy())
-    enc_s_and_f_global = TransformerEncoder(embed_s_and_f.copy(), scorer.copy())
+    embed_s = embedder.copy()
+    enc_s_and_f_local = TransformerEncoder(embedder.copy(), scorer.copy())
+    enc_s_and_f_global = TransformerEncoder(embedder.copy(), scorer.copy())
     # TODO(danj): add post cross-attn linear layer like paper?
     cross_attn = MultiheadAttention(scorer.copy())
     # TODO(danj): original paper has these as the same network
@@ -87,24 +84,24 @@ def main(key, func, embedder, scorer, p_dropout):
     s_ctx, f_ctx = s_ctx[[0], ...], f_ctx[[0], ...]
     s_test = jnp.array([[[732], [828], [987]]])
     f_test = func(s_test / period)
-    f_ctx_hat = state.apply_fn(
+    _, f_ctx_hat, _ = state.apply_fn(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_ctx
     )
-    f_test_hat = state.apply_fn(
+    _, f_test_hat, _ = state.apply_fn(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_test
     )
     s_all = jnp.linspace(0.0, 1000, num=10000)
     f_all = func(s_all / period)
-    plt.plot(s_all, f_all)
-    plt.scatter(s_ctx, f_ctx, color="black", alpha=0.5)
-    plt.scatter(s_ctx, f_ctx_hat, color="red", alpha=0.5)
-    plt.scatter(s_test, f_test, color="green", alpha=0.5)
-    plt.scatter(s_test, f_test_hat, color="red", alpha=0.5)
+    plt.plot(s_all.squeeze(), f_all.squeeze())
+    plt.scatter(s_ctx.squeeze(), f_ctx.squeeze(), color="black", alpha=0.5)
+    plt.scatter(s_ctx.squeeze(), f_ctx_hat.squeeze(), color="red", alpha=0.5)
+    plt.scatter(s_test.squeeze(), f_test.squeeze(), color="green", alpha=0.5)
+    plt.scatter(s_test.squeeze(), f_test_hat.squeeze(), color="red", alpha=0.5)
     plt.title("f_test vs f_test_hat samples")
     plt.savefig(f"{embedder.__class__.__name__}.pdf")
 
 
-def dataloader(key, s, f, num_context, num_test, batch_size):
+def dataloader(key, s, f, num_context, num_test, batch_size=128):
     idxs = jnp.arange(len(s))
     while True:
         s_ctx, f_ctx, s_test, f_test = [], [], [], []
@@ -138,7 +135,7 @@ def train_step(rng_dropout, rng_sample, state, batch):
             training=True,
             rngs={"dropout": rng_dropout},
         )
-        return -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var)).sum()
+        return -jnp.nan_to_num(norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2))).mean()
 
     grad_fn = jax.grad(loss_fn)
     grads = grad_fn(state.params)
@@ -151,8 +148,8 @@ def compute_metrics(rng_sample, state, batch):
     zs_global, f_mu, f_log_var = state.apply_fn(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_test
     )
-    loss = -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var)).sum()
-    metric_updates = state.metrics.single_from_model_output(loss=loss)
+    nll = -jnp.nan_to_num(norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2))).mean()
+    metric_updates = state.metrics.single_from_model_output(loss=nll)
     metrics = state.metrics.merge(metric_updates)
     return state.replace(metrics=metrics)
 
@@ -196,8 +193,10 @@ def parse_args(argv):
     parser.add_argument("-f", "--func", default="sine")
     parser.add_argument("-s", "--scorer", default="dot")
     parser.add_argument("-e", "--embedder", default="sinusoidal")
-    parser.add_argument("-d", "--embed_dim", type=int, default=64)
+    parser.add_argument("-d", "--embed_dim", type=int, default=128)
     parser.add_argument("-p", "--p_dropout", type=float, default=0.5)
+    parser.add_argument("-n", "--num_batches", type=int, default=500)
+    parser.add_argument("-b", "--batch_size", type=int, default=64)
     return parser.parse_args(argv[1:])
 
 
@@ -207,4 +206,13 @@ if __name__ == "__main__":
     func = get_func(args.func)
     embedder = get_embedder(args.embedder, key, args.embed_dim)
     scorer = get_scorer(args.scorer)
-    main(key, func, embedder, scorer, args.p_dropout)
+    main(
+        key,
+        func,
+        embedder,
+        scorer,
+        args.p_dropout,
+        args.embed_dim,
+        args.num_batches,
+        args.batch_size,
+    )
