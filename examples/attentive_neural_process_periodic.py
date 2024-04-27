@@ -6,23 +6,23 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
-import tqdm
 from clu import metrics
 from flax import struct
 from flax.training import train_state
 from jax import random
-from sps.gp import GP
-from sps.utils import build_grid
+from jax.scipy.stats import norm
 from tqdm import tqdm
 
 from dge import (
+    MLP,
     AdditiveScorer,
     AttentiveNeuralProcess,
     DotScorer,
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
-    KernelRegressor,
+    MultiheadAttention,
     NeRFEmbedding,
+    TransformerEncoder,
 )
 
 
@@ -36,43 +36,63 @@ class TrainState(train_state.TrainState):
 
 
 def main(key, func, embedder, scorer, p_dropout):
-    num_batches, batch_size = 1000, 64
-    rng_data, rng_init, rng_dropout = random.split(key, 3)
-    max_x, num_context, num_test = 200, 50, 50
-    s = jnp.linspace(0.0, max_x, num=max_x * 10)
-    period = 15  # lengthen period for graphics
+    embed_dim, batch_size, num_batches = 128, 64, 1000
+    max_x, num_context, num_test, period = 200, 50, 50, 15
+    rng_data, rng_init, rng_sample, rng_train = random.split(key, 4)
+    s = jnp.linspace(0.0, max_x, num=max_x * 10)[..., None]
     f = func(s / period)
     loader = dataloader(key, s, f, num_context, num_test, batch_size)
     (s_ctx, f_ctx), (s_test, f_test) = next(loader)
-    embed_dim = 128
-    location_embedder = FixedSinusoidalEmbedding(embed_dim)
-    local_s_and_f_embedder = TransformerEncoder()
-    # m = KernelRegressor(embedder, scorer, p_dropout)
-    m = AttentiveNeuralProcess()
+    scorer = DotScorer()
+    embed_s = FixedSinusoidalEmbedding(embed_dim)
+    embed_s_and_f = FixedSinusoidalEmbedding(embed_dim // 2)
+    enc_s_and_f_local = TransformerEncoder(embed_s_and_f.copy(), scorer.copy())
+    enc_s_and_f_global = TransformerEncoder(embed_s_and_f.copy(), scorer.copy())
+    # TODO(danj): add post cross-attn linear layer like paper?
+    cross_attn = MultiheadAttention(scorer.copy())
+    # TODO(danj): original paper has these as the same network
+    dec_z_mu = MLP([embed_dim, embed_dim])
+    dec_z_log_var = MLP([embed_dim, embed_dim])
+    dec_f_mu = MLP([embed_dim * 3, embed_dim * 2, embed_dim, 1])
+    dec_f_log_var = MLP([embed_dim * 3, embed_dim * 2, embed_dim, 1])
+    m = AttentiveNeuralProcess(
+        embed_s,
+        enc_s_and_f_local,
+        enc_s_and_f_global,
+        cross_attn,
+        dec_z_mu,
+        dec_z_log_var,
+        dec_f_mu,
+        dec_f_log_var,
+    )
     state = TrainState.create(
         apply_fn=m.apply,
-        params=m.init(rng_init, s_ctx, f_ctx, s_test)["params"],
+        params=m.init(rng_init, rng_sample, s_ctx, f_ctx, s_test)["params"],
         tx=optax.adam(1e-3),
         metrics=Metrics.empty(),
     )
     metrics = {"train_loss": []}
     with tqdm(range(1, num_batches + 1), unit="batch") as pbar:
-        _rng_dropout, rng_dropout = random.split(rng_dropout)
+        rng_dropout, rng_sample, rng_train = random.split(rng_train, 3)
         for i in pbar:
             batch = next(loader)
-            state = train_step(_rng_dropout, state, batch)
+            state = train_step(rng_dropout, rng_sample, state, batch)
             if i % 10 == 0:
-                state = compute_metrics(state, batch)
+                state = compute_metrics(rng_sample, state, batch)
                 for metric, value in state.metrics.compute().items():
                     metrics[f"train_{metric}"].append(value)
                 state = state.replace(metrics=state.metrics.empty())
                 pbar.set_postfix(loss=f"{metrics['train_loss'][-1]:.3f}")
     (s_ctx, f_ctx), _ = next(loader)
     s_ctx, f_ctx = s_ctx[[0], ...], f_ctx[[0], ...]
-    s_test = jnp.array([[732, 828, 987]])
+    s_test = jnp.array([[[732], [828], [987]]])
     f_test = func(s_test / period)
-    f_ctx_hat = state.apply_fn({"params": state.params}, s_ctx, f_ctx, s_ctx)
-    f_test_hat = state.apply_fn({"params": state.params}, s_ctx, f_ctx, s_test)
+    f_ctx_hat = state.apply_fn(
+        {"params": state.params}, rng_sample, s_ctx, f_ctx, s_ctx
+    )
+    f_test_hat = state.apply_fn(
+        {"params": state.params}, rng_sample, s_ctx, f_ctx, s_test
+    )
     s_all = jnp.linspace(0.0, 1000, num=10000)
     f_all = func(s_all / period)
     plt.plot(s_all, f_all)
@@ -105,18 +125,20 @@ def dataloader(key, s, f, num_context, num_test, batch_size):
 
 
 @jax.jit
-def train_step(rng_dropout, state, batch):
+def train_step(rng_dropout, rng_sample, state, batch):
     def loss_fn(params):
         (s_ctx, f_ctx), (s_test, f_test) = batch
-        f_test_hat = state.apply_fn(
+        zs_global, f_mu, f_log_var = state.apply_fn(
             {"params": params},
+            rng_sample,
             s_ctx,
             f_ctx,
             s_test,
+            valid_lens=None,
             training=True,
             rngs={"dropout": rng_dropout},
         )
-        return optax.squared_error(f_test_hat, f_test).mean()
+        return -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var)).sum()
 
     grad_fn = jax.grad(loss_fn)
     grads = grad_fn(state.params)
@@ -124,10 +146,12 @@ def train_step(rng_dropout, state, batch):
 
 
 @jax.jit
-def compute_metrics(state, batch):
+def compute_metrics(rng_sample, state, batch):
     (s_ctx, f_ctx), (s_test, f_test) = batch
-    f_test_hat = state.apply_fn({"params": state.params}, s_ctx, f_ctx, s_test)
-    loss = optax.squared_error(f_test_hat, f_test).mean()
+    zs_global, f_mu, f_log_var = state.apply_fn(
+        {"params": state.params}, rng_sample, s_ctx, f_ctx, s_test
+    )
+    loss = -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var)).sum()
     metric_updates = state.metrics.single_from_model_output(loss=loss)
     metrics = state.metrics.merge(metric_updates)
     return state.replace(metrics=metrics)

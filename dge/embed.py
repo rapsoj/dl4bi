@@ -1,11 +1,10 @@
+from collections.abc import Callable
+
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import jit, random, vmap
+from jax import jit, vmap
 from jax.tree_util import Partial
-
-from .mlp import MLP
-from collections.abc import Callable
 
 
 class FixedSinusoidalEmbedding(nn.Module):
@@ -88,7 +87,8 @@ class GaussianFourierEmbedding(nn.Module):
     \end{aligned}
     $$
 
-    .. warning:: This maps every element of the last dimension together: $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times E}$.
+    .. warning:: This maps every element of the last dimension together:
+        $\mathbb{R}^{\ldots\times D}\to\mathbb{R}^{\ldots\times E}$.
     """
 
     B: jax.Array  # [embed_dim, input_dim]
@@ -97,7 +97,6 @@ class GaussianFourierEmbedding(nn.Module):
     @nn.compact
     def __call__(self, s):
         embed_dim, input_dim = self.B.shape
-        s = s[..., None] if input_dim == 1 else s
         s = _pe_gaussian_fourier(self.B, self.var)(s)
         return nn.Dense(embed_dim)(s)
 

@@ -5,7 +5,7 @@ from flax import linen as nn
 
 class MLP(nn.Module):
     dims: list[int]
-    act_fn: Callable = nn.relu
+    act_fn: Callable = nn.selu
     dropout_rate: float = 0.5
 
     @nn.compact

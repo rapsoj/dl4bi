@@ -9,7 +9,7 @@ import jax
 
 from dge.embed import FixedSinusoidalEmbedding
 
-from .attention import Attention, DotScorer, MultiheadAttention
+from .attention import DotScorer, MultiheadAttention
 
 
 class AddNorm(nn.Module):
