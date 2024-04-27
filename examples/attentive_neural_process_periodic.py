@@ -40,7 +40,7 @@ def main(key, func, embedder, scorer, p_dropout, embed_dim, num_batches, batch_s
     rng_data, rng_init, rng_sample, rng_train = random.split(key, 4)
     s = jnp.linspace(0.0, max_x, num=max_x * 10)[..., None]
     f = func(s / period)
-    loader = dataloader(key, s, f, num_context, num_test, batch_size)
+    loader = dataloader(rng_data, s, f, num_context, num_test, batch_size)
     (s_ctx, f_ctx), (s_test, f_test) = next(loader)
     embed_s = embedder.copy()
     enc_s_and_f_local = TransformerEncoder(embedder.copy(), scorer.copy())
@@ -84,37 +84,39 @@ def main(key, func, embedder, scorer, p_dropout, embed_dim, num_batches, batch_s
     s_ctx, f_ctx = s_ctx[[0], ...], f_ctx[[0], ...]
     s_test = jnp.array([[[732], [828], [987]]])
     f_test = func(s_test / period)
-    _, f_ctx_hat, _ = state.apply_fn(
+    _, f_ctx_mu, f_ctx_log_var = state.apply_fn(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_ctx
     )
-    _, f_test_hat, _ = state.apply_fn(
+    _, f_test_mu, f_test_log_var = state.apply_fn(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_test
     )
+    print(jnp.exp(f_ctx_log_var / 2))
     s_all = jnp.linspace(0.0, 1000, num=10000)
     f_all = func(s_all / period)
     plt.plot(s_all.squeeze(), f_all.squeeze())
     plt.scatter(s_ctx.squeeze(), f_ctx.squeeze(), color="black", alpha=0.5)
-    plt.scatter(s_ctx.squeeze(), f_ctx_hat.squeeze(), color="red", alpha=0.5)
+    plt.scatter(s_ctx.squeeze(), f_ctx_mu.squeeze(), color="red", alpha=0.5)
     plt.scatter(s_test.squeeze(), f_test.squeeze(), color="green", alpha=0.5)
-    plt.scatter(s_test.squeeze(), f_test_hat.squeeze(), color="red", alpha=0.5)
+    plt.scatter(s_test.squeeze(), f_test_mu.squeeze(), color="red", alpha=0.5)
     plt.title("f_test vs f_test_hat samples")
     plt.savefig(f"{embedder.__class__.__name__}.pdf")
 
 
-def dataloader(key, s, f, num_context, num_test, batch_size=128):
+def dataloader(key, s, f, num_context, num_test, batch_size=128, eps=0.1):
     idxs = jnp.arange(len(s))
     while True:
         s_ctx, f_ctx, s_test, f_test = [], [], [], []
         for b in range(batch_size):
-            rng, key = random.split(key)
+            rng, rng_eps, key = random.split(key, 3)
             idx = random.choice(
                 rng, idxs, shape=(num_context + num_test,), replace=False
             )
+            _f = f + eps * random.normal(rng_eps, f.shape)
             context_idx, test_idx = idx[:num_context], idx[num_context:]
             s_ctx += [s[context_idx]]
-            f_ctx += [f[context_idx]]
+            f_ctx += [_f[context_idx]]
             s_test += [s[test_idx]]
-            f_test += [f[test_idx]]
+            f_test += [_f[test_idx]]
         yield (
             (jnp.stack(s_ctx), jnp.stack(f_ctx)),
             (jnp.stack(s_test), jnp.stack(f_test)),
@@ -135,7 +137,7 @@ def train_step(rng_dropout, rng_sample, state, batch):
             training=True,
             rngs={"dropout": rng_dropout},
         )
-        return -jnp.nan_to_num(norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2))).mean()
+        return -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2)).mean()
 
     grad_fn = jax.grad(loss_fn)
     grads = grad_fn(state.params)
@@ -148,7 +150,7 @@ def compute_metrics(rng_sample, state, batch):
     zs_global, f_mu, f_log_var = state.apply_fn(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_test
     )
-    nll = -jnp.nan_to_num(norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2))).mean()
+    nll = -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2)).mean()
     metric_updates = state.metrics.single_from_model_output(loss=nll)
     metrics = state.metrics.merge(metric_updates)
     return state.replace(metrics=metrics)
