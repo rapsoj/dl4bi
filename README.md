@@ -4,9 +4,10 @@
 - [ ] Implement Diffusion
 - [X] Implement ANP
     - [ ] Test embeddings: identity, sinusidal, nerf, fourier
+    - [ ] MLP after cross-attn
+    - [ ] Test optimized var in fourier embedding
     - [ ] Use joint MLP network for mu and var (z and f)
     - [ ] Use same self-attn network for local and global paths
-    - [ ] MLP after cross-attn
     - [ ] Incorporate valid lens
     - [ ] Try different pooling mechanism for global zs, e.g. max pooling
     - [ ] Test KL loss term on global zs

@@ -63,9 +63,7 @@ def main(
     )
     enc_ctx_local = TransformerEncoder(scorer.copy())
     enc_ctx_global = TransformerEncoder(scorer.copy())
-    # TODO(danj): add post cross-attn linear layer like paper?
     cross_attn = MultiheadAttention(scorer.copy())
-    # TODO(danj): original paper has these as the same network
     dec_z_mu = MLP([embed_dim, embed_dim])
     dec_z_log_var = MLP([embed_dim, embed_dim])
     dec_f_mu = MLP([embed_dim * 3, embed_dim * 2, embed_dim, 1], p_dropout=0.0)

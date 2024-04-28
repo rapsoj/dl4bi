@@ -81,7 +81,6 @@ class NeRFEmbedding(nn.Module):
         return _pe_nerf_sinusoidal(self.embed_dim)(s).reshape(B, L, D * self.embed_dim)
 
 
-# TODO(danj): test optimized var?
 class GaussianFourierEmbedding(nn.Module):
     r"""Gaussian Fourier Feature (GFF) positional encoding from ["Fourier Features Let Networks Learn
         High Frequency Functions in Low Dimensional Domains"](https://arxiv.org/abs/2006.10739).
