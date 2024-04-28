@@ -43,11 +43,12 @@ def main(
     pos_embed,
     scorer,
     p_dropout,
+    embed_dim_pe,
     embed_dim,
     num_batches,
     batch_size,
 ):
-    max_train_s, freq, num_context, num_test = 0.2, 15, 50, 50
+    max_train_s, freq, num_context, num_test = 0.2, 20, 50, 50
     rng_embed, rng_data, rng_init, rng_sample, rng_train = random.split(key, 5)
     # if you don't normalize, the identity positional embedding will explode
     s = jnp.linspace(0.0, 1.0, num=10000)
@@ -58,13 +59,13 @@ def main(
     s_train, f_train = s[train_idx, None], f[train_idx, None]
     loader = dataloader(rng_data, s_train, f_train, num_context, num_test, batch_size)
     (s_ctx_init, f_ctx_init), (s_test_init, _) = next(loader)
+    mlp_dims = [embed_dim * n for n in [4, 4, 4, 4, 4, 1]]
     embed_s = LearnableEmbedding(
-        get_embedder(pos_embed, rng_embed, embed_dim, 1),
-        MLP([embed_dim * 2, embed_dim]),
+        get_embedder(pos_embed, rng_embed, embed_dim_pe, 1), MLP(mlp_dims)
     )
     embed_s_and_f = LearnableEmbedding(
-        get_embedder(pos_embed, rng_embed, embed_dim, 2),
-        MLP([embed_dim * 2, embed_dim]),
+        get_embedder(pos_embed, rng_embed, embed_dim_pe, 2),
+        MLP(mlp_dims),
     )
     enc_ctx_local = TransformerEncoder(scorer.copy())
     enc_ctx_global = TransformerEncoder(scorer.copy())
@@ -241,6 +242,7 @@ def parse_args(argv):
     parser.add_argument("-f", "--func", default="sine")
     parser.add_argument("-s", "--scorer", default="dot")
     parser.add_argument("-e", "--pos_embed", default="sinusoidal")
+    parser.add_argument("-d_pe", "--embed_dim_pe", default=16)
     parser.add_argument("-d", "--embed_dim", type=int, default=128)
     parser.add_argument("-p", "--p_dropout", type=float, default=0.5)
     parser.add_argument("-n", "--num_batches", type=int, default=500)
@@ -259,6 +261,7 @@ if __name__ == "__main__":
         args.pos_embed,
         scorer,
         args.p_dropout,
+        args.embed_dim_pe,
         args.embed_dim,
         args.num_batches,
         args.batch_size,
