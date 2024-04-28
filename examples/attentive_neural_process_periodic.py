@@ -153,8 +153,7 @@ def train_step(rng_dropout, rng_sample, state, batch):
             training=True,
             rngs={"dropout": rng_dropout},
         )
-        nll = -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2))
-        return nn.relu(nll).sum()  # relu for when variance collapses
+        return -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2)).sum()
 
     grad_fn = jax.grad(loss_fn)
     grads = grad_fn(state.params)
@@ -167,9 +166,8 @@ def compute_metrics(rng_sample, state, batch):
     zs_global, f_mu, f_log_var = state.apply_fn(
         {"params": state.params}, rng_sample, s_ctx, f_ctx, s_test
     )
-    nll = -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2))
-    loss = nn.relu(nll).sum()
-    metric_updates = state.metrics.single_from_model_output(loss=loss)
+    nll = -norm.logpdf(f_test, f_mu, jnp.exp(f_log_var / 2)).sum()
+    metric_updates = state.metrics.single_from_model_output(loss=nll)
     metrics = state.metrics.merge(metric_updates)
     return state.replace(metrics=metrics)
 

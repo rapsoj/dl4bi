@@ -11,6 +11,7 @@
     - [ ] Incorporate valid lens
     - [ ] Try different pooling mechanism for global zs, e.g. max pooling
     - [ ] Test KL loss term on global zs
+    - [ ] Implement multiple sinusoidal tasks
 - [X] Implement piVAE
 - [X] Implement PriorVAE
 - [X] Implement DeepChol
