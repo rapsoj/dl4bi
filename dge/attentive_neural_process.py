@@ -25,8 +25,8 @@ class AttentiveNeuralProcess(nn.Module):
     cross_attn: nn.Module = MultiheadAttention()
     dec_z_mu: nn.Module = MLP([128, 128])
     dec_z_log_var: nn.Module = MLP([128, 128])
-    dec_f_mu: nn.Module = MLP([128 * 3, 128 * 2, 128, 1])
-    dec_f_log_var: nn.Module = MLP([128 * 3, 128 * 2, 128, 1])
+    dec_f_mu: nn.Module = MLP([128 * 3, 128 * 2, 128, 1], p_dropout=0.0)
+    dec_f_log_var: nn.Module = MLP([128 * 3, 128 * 2, 128, 1], p_dropout=0.0)
 
     @nn.compact
     def __call__(

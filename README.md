@@ -2,12 +2,14 @@
 
 ## TODO
 - [ ] Implement Diffusion
-- [X] Implement SPVAE
-    - [ ] Keep randomness constant, change locations - smooth curve?
-    - [ ] Use additive positional encodings
-    - [ ] Can we do this only with Attention and relative embeddings?
-        - https://arxiv.org/abs/1803.02155
-        - https://arxiv.org/abs/2006.03654
+- [X] Implement ANP
+    - [ ] Test embeddings: identity, sinusidal, nerf, fourier
+    - [ ] Use joint MLP network for mu and var (z and f)
+    - [ ] Use same self-attn network for local and global paths
+    - [ ] MLP after cross-attn
+    - [ ] Incorporate valid lens
+    - [ ] Try different pooling mechanism for global zs, e.g. max pooling
+    - [ ] Test KL loss term on global zs
 - [X] Implement piVAE
 - [X] Implement PriorVAE
 - [X] Implement DeepChol
