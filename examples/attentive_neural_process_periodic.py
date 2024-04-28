@@ -49,17 +49,18 @@ def main(
 ):
     max_x, num_context, num_test, period = 200, 50, 50, 15
     rng_embed, rng_data, rng_init, rng_sample, rng_train = random.split(key, 5)
-    s = jnp.linspace(0.0, max_x, num=max_x * 10)[..., None]
+    # if you don't normalize, the identity positional embedding will explode
+    s = jnp.linspace(0.0, max_x, num=max_x * 10)[..., None] / max_x
     f = func(s / period)
     loader = dataloader(rng_data, s, f, num_context, num_test, batch_size)
     (s_ctx, f_ctx), (s_test, f_test) = next(loader)
     embed_s = LearnableEmbedding(
         get_embedder(pos_embed, rng_embed, embed_dim, 1),
-        MLP([embed_dim, embed_dim]),
+        MLP([embed_dim] * 6),
     )
     embed_s_and_f = LearnableEmbedding(
         get_embedder(pos_embed, rng_embed, embed_dim, 2),
-        MLP([embed_dim, embed_dim]),
+        MLP([embed_dim] * 6),
     )
     enc_ctx_local = TransformerEncoder(scorer.copy())
     enc_ctx_global = TransformerEncoder(scorer.copy())

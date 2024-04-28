@@ -3,15 +3,16 @@
 ## TODO
 - [ ] Implement Diffusion
 - [X] Implement ANP
-    - [ ] Test embeddings: identity, sinusidal, nerf, fourier
+    - [ ] Fix identity embedding
+    - [ ] Compare embeddings: identity, sinusidal, nerf, fourier
     - [ ] MLP after cross-attn
-    - [ ] Test optimized var in fourier embedding
     - [ ] Use joint MLP network for mu and var (z and f)
+    - [ ] Test optimized var in fourier embedding
     - [ ] Use same self-attn network for local and global paths
     - [ ] Incorporate valid lens
     - [ ] Try different pooling mechanism for global zs, e.g. max pooling
     - [ ] Test KL loss term on global zs
-    - [ ] Implement multiple sinusoidal tasks
+    - [ ] Test generalization across multiple sinusoidal tasks
 - [X] Implement piVAE
 - [X] Implement PriorVAE
 - [X] Implement DeepChol

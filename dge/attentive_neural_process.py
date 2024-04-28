@@ -11,8 +11,6 @@ from .mlp import MLP
 from .transformer import TransformerEncoder
 
 
-# TODO(danj): incorporate valid_lens
-# TODO(danj): try different global pooling mechanisms (max-pooling instead of mean)
 class AttentiveNeuralProcess(nn.Module):
     embed_s: nn.Module = LearnableEmbedding(
         FixedSinusoidalEmbedding(128), MLP([128, 128])
