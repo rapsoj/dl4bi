@@ -161,11 +161,11 @@ class TransformerDecoder(nn.Module):
         **kwargs,
     ):
         d = x_dec.shape[-1]
-        x, _, _ = TransformerDecoderBlock(self.attention, self.p_dropout)(
+        x_dec, _, _ = TransformerDecoderBlock(self.attention, self.p_dropout)(
             x_dec, x_enc, valid_lens_dec, valid_lens_enc, training, **kwargs
         )
         for i in range(1, self.num_blks):
-            x, _, _ = TransformerDecoderBlock(
+            x_dec, _, _ = TransformerDecoderBlock(
                 self.attention.copy(name=f"attention_{i}"), self.p_dropout
             )(x_dec, x_enc, valid_lens_dec, valid_lens_enc, training, **kwargs)
-        return nn.Dense(d)(x)
+        return nn.Dense(d)(x_dec)
