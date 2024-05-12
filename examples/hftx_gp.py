@@ -2,6 +2,7 @@
 import pickle
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Optional
 
 import arviz as az
 import flax
@@ -15,6 +16,7 @@ import numpyro.distributions as dist
 import optax
 from clu import metrics
 from flax import struct
+from flax.core import FrozenDict
 from flax.training import train_state
 from jax import Array, grad, jit, random
 from jax.scipy.stats import norm
@@ -37,7 +39,7 @@ class Metrics(metrics.Collection):
 
 class TrainState(train_state.TrainState):
     metrics: Metrics
-    projections: flax.core.FrozenDict
+    kwargs: FrozenDict = FrozenDict({})
 
 
 @dataclass
@@ -66,8 +68,7 @@ def main(cfg: DictConfig):
         state = train(cfg, loader, rng_tr)
         valid_lens = valid_lens.at[0].set(cfg.data.num_test)
         f_mu, f_log_var = state.apply_fn(
-            {"params": state.params, "projections": state.projections},
-            # {"params": state.params},
+            {"params": state.params, **state.kwargs},
             s_ctx,
             f_ctx,
             s_test,
@@ -115,13 +116,14 @@ def train(cfg: DictConfig, loader: Iterable, rng: Array):
     rng_model, rng_init, rng_train = random.split(rng, 3)
     model = instantiate(OmegaConf.to_container(cfg.model, resolve=True), rng_model)
     (s_ctx, f_ctx, valid_lens), (s_test, _, _) = next(loader)
-    variables = model.init(rng_init, s_ctx, f_ctx, s_test, valid_lens)
+    kwargs = model.init(rng_init, s_ctx, f_ctx, s_test, valid_lens)
+    params = kwargs.pop("params")
     state = TrainState.create(
         apply_fn=model.apply,
-        params=variables["params"],
-        projections=variables["projections"],
+        params=params,
         tx=optax.adam(1e-3),
         metrics=Metrics.empty(),
+        kwargs=kwargs,
     )
     metrics = {"train_loss": []}
     param_count = sum(x.size for x in jax.tree_util.tree_leaves(state.params))
@@ -164,8 +166,7 @@ def train_step(rng_dropout, state, batch):
     def loss_fn(params):
         (s_ctx, f_ctx, valid_lens), (s_test, f_test, f_test_noisy) = batch
         f_mu, f_log_var = state.apply_fn(
-            {"params": params, "projections": state.projections},
-            # {"params": params},
+            {"params": params, **state.kwargs},
             s_ctx,
             f_ctx,
             s_test,
@@ -182,8 +183,7 @@ def train_step(rng_dropout, state, batch):
 def compute_metrics(state, batch):
     (s_ctx, f_ctx, valid_lens), (s_test, f_test, f_test_noisy) = batch
     f_mu, f_log_var = state.apply_fn(
-        {"params": state.params, "projections": state.projections},
-        # {"params": state.params},
+        {"params": state.params, **state.kwargs},
         s_ctx,
         f_ctx,
         s_test,

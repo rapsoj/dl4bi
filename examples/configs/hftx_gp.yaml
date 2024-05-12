@@ -29,12 +29,12 @@ model:
       cls: LearnableEmbedding
       kwargs:
         map:
+          # func: 'lambda x: x' # only learned embeddings
           cls: GaussianFourierEmbedding
           kwargs:
             embed_dim: ${shared.pe_dim}
             input_dim: 1
             var: 10.0
-          # func: 'lambda x: x'
         post_process:
           cls: MLP
           kwargs:

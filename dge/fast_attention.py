@@ -127,14 +127,19 @@ class FastSoftmaxAttention(nn.Module):
         # NOTE: mask after phi in case phi maps zero to non-zero values
         # TODO(danj): validate this method of masking
         ks_prime = apply_mask(ks_prime, valid_lens)
-        c = jnp.concatenate([vs, jnp.ones((*vs.shape[:-1], 1))], axis=-1)
-        buf_1 = ks_prime.mT @ c
-        buf_2 = qs_prime @ buf_1
-        buf_3, buf_4 = buf_2[..., :-1], buf_2[..., -1]
-        d_inv = vmap(jnp.diag)(1 / buf_4)
-        ctx = d_inv @ buf_3
+        ctx = _fast_softmax(qs_prime, ks_prime, vs)
         ctx = nn.Dropout(self.p_dropout, deterministic=not training)(ctx)
         return ctx, None
+
+
+@jit
+def _fast_softmax(qs_prime: jax.Array, ks_prime: jax.Array, vs: jax.Array):
+    c = jnp.concatenate([vs, jnp.ones((*vs.shape[:-1], 1))], axis=-1)
+    buf_1 = ks_prime.mT @ c
+    buf_2 = qs_prime @ buf_1
+    buf_3, buf_4 = buf_2[..., :-1], buf_2[..., -1]
+    d_inv = vmap(jnp.diag)(1 / buf_4)  # TODO(danj): stablize buf_4
+    return d_inv @ buf_3
 
 
 def apply_mask(x: jax.Array, valid_lens: Optional[jax.Array] = None):
