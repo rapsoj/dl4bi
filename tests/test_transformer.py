@@ -14,6 +14,7 @@ from dge import (
     NeRFEmbedding,
     TransformerEncoder,
 )
+from dge.transformer import TransformerDecoder
 
 
 def test_transformer_encoder():
@@ -32,21 +33,31 @@ def test_transformer_encoder():
         s_e, _ = embedder.init_with_output(rng_init, s)
         for scorer in [AdditiveScorer(), MultiplicativeScorer(), DotScorer()]:
             attention = MultiheadAttention(scorer)
-            f, _ = TransformerEncoder(attention).init_with_output(
+            f_enc, _ = TransformerEncoder(attention).init_with_output(
                 rng_init, s_e, valid_lens
             )
-            assert f.shape == (
+            f_dec, _ = TransformerDecoder(attention).init_with_output(
+                rng_init, s_e, f_enc, None, valid_lens
+            )
+            for name, f in [("encoder", f_enc), ("decoder", f_dec)]:
+                assert f_enc.shape == (
+                    batch_size,
+                    seq_len,
+                    embed_dim,
+                ), f"Incorrect {name} output shape!"
+                assert not jnp.isnan(f).any(), f"{name.title()} returned nans!"
+        # test fast version too
+        attention = MultiheadFastSoftmaxAttention()
+        f_enc, _ = TransformerEncoder(attention).init_with_output(
+            rng_init, s_e, valid_lens
+        )
+        f_dec, _ = TransformerDecoder(attention).init_with_output(
+            rng_init, s_e, f_enc, None, valid_lens
+        )
+        for name, f in [("encoder", f_enc), ("decoder", f_dec)]:
+            assert f_enc.shape == (
                 batch_size,
                 seq_len,
                 embed_dim,
-            ), "Incorrect encoder output shape!"
-            assert jnp.isnan(f).sum() == 0, "Returned nans!"
-        # test fast version too
-        attention = MultiheadFastSoftmaxAttention()
-        f, _ = TransformerEncoder(attention).init_with_output(rng_init, s_e, valid_lens)
-        assert f.shape == (
-            batch_size,
-            seq_len,
-            embed_dim,
-        ), "Incorrect encoder output shape!"
-        assert jnp.isnan(f).sum() == 0, "Returned nans!"
+            ), f"Incorrect {name} (fast) output shape!"
+            assert not jnp.isnan(f).any(), f"{name.title()} (fast) returned nans!"

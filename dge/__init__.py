@@ -23,4 +23,9 @@ from .mlp import MLP
 from .pi_vae import Phi, PiVAE
 from .prior_cvae import PriorCVAE
 from .sp_vae import SPVAE
-from .transformer import TransformerEncoder, TransformerEncoderBlock
+from .transformer import (
+    TransformerDecoder,
+    TransformerDecoderBlock,
+    TransformerEncoder,
+    TransformerEncoderBlock,
+)
