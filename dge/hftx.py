@@ -18,6 +18,7 @@ class HFTx(nn.Module):
         embed_s_f: A module or combining embedded locations and function values.
         enc: An encoder module for observed points.
         dec: A decoder module for target points.
+        head: A prediction head for decoded output.
 
     Returns:
         An instance of the `HFTx` model.
@@ -48,13 +49,13 @@ class HFTx(nn.Module):
 
         Args:
             rng: A psuedo-random number generator.
-            s_ctx: A location array of shape `(B,S_ctx,D_S)` where
+            s_ctx: A location array of shape `[B, S_ctx, D_S]` where
                 `B` is batch size, `S_ctx` is number of context
                 locations, and `D_S` is the dimension of each location.
-            f_ctx: A function value array of shape `(B,S_ctx,D_F)` where `B` is
+            f_ctx: A function value array of shape `[B, S_ctx, D_F]` where `B` is
                 batch size, `S_ctx` is number of context locations, and `D_F` is
                 the dimension of each function value.
-            s_test: A location array of shape `(B,S_test,D_S)` where `B` is
+            s_test: A location array of shape `[B, S_test, D_S]` where `B` is
                 batch size, `S_test` is number of test locations, and `D_S`
                 is the dimension of each location.
             valid_lens: An optional array of shape `(B,)` indicating the
