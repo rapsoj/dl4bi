@@ -84,7 +84,7 @@ def build_phi(h: Callable, funcs: list[Callable], proj: jax.Array):
     )
 
 
-# TODO(danj): implement masks
+# TODO(danj): solve numerical stability issue
 class FastSoftmaxAttention(nn.Module):
     r"""[FAVOR+](https://arxiv.org/abs/2009.14794) implementation, Appendix B."""
 
@@ -133,12 +133,18 @@ class FastSoftmaxAttention(nn.Module):
 
 
 @jit
-def _fast_softmax(qs_prime: jax.Array, ks_prime: jax.Array, vs: jax.Array):
+def _fast_softmax(
+    qs_prime: jax.Array,
+    ks_prime: jax.Array,
+    vs: jax.Array,
+    eps: float = 1e-6,
+):
     c = jnp.concatenate([vs, jnp.ones((*vs.shape[:-1], 1))], axis=-1)
     buf_1 = ks_prime.mT @ c
     buf_2 = qs_prime @ buf_1
     buf_3, buf_4 = buf_2[..., :-1], buf_2[..., -1]
-    d_inv = vmap(jnp.diag)(1 / buf_4)  # TODO(danj): stablize buf_4
+    buf_4 = jnp.where(buf_4 < eps, eps, buf_4)  # numerical stabilization
+    d_inv = vmap(jnp.diag)(1 / buf_4)
     return d_inv @ buf_3
 
 
