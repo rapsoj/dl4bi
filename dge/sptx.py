@@ -22,11 +22,6 @@ class SPTx(nn.Module):
 
     Returns:
         An instance of the `SPTx` model.
-
-    .. warning::
-        `valid_lens` applies only to input context sequences, `s_ctx`. Test
-        locations, `s_test`, are expected to be dense, i.e. not ragged or
-        padded.
     """
 
     embed_s: nn.Module = LearnableEmbedding(lambda x: x, MLP([128] * 3))
