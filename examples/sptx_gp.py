@@ -60,7 +60,8 @@ def main(cfg: DictConfig):
     periodic_task = Task(name="Periodic", kernel=periodic_0_1, var=var, ls=ls)
     matern_3_2_task = Task(name="Matern 3-2", kernel=matern_3_2, var=var, ls=ls)
     rbf_task = Task(name="RBF", kernel=rbf, var=var, ls=ls)
-    for task in [rbf_task, matern_3_2_task, periodic_task]:
+    # for task in [rbf_task, matern_3_2_task, periodic_task]:
+    for task in [rbf_task]:  # matern_3_2_task, periodic_task]:
         print(task.name)
         rng_loader, rng_hmc, rng_tr, key = random.split(key, 4)
         gp = GP(task.kernel, task.var, task.ls)
@@ -75,13 +76,23 @@ def main(cfg: DictConfig):
             s_test,
             valid_lens,
         )
-        f_mu, f_log_var = f_mu[0].squeeze(), f_log_var[0].squeeze()
-        s_ctx, f_ctx = s_ctx[0].squeeze(), f_ctx[0].squeeze()
-        s_test, f_test = s_test[0].squeeze(), f_test[0].squeeze()
-        f_noisy, valid_len = f_noisy[0].squeeze(), valid_lens[0]
-        plot_posterior_predictive_params(
-            task.name, s_ctx, f_ctx, valid_len, s_test, f_test, f_noisy, f_mu, f_log_var
-        )
+        for i in range(s_ctx.shape[0]):
+            f_mu_i, f_log_var_i = f_mu[i].squeeze(), f_log_var[i].squeeze()
+            s_ctx_i, f_ctx_i = s_ctx[i].squeeze(), f_ctx[i].squeeze()
+            s_test_i, f_test_i = s_test[i].squeeze(), f_test[i].squeeze()
+            f_noisy_i, valid_len_i = f_noisy[i].squeeze(), valid_lens[i]
+            name = f"{task.name} ({i})"
+            plot_posterior_predictive_params(
+                name,
+                s_ctx_i,
+                f_ctx_i,
+                valid_len_i,
+                s_test_i,
+                f_test_i,
+                f_noisy_i,
+                f_mu_i,
+                f_log_var_i,
+            )
         # gp_model = build_gp_model(task.kernel)
         # pp = hmc(task, gp_model, rng_hmc, s_ctx, f_ctx, valid_len, cfg.infer)
         # plot_posterior_predictive_samples(
@@ -105,12 +116,11 @@ def dataloader(
     while True:
         rng_gp, rng_noise, rng_perm, rng_valid, key = random.split(key, 5)
         _var, _ls, _z, f = gp.simulate(rng_gp, s, batch_size, approx)
-        f_noisy = f + obs_noise * random.normal(rng_noise, f.shape)
-        # permuting same size matrices with the same rng permutes both equivalently
-        s_perm = random.permutation(rng_perm, _s, axis=1, independent=True)
-        f_noisy_perm = random.permutation(rng_perm, f_noisy, axis=1, independent=True)
         valid_lens = random.randint(rng_valid, (batch_size,), min_obs, max_obs)
-        yield (s_perm, f_noisy_perm, valid_lens), (_s, f, f_noisy)
+        perm = random.permutation(rng_perm, S)
+        s_perm, f_perm = _s[:, perm, :], f[:, perm, :]
+        f_perm_noisy = f_perm + obs_noise * random.normal(rng_noise, f.shape)
+        yield (s_perm, f_perm_noisy, valid_lens), (s_perm, f_perm, f_perm_noisy)
 
 
 def train(cfg: DictConfig, loader: Iterable, rng: Array):
@@ -201,21 +211,24 @@ def plot_posterior_predictive_params(
     s_ctx,
     f_ctx,
     valid_len,
-    s,
-    f,
-    f_noisy,
+    s_test,
+    f_test,
+    f_test_noisy,
     f_mu,
     f_log_var,
     hdi_prob=0.9,
 ):
+    idx = jnp.argsort(s_test)
+    s_test, f_test = s_test[idx], f_test[idx]
+    f_mu, f_log_var = f_mu[idx], f_log_var[idx]
     f_std = jnp.exp(f_log_var / 2)
     z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
     f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
-    plt.plot(s, f, color="black")
-    plt.plot(s, f_mu, color="steelblue")
+    plt.plot(s_test, f_test, color="black")
+    plt.plot(s_test, f_mu, color="steelblue")
     plt.scatter(s_ctx[:valid_len], f_ctx[:valid_len], color="black")
     plt.fill_between(
-        s,
+        s_test,
         f_lower,
         f_upper,
         alpha=0.4,
@@ -226,7 +239,7 @@ def plot_posterior_predictive_params(
     ax.set_xlabel("s")
     ax.set_ylabel("f")
     plt.title(f"SPTx: {name} Posterior Predictive")
-    plt.savefig(f"SPTx: {name} Posterior Predictive.pdf", dpi=600)
+    plt.savefig(f"plots/SPTx: {name} Posterior Predictive.pdf", dpi=600)
     plt.clf()
 
 
