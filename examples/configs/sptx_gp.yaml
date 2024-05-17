@@ -6,7 +6,7 @@ data:
   num_test: 16
   period: 0.2
   loader:
-    obs_noise: 0.1
+    obs_noise: 0.0
     min_p: 0.05
     max_p: 0.50
     batch_size: 64

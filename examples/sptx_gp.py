@@ -24,7 +24,7 @@ from jax.tree_util import Partial
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
 from omegaconf import DictConfig, OmegaConf
 from sps.gp import GP
-from sps.kernels import Kernel, matern_3_2, periodic
+from sps.kernels import Kernel, matern_3_2, periodic, rbf
 from sps.priors import Prior
 from sps.utils import build_grid
 from tqdm import tqdm
@@ -52,14 +52,15 @@ class Task:
 
 @hydra.main("configs", "sptx_gp", None)
 def main(cfg: DictConfig):
-    key = random.key(42)
+    key = random.key(0)
     OmegaConf.register_new_resolver("eval", eval)
     s = build_grid(cfg.data.grid)
     periodic_0_1 = Partial(periodic, period=cfg.data.period)
-    var, ls = Prior("fixed", {"value": 1.0}), Prior("fixed", {"value": 0.2})
+    var, ls = Prior("fixed", {"value": 1.0}), Prior("beta", {"a": 2.5, "b": 6})
     periodic_task = Task(name="Periodic", kernel=periodic_0_1, var=var, ls=ls)
     matern_3_2_task = Task(name="Matern 3-2", kernel=matern_3_2, var=var, ls=ls)
-    for task in [matern_3_2_task, periodic_task]:
+    rbf_task = Task(name="RBF", kernel=rbf, var=var, ls=ls)
+    for task in [rbf_task, matern_3_2_task, periodic_task]:
         print(task.name)
         rng_loader, rng_hmc, rng_tr, key = random.split(key, 4)
         gp = GP(task.kernel, task.var, task.ls)
