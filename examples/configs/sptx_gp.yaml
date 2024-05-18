@@ -17,6 +17,7 @@ infer:
 
 train:
   num_batches: 10000
+  redraw_random_features_every_n: 10001
 
 shared:
   pe_dim: 16
@@ -39,7 +40,7 @@ model:
           cls: MLP
           kwargs:
             dims: ${eval:'[${shared.embed_dim}]*2'}
-            p_dropout: 0.2
+            p_dropout: 0.0
     embed_s_f:
       cls: MLP
       kwargs:
@@ -53,8 +54,8 @@ model:
           # cls: MultiheadAttention
           kwargs:
             p_dropout: 0.0
-        num_blks: 3
-        p_dropout: 0.2
+        num_blks: 4
+        p_dropout: 0.0
     dec:
       cls: TransformerDecoder
       kwargs:
@@ -63,8 +64,8 @@ model:
           # cls: MultiheadAttention
           kwargs:
             p_dropout: 0.0
-        num_blks: 3
-        p_dropout: 0.2
+        num_blks: 1
+        p_dropout: 0.0
     head:
       cls: MLP
       kwargs:

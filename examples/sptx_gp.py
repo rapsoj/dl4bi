@@ -140,10 +140,13 @@ def train(cfg: DictConfig, loader: Iterable, rng: Array):
     param_count = sum(x.size for x in jax.tree_util.tree_leaves(state.params))
     print(f"{model}\n\nParam count: {param_count}")
     with tqdm(range(1, cfg.train.num_batches + 1), unit="batch") as pbar:
-        rng_dropout, rng_train = random.split(rng_train, 2)
+        rng_dropout, rng_train = random.split(rng_train)
         for i in pbar:
             batch = next(loader)
-            state = train_step(rng_dropout, state, batch)
+            rng_redraw_random_features = None
+            if i % cfg.train.redraw_random_features_every_n == 0:
+                rng_redraw_random_features, rng_train = random.split(rng_train)
+            state = train_step(rng_dropout, state, batch, rng_redraw_random_features)
             if i % 10 == 0:
                 state = compute_metrics(state, batch)
                 for metric, value in state.metrics.compute().items():
@@ -173,21 +176,32 @@ def instantiate(d: dict, rng: Array):
 
 
 @jit
-def train_step(rng_dropout, state, batch):
+def train_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: tuple,
+    rng_redraw_random_features: Optional[jax.Array] = None,
+):
     def loss_fn(params):
         (s_ctx, f_ctx, valid_lens), (s_test, f_test, f_test_noisy) = batch
-        f_mu, f_log_var = state.apply_fn(
+        (f_mu, f_log_var), updated_state = state.apply_fn(
             {"params": params, **state.kwargs},
             s_ctx,
             f_ctx,
             s_test,
             valid_lens,
             training=True,
-            rngs={"dropout": rng_dropout},
+            rng_redraw_random_features=rng_redraw_random_features,
+            rngs={"dropout": rng},
+            mutable=["projections"],
         )
-        return -norm.logpdf(f_test_noisy, f_mu, jnp.exp(f_log_var / 2)).mean()
+        nll = -norm.logpdf(f_test_noisy, f_mu, jnp.exp(f_log_var / 2)).mean()
+        return nll, updated_state
 
-    return state.apply_gradients(grads=grad(loss_fn)(state.params))
+    (nll, updated_state), grads = jax.value_and_grad(loss_fn, has_aux=True)(
+        state.params
+    )
+    return state.apply_gradients(grads=grads, kwargs=updated_state)
 
 
 @jit

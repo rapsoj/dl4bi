@@ -131,7 +131,7 @@ class FastSoftmaxAttention(nn.Module):
         vs: jax.Array,  # [B, K, D_V]
         valid_lens: Optional[jax.Array] = None,  # [B] or [B, Q]
         training: bool = False,
-        redraw_random_features: bool = False,
+        rng_redraw_random_features: Optional[jax.Array] = None,
     ):
         r"""Performs forward pass of network.
 
@@ -150,10 +150,11 @@ class FastSoftmaxAttention(nn.Module):
             since the attention matrix is never materialized in FAVOR+.
         """
         B, K, D_QK = ks.shape
-        gen_proj = lambda: gaussian_orf(self.make_rng("params"), D_QK, D_QK)
-        proj = self.variable("projections", "random", gen_proj)
-        if redraw_random_features:
-            proj.value = gen_proj()
+        gen_proj = lambda rng: gaussian_orf(rng, D_QK, D_QK)
+        init_proj = lambda: gen_proj(self.make_rng("params"))
+        proj = self.variable("projections", "random", init_proj)
+        if rng_redraw_random_features is not None:
+            proj.value = gen_proj(rng_redraw_random_features)
         normalizer = 1 / jnp.pow(D_QK, 0.25)
         phi = build_stable_positive_softmax_phi(proj.value)
         qs_prime = phi(qs * normalizer)
@@ -234,7 +235,7 @@ class MultiheadFastSoftmaxAttention(nn.Module):
         vs: jax.Array,  # [B, K, D_V]
         valid_lens: Optional[jax.Array] = None,  # [B] or [B, Q]
         training: bool = False,
-        redraw_random_features: bool = False,
+        rng_redraw_random_features: Optional[jax.Array] = None,
     ):
         r"""Performs forward pass of network.
 
@@ -262,7 +263,7 @@ class MultiheadFastSoftmaxAttention(nn.Module):
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
         ctx, attn = FastSoftmaxAttention(self.p_dropout)(
-            qs, ks, vs, valid_lens, training, redraw_random_features
+            qs, ks, vs, valid_lens, training, rng_redraw_random_features
         )
         ctx = ctx.reshape(B, H, Q, D_V_H).transpose(0, 2, 1, 3).reshape(B, Q, D_V)
         return nn.Dense(D_V)(ctx), attn

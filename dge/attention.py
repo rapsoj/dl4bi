@@ -98,6 +98,7 @@ class Attention(nn.Module):
         vs: jax.Array,  # [B, V, D_V]
         valid_lens: Optional[jax.Array] = None,  # [B] or [B, Q]
         training: bool = False,
+        **kwargs,
     ):
         r"""Performs forward pass of network.
 
@@ -151,6 +152,7 @@ class MultiheadAttention(nn.Module):
         vs: jax.Array,  # [B, V, D_V]
         valid_lens: Optional[jax.Array] = None,  # [B] or [B, K]
         training=False,
+        **kwargs,
     ):
         r"""Performs forward pass of network.
 
