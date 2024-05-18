@@ -3,7 +3,7 @@ from collections.abc import Callable
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import jit, vmap
+from jax import jit, random, vmap
 from jax.tree_util import Partial
 
 from .mlp import MLP
@@ -104,15 +104,17 @@ class GaussianFourierEmbedding(nn.Module):
         ^{\ldots\times D}\to\mathbb{R}^{\ldots\times E}$.
     """
 
-    B: jax.Array  # [embed_dim, input_dim]
+    embed_dim: int = 256
     var: float = 10.0
 
     @nn.compact
     def __call__(self, s):
-        return _pe_gaussian_fourier(self.B, self.var)(s)
+        gen_B = lambda rng: random.normal(rng, (self.embed_dim, s.shape[-1]))
+        B = self.variable("projections", "B", lambda: gen_B(self.make_rng("params")))
+        return _pe_gaussian_fourier(B.value, self.var)(s)
 
 
-def _pe_gaussian_fourier(B, var):
+def _pe_gaussian_fourier(B: jax.Array, var: float):
     s_proj = lambda s: (2.0 * jnp.pi * s) @ (var * B).T
     return jit(
         lambda s: jnp.concatenate([jnp.sin(s_proj(s)), jnp.cos(s_proj(s))], axis=-1)

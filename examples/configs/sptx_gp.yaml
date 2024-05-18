@@ -36,7 +36,6 @@ model:
           cls: GaussianFourierEmbedding
           kwargs:
             embed_dim: ${shared.pe_dim}
-            input_dim: 1
             var: 10.0
         post_process:
           cls: MLP

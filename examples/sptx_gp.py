@@ -72,9 +72,7 @@ def main(cfg: DictConfig):
         loader = dataloader(rng_loader, gp, s, **cfg.data.loader)
         (s_ctx, f_ctx, valid_lens), (s_test, f_test, f_noisy) = next(loader)
         state = train(cfg, loader, rng_tr)
-        save_ckpt(state, cfg)
-        state, _ = load_ckpt(cfg)
-        print(state.apply_fn)
+        # save_ckpt(state, cfg)
         valid_lens = valid_lens.at[0].set(cfg.data.num_test)
         f_dist = state.apply_fn(
             {"params": state.params, **state.kwargs},
@@ -181,15 +179,8 @@ def instantiate(d: dict, rng: Array):
         if isinstance(d[k], dict):
             d[k] = instantiate(d[k], rng)
     if "cls" in d:
-        if d["cls"] == "GaussianFourierEmbedding":
-            embed_dim = d["kwargs"]["embed_dim"]
-            input_dim = d["kwargs"]["input_dim"]
-            var = d["kwargs"].get("var", 10.0)
-            B = random.normal(rng, (embed_dim, input_dim))
-            return GaussianFourierEmbedding(B, var)
-        else:
-            cls, kwargs = d["cls"], d.get("kwargs", {})
-            return globals()[cls](**kwargs)
+        cls, kwargs = d["cls"], d.get("kwargs", {})
+        return globals()[cls](**kwargs)
     elif "func" in d:
         return eval(d["func"])
     return d
