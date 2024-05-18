@@ -3,3 +3,4 @@
 *.pkl
 *.png
 *.npy
+*/ckpts/**

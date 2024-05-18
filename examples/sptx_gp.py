@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import pickle
+import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import Optional
 
 import arviz as az
@@ -15,6 +17,7 @@ import numpy as np
 import numpyro
 import numpyro.distributions as dist
 import optax
+import orbax.checkpoint as ocp
 from clu import metrics
 from flax import struct
 from flax.core import FrozenDict
@@ -69,6 +72,9 @@ def main(cfg: DictConfig):
         loader = dataloader(rng_loader, gp, s, **cfg.data.loader)
         (s_ctx, f_ctx, valid_lens), (s_test, f_test, f_noisy) = next(loader)
         state = train(cfg, loader, rng_tr)
+        save_ckpt(state, cfg)
+        state, _ = load_ckpt(cfg)
+        print(state.apply_fn)
         valid_lens = valid_lens.at[0].set(cfg.data.num_test)
         f_dist = state.apply_fn(
             {"params": state.params, **state.kwargs},
@@ -250,6 +256,47 @@ def compute_metrics(state, batch):
     metric_updates = state.metrics.single_from_model_output(loss=nll)
     metrics = state.metrics.merge(metric_updates)
     return state.replace(metrics=metrics)
+
+
+def save_ckpt(state: TrainState, cfg: DictConfig):
+    path = Path(f"ckpts/{cfg.model.cls}").absolute()
+    shutil.rmtree(path, ignore_errors=True)
+    ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
+    cfg_d = OmegaConf.to_container(cfg, resolve=True)
+    ckptr.save(
+        path,
+        args=ocp.args.Composite(
+            state=ocp.args.StandardSave(state),
+            config=ocp.args.JsonSave(cfg_d),
+        ),
+    )
+
+
+def load_ckpt(cfg: DictConfig):
+    key = random.key(42)
+    model = instantiate(OmegaConf.to_container(cfg.model, resolve=True), key)
+    B, L, D = 4, cfg.data.grid[0].num, 1
+    s = f = jnp.zeros((B, L, D))
+    valid_lens = jnp.repeat(L, B)
+    kwargs = model.init(key, s, f, s, valid_lens, valid_lens)
+    params = kwargs.pop("params")
+    state = TrainState.create(
+        apply_fn=model.apply,
+        params=params,
+        tx=optax.yogi(1e-3),
+        metrics=Metrics.empty(),
+        kwargs=kwargs,
+    )
+    ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
+    path = Path(f"ckpts/{cfg.model.cls}").absolute()
+    ckpt = ckptr.restore(
+        path,
+        args=ocp.args.Composite(
+            state=ocp.args.StandardRestore(state),
+            config=ocp.args.JsonRestore(),
+        ),
+    )
+    return ckpt["state"], OmegaConf.create(ckpt["config"])
 
 
 def plot_posterior_predictive_params(
