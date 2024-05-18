@@ -17,6 +17,8 @@ infer:
 
 train:
   num_batches: 10000
+  num_warmup: 2500
+  learning_rate: 1.0e-3
   redraw_random_features_every_n: 10001
 
 shared:
@@ -50,8 +52,8 @@ model:
       cls: TransformerEncoder
       kwargs:
         attention:
-          cls: MultiheadFastSoftmaxAttention
-          # cls: MultiheadAttention
+          # cls: MultiheadFastSoftmaxAttention
+          cls: MultiheadAttention
           kwargs:
             p_dropout: 0.0
         num_blks: 4
@@ -60,8 +62,8 @@ model:
       cls: TransformerDecoder
       kwargs:
         attention:
-          cls: MultiheadFastSoftmaxAttention
-          # cls: MultiheadAttention
+          # cls: MultiheadFastSoftmaxAttention
+          cls: MultiheadAttention
           kwargs:
             p_dropout: 0.0
         num_blks: 1

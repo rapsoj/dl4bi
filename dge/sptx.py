@@ -62,7 +62,7 @@ class SPTx(nn.Module):
                 training.
 
         Returns:
-            $\mu_f,\log(\sigma_f^2\in\mathbb{R}^{B\times S_\text{test}\times D_F}$.
+            $\mu_f,\log(\sigma_f^2\in\mathbb{R}^{B\times S_\text{test}\times 2D_F}$.
         """
         s_ctx_embed = self.embed_s(s_ctx, training)
         s_test_embed = self.embed_s(s_test, training)
@@ -77,6 +77,4 @@ class SPTx(nn.Module):
             training,
             **kwargs,
         )
-        f_mu_log_var = self.head(s_f_dec, training)
-        f_mu, f_log_var = f_mu_log_var[..., [0]], f_mu_log_var[..., [1]]
-        return f_mu, f_log_var
+        return self.head(s_f_dec, training)

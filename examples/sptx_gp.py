@@ -2,6 +2,7 @@
 import pickle
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import partial
 from typing import Optional
 
 import arviz as az
@@ -69,13 +70,14 @@ def main(cfg: DictConfig):
         (s_ctx, f_ctx, valid_lens), (s_test, f_test, f_noisy) = next(loader)
         state = train(cfg, loader, rng_tr)
         valid_lens = valid_lens.at[0].set(cfg.data.num_test)
-        f_mu, f_log_var = state.apply_fn(
+        f_dist = state.apply_fn(
             {"params": state.params, **state.kwargs},
             s_ctx,
             f_ctx,
             s_test,
             valid_lens,
         )
+        f_mu, f_log_var = f_dist[..., [0]], f_dist[..., [1]]
         for i in range(s_ctx.shape[0]):
             f_mu_i, f_log_var_i = f_mu[i].squeeze(), f_log_var[i].squeeze()
             s_ctx_i, f_ctx_i = s_ctx[i].squeeze(), f_ctx[i].squeeze()
@@ -113,14 +115,20 @@ def dataloader(
     S = s.shape[0]
     _s = jnp.repeat(s[None, ...], batch_size, axis=0)  # [B, S, D_S]
     min_obs, max_obs = int(min_p * S), int(max_p * S)
-    while True:
-        rng_gp, rng_noise, rng_perm, rng_valid, key = random.split(key, 5)
+
+    @jit
+    def gen_batch(rng: jax.Array):
+        rng_gp, rng_noise, rng_perm, rng_valid = random.split(rng, 4)
         _var, _ls, _z, f = gp.simulate(rng_gp, s, batch_size, approx)
         valid_lens = random.randint(rng_valid, (batch_size,), min_obs, max_obs)
         perm = random.permutation(rng_perm, S)
         s_perm, f_perm = _s[:, perm, :], f[:, perm, :]
         f_perm_noisy = f_perm + obs_noise * random.normal(rng_noise, f.shape)
-        yield (s_perm, f_perm_noisy, valid_lens), (s_perm, f_perm, f_perm_noisy)
+        return (s_perm, f_perm_noisy, valid_lens), (s_perm, f_perm, f_perm_noisy)
+
+    while True:
+        rng, key = random.split(key)
+        yield gen_batch(rng)
 
 
 def train(cfg: DictConfig, loader: Iterable, rng: Array):
@@ -129,10 +137,16 @@ def train(cfg: DictConfig, loader: Iterable, rng: Array):
     (s_ctx, f_ctx, valid_lens), (s_test, _, _) = next(loader)
     kwargs = model.init(rng_init, s_ctx, f_ctx, s_test, valid_lens)
     params = kwargs.pop("params")
+    # learning_rate_fn = create_learning_rate_fn(
+    #     cfg.train.num_batches,
+    #     cfg.train.num_warmup,
+    #     cfg.train.learning_rate,
+    # )
     state = TrainState.create(
         apply_fn=model.apply,
         params=params,
-        tx=optax.adam(1e-3),
+        # tx=optax.adamaxw(learning_rate_fn),
+        tx=optax.yogi(cfg.train.learning_rate),
         metrics=Metrics.empty(),
         kwargs=kwargs,
     )
@@ -184,7 +198,7 @@ def train_step(
 ):
     def loss_fn(params):
         (s_ctx, f_ctx, valid_lens), (s_test, f_test, f_test_noisy) = batch
-        (f_mu, f_log_var), updated_state = state.apply_fn(
+        f_dist, updated_state = state.apply_fn(
             {"params": params, **state.kwargs},
             s_ctx,
             f_ctx,
@@ -195,6 +209,7 @@ def train_step(
             rngs={"dropout": rng},
             mutable=["projections"],
         )
+        f_mu, f_log_var = f_dist[..., [0]], f_dist[..., [1]]
         nll = -norm.logpdf(f_test_noisy, f_mu, jnp.exp(f_log_var / 2)).mean()
         return nll, updated_state
 
@@ -204,16 +219,33 @@ def train_step(
     return state.apply_gradients(grads=grads, kwargs=updated_state)
 
 
+def create_learning_rate_fn(
+    num_steps: int,
+    num_warmup_steps: int,
+    peak_learning_rate: float = 1e-3,
+):
+    warmup_fn = optax.linear_schedule(
+        init_value=0.0, end_value=peak_learning_rate, transition_steps=num_warmup_steps
+    )
+    decay_steps = num_steps - num_warmup_steps
+    cosine_fn = optax.cosine_decay_schedule(peak_learning_rate, decay_steps)
+    schedule_fn = optax.join_schedules(
+        [warmup_fn, cosine_fn], boundaries=[num_warmup_steps]
+    )
+    return schedule_fn
+
+
 @jit
 def compute_metrics(state, batch):
     (s_ctx, f_ctx, valid_lens), (s_test, f_test, f_test_noisy) = batch
-    f_mu, f_log_var = state.apply_fn(
+    f_dist = state.apply_fn(
         {"params": state.params, **state.kwargs},
         s_ctx,
         f_ctx,
         s_test,
         valid_lens,
     )
+    f_mu, f_log_var = f_dist[..., [0]], f_dist[..., [1]]
     nll = -norm.logpdf(f_test_noisy, f_mu, jnp.exp(f_log_var / 2)).mean()
     metric_updates = state.metrics.single_from_model_output(loss=nll)
     metrics = state.metrics.merge(metric_updates)
