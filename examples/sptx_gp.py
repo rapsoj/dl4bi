@@ -56,55 +56,39 @@ class Task:
 
 @hydra.main("configs", "sptx_gp", None)
 def main(cfg: DictConfig):
-    key = random.key(0)
+    key = random.key(42)
     OmegaConf.register_new_resolver("eval", eval)
-    s = build_grid(cfg.data.grid)
+    grid = build_grid(cfg.data.grid)
     periodic_0_1 = Partial(periodic, period=cfg.data.period)
-    var, ls = Prior("fixed", {"value": 1.0}), Prior("beta", {"a": 2.5, "b": 6})
+    # var, ls = Prior("fixed", {"value": 1.0}), Prior("beta", {"a": 2.5, "b": 6})
+    var, ls = Prior("fixed", {"value": 1.0}), Prior("fixed", {"value": 0.1})
     periodic_task = Task(name="Periodic", kernel=periodic_0_1, var=var, ls=ls)
     matern_3_2_task = Task(name="Matern 3-2", kernel=matern_3_2, var=var, ls=ls)
     rbf_task = Task(name="RBF", kernel=rbf, var=var, ls=ls)
-    # for task in [rbf_task, matern_3_2_task, periodic_task]:
-    for task in [rbf_task]:  # matern_3_2_task, periodic_task]:
+    for task in [rbf_task, matern_3_2_task, periodic_task]:
         print(task.name)
         rng_loader, rng_hmc, rng_tr, key = random.split(key, 4)
         gp = GP(task.kernel, task.var, task.ls)
-        loader = dataloader(rng_loader, gp, s, **cfg.data.loader)
-        (s_ctx, f_ctx, valid_lens), (s_test, f_test, f_noisy) = next(loader)
+        loader = dataloader(rng_loader, gp, grid, **cfg.data.loader)
+        s, f, f_noisy, valid_lens = next(loader)
         state = train(cfg, loader, rng_tr)
-        # save_ckpt(state, cfg)
-        # state, cfg = load_ckpt(cfg.train.ckpt_path)
-        valid_lens = valid_lens.at[0].set(cfg.data.num_test)
-        f_dist = state.apply_fn(
-            {"params": state.params, **state.kwargs},
-            s_ctx,
-            f_ctx,
-            s_test,
-            valid_lens,
+        # NOTE: arbitrarily choose path for comparison with HMC
+        i = 0
+        valid_lens = valid_lens.at[i].set(cfg.data.num_test)
+        f_mu, f_log_var = state.apply_fn(
+            {"params": state.params, **state.kwargs}, s, f, s, valid_lens
         )
-        f_mu, f_log_var = f_dist[..., [0]], f_dist[..., [1]]
-        for i in range(s_ctx.shape[0]):
-            f_mu_i, f_log_var_i = f_mu[i].squeeze(), f_log_var[i].squeeze()
-            s_ctx_i, f_ctx_i = s_ctx[i].squeeze(), f_ctx[i].squeeze()
-            s_test_i, f_test_i = s_test[i].squeeze(), f_test[i].squeeze()
-            f_noisy_i, valid_len_i = f_noisy[i].squeeze(), valid_lens[i]
-            name = f"{task.name} ({i})"
-            plot_posterior_predictive_params(
-                name,
-                s_ctx_i,
-                f_ctx_i,
-                valid_len_i,
-                s_test_i,
-                f_test_i,
-                f_noisy_i,
-                f_mu_i,
-                f_log_var_i,
-            )
-        # gp_model = build_gp_model(task.kernel)
-        # pp = hmc(task, gp_model, rng_hmc, s_ctx, f_ctx, valid_len, cfg.infer)
-        # plot_posterior_predictive_samples(
-        #     task.name, s_ctx, f_ctx, valid_len, s_test, f_test, f_noisy, pp["obs"]
-        # )
+        s_i, f_i, valid_len_i = s[i, :, 0], f[i, :, 0], valid_lens[i]
+        f_noisy_i = f_noisy[i, :, 0]
+        f_mu_i, f_log_var_i = f_mu[i, :, 0], f_log_var[i, :, 0]
+        plot_posterior_predictive_params(
+            task.name, s_i, f_i, f_noisy_i, valid_len_i, f_mu_i, f_log_var_i
+        )
+        gp_model = build_gp_model(task.kernel)
+        pp = hmc(task, gp_model, rng_hmc, s_i, f_i, valid_len_i, cfg.infer)
+        plot_posterior_predictive_samples(
+            task.name, s_i, f_i, f_noisy_i, valid_len_i, pp["obs"]
+        )
 
 
 def dataloader(
@@ -129,7 +113,7 @@ def dataloader(
         perm = random.permutation(rng_perm, S)
         s_perm, f_perm = _s[:, perm, :], f[:, perm, :]
         f_perm_noisy = f_perm + obs_noise * random.normal(rng_noise, f.shape)
-        return (s_perm, f_perm_noisy, valid_lens), (s_perm, f_perm, f_perm_noisy)
+        return s_perm, f_perm, f_perm_noisy, valid_lens
 
     while True:
         rng, key = random.split(key)
@@ -139,18 +123,12 @@ def dataloader(
 def train(cfg: DictConfig, loader: Iterable, rng: Array):
     rng_model, rng_init, rng_train = random.split(rng, 3)
     model = instantiate(cfg.model)
-    (s_ctx, f_ctx, valid_lens), (s_test, _, _) = next(loader)
-    kwargs = model.init(rng_init, s_ctx, f_ctx, s_test, valid_lens)
+    s, f, f_noisy, valid_lens = next(loader)
+    kwargs = model.init(rng_init, s, f, s, valid_lens)
     params = kwargs.pop("params")
-    # learning_rate_fn = create_learning_rate_fn(
-    #     cfg.train.num_batches,
-    #     cfg.train.num_warmup,
-    #     cfg.train.learning_rate,
-    # )
     state = TrainState.create(
         apply_fn=model.apply,
         params=params,
-        # tx=optax.adamaxw(learning_rate_fn),
         tx=optax.yogi(cfg.train.learning_rate),
         metrics=Metrics.empty(),
         kwargs=kwargs,
@@ -197,20 +175,19 @@ def train_step(
     rng_redraw_random_features: Optional[jax.Array] = None,
 ):
     def loss_fn(params):
-        (s_ctx, f_ctx, valid_lens), (s_test, f_test, f_test_noisy) = batch
-        f_dist, updated_state = state.apply_fn(
+        s, f, f_noisy, valid_lens = batch
+        (f_mu, f_log_var), updated_state = state.apply_fn(
             {"params": params, **state.kwargs},
-            s_ctx,
-            f_ctx,
-            s_test,
+            s,
+            f,
+            s,
             valid_lens,
             training=True,
             rng_redraw_random_features=rng_redraw_random_features,
             rngs={"dropout": rng},
             mutable=["projections"],
         )
-        f_mu, f_log_var = f_dist[..., [0]], f_dist[..., [1]]
-        nll = -norm.logpdf(f_test_noisy, f_mu, jnp.exp(f_log_var / 2)).mean()
+        nll = -norm.logpdf(f_noisy, f_mu, jnp.exp(f_log_var / 2)).mean()
         return nll, updated_state
 
     (nll, updated_state), grads = jax.value_and_grad(loss_fn, has_aux=True)(
@@ -237,16 +214,11 @@ def create_learning_rate_fn(
 
 @jit
 def compute_metrics(state, batch):
-    (s_ctx, f_ctx, valid_lens), (s_test, f_test, f_test_noisy) = batch
-    f_dist = state.apply_fn(
-        {"params": state.params, **state.kwargs},
-        s_ctx,
-        f_ctx,
-        s_test,
-        valid_lens,
+    s, f, f_noisy, valid_lens = batch
+    f_mu, f_log_var = state.apply_fn(
+        {"params": state.params, **state.kwargs}, s, f, s, valid_lens
     )
-    f_mu, f_log_var = f_dist[..., [0]], f_dist[..., [1]]
-    nll = -norm.logpdf(f_test_noisy, f_mu, jnp.exp(f_log_var / 2)).mean()
+    nll = -norm.logpdf(f_noisy, f_mu, jnp.exp(f_log_var / 2)).mean()
     metric_updates = state.metrics.single_from_model_output(loss=nll)
     metrics = state.metrics.merge(metric_updates)
     return state.replace(metrics=metrics)
@@ -293,25 +265,23 @@ def load_ckpt(path: str):
 
 def plot_posterior_predictive_params(
     name,
-    s_ctx,
-    f_ctx,
+    s,
+    f,
+    f_noisy,
     valid_len,
-    s_test,
-    f_test,
-    f_test_noisy,
     f_mu,
     f_log_var,
     hdi_prob=0.9,
 ):
-    idx = jnp.argsort(s_test)
-    s_test, f_test = s_test[idx], f_test[idx]
+    idx = jnp.argsort(s)
+    s_test, f_test = s[idx], f[idx]
     f_mu, f_log_var = f_mu[idx], f_log_var[idx]
     f_std = jnp.exp(f_log_var / 2)
     z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
     f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
     plt.plot(s_test, f_test, color="black")
     plt.plot(s_test, f_mu, color="steelblue")
-    plt.scatter(s_ctx[:valid_len], f_ctx[:valid_len], color="black")
+    plt.scatter(s[:valid_len], f[:valid_len], color="black")
     plt.fill_between(
         s_test,
         f_lower,
@@ -359,22 +329,22 @@ def hmc(task, model, rng, s_ctx, f_ctx, valid_len, cfg: DictConfig):
 
 def plot_posterior_predictive_samples(
     name,
-    s_ctx,
-    f_ctx,
-    valid_len,
     s,
     f,
     f_noisy,
+    valid_len,
     pp_samples,
     hdi_prob=0.9,
 ):
-    idx = s_ctx.argsort()
-    f_hat = np.array(pp_samples)
+    s_ctx, f_ctx = s[:valid_len], f[:valid_len]
+    idx = s.argsort()
+    s, f, f_noisy = s[idx], f[idx], f_noisy[idx]
+    f_hat = np.array(pp_samples)[:, idx]
     f_hat_mu = f_hat.mean(axis=0)
     f_hat_hdi = az.hdi(f_hat)
     plt.plot(s, f, color="black")
-    plt.plot(s, f_hat_mu[idx], color="steelblue")
-    plt.scatter(s_ctx[:valid_len], f_ctx[:valid_len], color="black")
+    plt.plot(s, f_hat_mu, color="steelblue")
+    plt.scatter(s_ctx, f_ctx, color="black")
     plt.fill_between(
         s,
         f_hat_hdi[idx, 0],
@@ -387,7 +357,7 @@ def plot_posterior_predictive_samples(
     ax.set_xlabel("s")
     ax.set_ylabel("f")
     plt.title(f"GP: {name} Posterior Predictive")
-    plt.savefig(f"GP: {name} Posterior Predictive.pdf", dpi=600)
+    plt.savefig(f"plots/GP: {name} Posterior Predictive.pdf", dpi=600)
     plt.clf()
 
 

@@ -1,7 +1,7 @@
 data:
   grid:
-    - start: 0.0
-      stop: 1.0
+    - start: -2.0
+      stop: 2.0
       num: 128
   num_test: 16
   period: 0.2
@@ -17,8 +17,8 @@ infer:
 
 train:
   ckpt_path: ckpts/sptx
-  num_batches: 100
-  num_warmup: 1000
+  num_batches: 10000
+  num_warmup: 10
   learning_rate: 1.0e-3
   redraw_random_features_every_n: 10001
 

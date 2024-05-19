@@ -77,4 +77,6 @@ class SPTx(nn.Module):
             training,
             **kwargs,
         )
-        return self.head(s_f_dec, training)
+        f_dist = self.head(s_f_dec, training)
+        f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
+        return f_mu, f_log_var
