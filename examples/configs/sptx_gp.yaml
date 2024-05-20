@@ -17,12 +17,12 @@ infer:
 
 train:
   ckpt_path: ckpts/sptx
-  num_batches: 20000
+  num_batches: 100000
   num_warmup: 10
   learning_rate:
     peak: 1.0e-3
     num_cycles: 2
-  redraw_random_features_every_n: 10001
+  redraw_random_features_every_n: 50001
 
 shared:
   pe_dim: 16
