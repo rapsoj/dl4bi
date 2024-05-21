@@ -95,7 +95,7 @@ def dataloader(
     key,
     gp,
     s,
-    obs_noise=0.1,
+    obs_noise=0.0,
     min_p=0.05,
     max_p=0.5,
     batch_size=64,
@@ -109,11 +109,10 @@ def dataloader(
     def gen_batch(rng: jax.Array):
         rng_gp, rng_noise, rng_perm, rng_valid = random.split(rng, 4)
         _var, _ls, _z, f = gp.simulate(rng_gp, s, batch_size, approx)
+        f_noisy = f + obs_noise * random.normal(rng_noise, f.shape)
         valid_lens = random.randint(rng_valid, (batch_size,), min_obs, max_obs)
         perm = random.permutation(rng_perm, S)
-        s_perm, f_perm = _s[:, perm, :], f[:, perm, :]
-        f_perm_noisy = f_perm + obs_noise * random.normal(rng_noise, f.shape)
-        return s_perm, f_perm, f_perm_noisy, valid_lens
+        return _s[:, perm, :], f[:, perm, :], f_noisy[:, perm, :], valid_lens
 
     while True:
         rng, key = random.split(key)
@@ -339,9 +338,9 @@ def plot_posterior_predictive_samples(
 ):
     s_ctx, f_ctx = s[:valid_len], f[:valid_len]
     idx = s.argsort()
-    s, f, f_noisy = s[idx], f[idx], f_noisy[idx]
-    f_hat = np.array(pp_samples)[:, idx]
-    f_hat_mu = f_hat.mean(axis=0)
+    s, f = s[idx], f[idx]
+    f_hat = np.array(pp_samples)
+    f_hat_mu = f_hat.mean(axis=0)[idx]
     f_hat_hdi = az.hdi(f_hat)
     plt.plot(s, f, color="black")
     plt.plot(s, f_hat_mu, color="steelblue")
