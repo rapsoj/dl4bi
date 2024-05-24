@@ -2,6 +2,7 @@
 Transformer architecture inspired by [d2l](https://d2l.ai/chapter_attention-mechanisms-and-transformers/transformer.html)'s version.
 """
 
+from collections.abc import Callable
 from typing import Optional
 
 import flax.linen as nn
@@ -44,6 +45,7 @@ class TransformerEncoderBlock(nn.Module):
     attention: nn.Module = MultiheadAttention()
     p_dropout: float = 0.0
     d_ffn: Optional[int] = None
+    act_fn: Callable = nn.relu
 
     @nn.compact
     def __call__(
@@ -54,10 +56,10 @@ class TransformerEncoderBlock(nn.Module):
         **kwargs,
     ):
         d = x.shape[-1]
-        d_ffn = self.d_ffn or 2 * x.shape[-1]
+        d_ffn = self.d_ffn or 2 * d
         ctx, attn = self.attention(x, x, x, valid_lens, training, **kwargs)
         y = AddNorm(self.p_dropout)(x, ctx, training)
-        ctx = nn.Sequential([nn.Dense(d_ffn), nn.relu, nn.Dense(d)])(y)
+        ctx = nn.Sequential([nn.Dense(d_ffn), self.act_fn, nn.Dense(d)])(y)
         return AddNorm(self.p_dropout)(y, ctx, training), attn
 
 
@@ -79,6 +81,7 @@ class TransformerEncoder(nn.Module):
     num_blks: int = 3
     p_dropout: float = 0.0
     d_ffn: Optional[int] = None
+    act_fn: Callable = nn.relu
 
     @nn.compact
     def __call__(
@@ -89,12 +92,15 @@ class TransformerEncoder(nn.Module):
         **kwargs,
     ):
         d_ffn = self.d_ffn or 2 * x.shape[-1]
-        x, _ = TransformerEncoderBlock(self.attention, self.p_dropout, d_ffn)(
-            x, valid_lens, training, **kwargs
-        )
+        x, _ = TransformerEncoderBlock(
+            self.attention, self.p_dropout, d_ffn, self.act_fn
+        )(x, valid_lens, training, **kwargs)
         for i in range(1, self.num_blks):
             x, _ = TransformerEncoderBlock(
-                self.attention.copy(name=f"attention_{i}"), self.p_dropout, d_ffn
+                self.attention.copy(name=f"attention_{i}"),
+                self.p_dropout,
+                d_ffn,
+                self.act_fn,
             )(x, valid_lens, training, **kwargs)
         return x
 
@@ -119,6 +125,7 @@ class TransformerDecoderBlock(nn.Module):
     attention: nn.Module = MultiheadAttention()
     p_dropout: float = 0.0
     d_ffn: Optional[int] = None
+    act_fn: Callable = nn.relu
 
     @nn.compact
     def __call__(
@@ -131,7 +138,7 @@ class TransformerDecoderBlock(nn.Module):
         **kwargs,
     ):
         d = x_dec.shape[-1]
-        d_ffn = self.d_ffn or 2 * x_dec.shape[-1]
+        d_ffn = self.d_ffn or 2 * d
         x_dec_2, attn_dec = self.attention(
             x_dec, x_dec, x_dec, valid_lens_dec, training, **kwargs
         )
@@ -140,7 +147,9 @@ class TransformerDecoderBlock(nn.Module):
             y_dec, x_enc, x_enc, valid_lens_enc, training, **kwargs
         )
         z_dec_enc = AddNorm(self.p_dropout)(y_dec, y_dec_enc, training)
-        z_dec_enc_2 = nn.Sequential([nn.Dense(d_ffn), nn.relu, nn.Dense(d)])(z_dec_enc)
+        z_dec_enc_2 = nn.Sequential([nn.Dense(d_ffn), self.act_fn, nn.Dense(d)])(
+            z_dec_enc
+        )
         out = AddNorm(self.p_dropout)(z_dec_enc, z_dec_enc_2, training)
         return out, attn_dec, attn_enc
 
@@ -163,6 +172,7 @@ class TransformerDecoder(nn.Module):
     num_blks: int = 3
     p_dropout: float = 0.0
     d_ffn: Optional[int] = None
+    act_fn: Callable = nn.relu
 
     @nn.compact
     def __call__(
@@ -175,12 +185,15 @@ class TransformerDecoder(nn.Module):
         **kwargs,
     ):
         d = x_dec.shape[-1]
-        d_ffn = self.d_ffn or 2 * x_dec.shape[-1]
-        x_dec, _, _ = TransformerDecoderBlock(self.attention, self.p_dropout, d_ffn)(
-            x_dec, x_enc, valid_lens_dec, valid_lens_enc, training, **kwargs
-        )
+        d_ffn = self.d_ffn or 2 * d
+        x_dec, _, _ = TransformerDecoderBlock(
+            self.attention, self.p_dropout, d_ffn, self.act_fn
+        )(x_dec, x_enc, valid_lens_dec, valid_lens_enc, training, **kwargs)
         for i in range(1, self.num_blks):
             x_dec, _, _ = TransformerDecoderBlock(
-                self.attention.copy(name=f"attention_{i}"), self.p_dropout, d_ffn
+                self.attention.copy(name=f"attention_{i}"),
+                self.p_dropout,
+                d_ffn,
+                self.act_fn,
             )(x_dec, x_enc, valid_lens_dec, valid_lens_enc, training, **kwargs)
         return nn.Dense(d)(x_dec)

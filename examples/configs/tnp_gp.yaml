@@ -16,12 +16,12 @@ infer:
   num_samples: 1000
 
 train:
-  ckpt_path: ckpts/sptx
+  ckpt_path: ckpts/tnpd
   num_batches: 100000
   num_warmup: 10
   learning_rate:
     peak: 1.0e-3
-    num_cycles: 2
+    num_cycles: 1
 
 shared:
   embed_dim: 64
@@ -42,8 +42,7 @@ model:
       cls: TransformerEncoder
       kwargs:
         attention:
-          cls: MultiheadFastSoftmaxAttention
-          # cls: MultiheadAttention
+          cls: MultiheadAttention
         num_blks: 6
         d_ffn: ${eval:'2*${shared.embed_dim}'}
     head:

@@ -82,11 +82,11 @@ def main(cfg: DictConfig):
         plot_posterior_predictive_params(
             task.name, s_i, f_i, f_noisy_i, valid_len_i, f_mu_i, f_log_var_i
         )
-        # gp_model = build_gp_model(task.kernel)
-        # pp = hmc(task, gp_model, rng_hmc, s_i, f_i, valid_len_i, cfg.infer)
-        # plot_posterior_predictive_samples(
-        #     task.name, s_i, f_i, f_noisy_i, valid_len_i, pp["obs"]
-        # )
+        gp_model = build_gp_model(task.kernel)
+        pp = hmc(task, gp_model, rng_hmc, s_i, f_i, valid_len_i, cfg.infer)
+        plot_posterior_predictive_samples(
+            task.name, s_i, f_i, f_noisy_i, valid_len_i, pp["obs"]
+        )
 
 
 def dataloader(
@@ -277,8 +277,8 @@ def plot_posterior_predictive_params(
     ax = plt.gca()
     ax.set_xlabel("s")
     ax.set_ylabel("f")
-    plt.title(f"SPTx: {name} Posterior Predictive")
-    plt.savefig(f"plots/SPTx: {name} Posterior Predictive.pdf", dpi=600)
+    plt.title(f"TNPD: {name} Posterior Predictive")
+    plt.savefig(f"plots/TNPD: {name} Posterior Predictive.pdf", dpi=600)
     plt.clf()
 
 

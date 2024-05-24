@@ -116,7 +116,6 @@ def build_phi(h: Callable, funcs: list[Callable], proj: jax.Array):
     )
 
 
-# TODO(danj): solve numerical stability issue
 class FastSoftmaxAttention(nn.Module):
     r"""[FAVOR+](https://arxiv.org/abs/2009.14794) implementation, Appendix B."""
 

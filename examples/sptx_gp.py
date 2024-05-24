@@ -3,12 +3,11 @@ import pickle
 import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import Optional, Union
 
 import arviz as az
-import flax
+import flax.linen as nn
 import hydra
 import jax
 import jax.numpy as jnp
@@ -22,7 +21,7 @@ from clu import metrics
 from flax import struct
 from flax.core import FrozenDict
 from flax.training import train_state
-from jax import Array, grad, jit, random
+from jax import Array, jit, random
 from jax.scipy.stats import norm
 from jax.tree_util import Partial
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_median
@@ -84,11 +83,11 @@ def main(cfg: DictConfig):
         plot_posterior_predictive_params(
             task.name, s_i, f_i, f_noisy_i, valid_len_i, f_mu_i, f_log_var_i
         )
-        gp_model = build_gp_model(task.kernel)
-        pp = hmc(task, gp_model, rng_hmc, s_i, f_i, valid_len_i, cfg.infer)
-        plot_posterior_predictive_samples(
-            task.name, s_i, f_i, f_noisy_i, valid_len_i, pp["obs"]
-        )
+        # gp_model = build_gp_model(task.kernel)
+        # pp = hmc(task, gp_model, rng_hmc, s_i, f_i, valid_len_i, cfg.infer)
+        # plot_posterior_predictive_samples(
+        #     task.name, s_i, f_i, f_noisy_i, valid_len_i, pp["obs"]
+        # )
 
 
 def dataloader(
@@ -165,6 +164,8 @@ def instantiate(d: Union[dict, DictConfig]):
             d[k] = instantiate(d[k])
     if "cls" in d:
         cls, kwargs = d["cls"], d.get("kwargs", {})
+        if "act_fn" in kwargs:
+            kwargs["act_fn"] = getattr(nn, kwargs["act_fn"])
         return globals()[cls](**kwargs)
     elif "func" in d:
         return eval(d["func"])

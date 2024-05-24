@@ -22,7 +22,7 @@ from .mlp import MLP
 from .pi_vae import Phi, PiVAE
 from .prior_cvae import PriorCVAE
 from .sp_vae import SPVAE
-from .sptx import SPTx
+from .sptx import KRBlock, KRStack, SPTx
 from .tnp import TNPD
 from .transformer import (
     TransformerDecoder,

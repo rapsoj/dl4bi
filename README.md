@@ -1,8 +1,5 @@
 # Deep Generative Emulation (dge)
 
-## TODO
-- [ ] Implement generic masking for attention.
-
 ## Install
 1. Install [jax](https://jax.readthedocs.io/en/latest/installation.html)
 2. Install [numpyro](https://num.pyro.ai/en/stable/getting_started.html)
