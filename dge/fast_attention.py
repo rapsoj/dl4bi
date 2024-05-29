@@ -50,7 +50,6 @@ def build_simple_positive_softmax_phi(proj: jax.Array):
 
     Args:
         proj: A random projection to use for transforming input features.
-        eps: An epsilon used for numerical stability.
 
     Returns:
         $\phi$, a function that maps data to positive vectors used
@@ -93,6 +92,30 @@ def build_stable_positive_softmax_phi(proj: jax.Array):
     return phi
 
 
+def build_generalized_kernel_phi(
+    proj: jax.Array,
+    kernel_fn: Callable = nn.relu,
+    eps: float = 0.001,
+):
+    r"""Builds the generalized kernel from equation (7) in [FAVOR+](https://arxiv.org/abs/2009.14794).
+
+    Args:
+        proj: A random projection to use for transforming input features.
+        kernel_fn: A callable to used as the attention kernel.
+        eps: A kernel epsilon added to the transformed data.
+
+    Returns:
+        $\phi$, a function that maps data to vectors used in kernel
+            approximation.
+    """
+
+    def h(x):
+        m = proj.shape[0]
+        return jnp.sqrt(m)  # cancels out coefficient in phi
+
+    return build_phi(h, [kernel_fn], proj)
+
+
 def build_phi(h: Callable, funcs: list[Callable], proj: jax.Array):
     r"""Builds $phi\mathbf{x})$ from equation (5) of [FAVOR+](https://arxiv.org/abs/2009.14794).
 
@@ -105,21 +128,24 @@ def build_phi(h: Callable, funcs: list[Callable], proj: jax.Array):
         $\phi$, a function that maps data to vectors used in kernel
             approximation.
     """
-    m = proj.shape[0]
-    return lambda x: (
-        h(x)
-        / jnp.sqrt(m)
-        * jnp.concatenate(
-            [func(jnp.einsum("...d,md->...m", x, proj)) for func in funcs],
-            axis=-1,
+    m = proj.shape[0]  # m normalizes over projection features
+    return jit(
+        lambda x: (
+            h(x)
+            / jnp.sqrt(m)
+            * jnp.concatenate(
+                [func(jnp.einsum("...d,md->...m", x, proj)) for func in funcs],
+                axis=-1,
+            )
         )
     )
 
 
-class FastSoftmaxAttention(nn.Module):
+class FastAttention(nn.Module):
     r"""[FAVOR+](https://arxiv.org/abs/2009.14794) implementation, Appendix B."""
 
     p_dropout: float = 0.0
+    build_phi: Callable = build_stable_positive_softmax_phi
 
     @nn.compact
     def __call__(
@@ -154,18 +180,18 @@ class FastSoftmaxAttention(nn.Module):
         if rng_redraw_random_features is not None:
             proj.value = gen_proj(rng_redraw_random_features)
         normalizer = 1 / jnp.pow(D_QK, 0.25)
-        phi = build_stable_positive_softmax_phi(proj.value)
+        phi = self.build_phi(proj.value)
         qs_prime = phi(qs * normalizer)
         ks_prime = phi(ks * normalizer)
         # NOTE: mask after phi in case phi maps zero to non-zero values
         ks_prime = apply_mask(ks_prime, valid_lens)
-        ctx = _fast_softmax(qs_prime, ks_prime, vs)
+        ctx = _attend(qs_prime, ks_prime, vs)
         ctx = nn.Dropout(self.p_dropout, deterministic=not training)(ctx)
         return ctx, None
 
 
 @jit
-def _fast_softmax(
+def _attend(
     qs_prime: jax.Array,
     ks_prime: jax.Array,
     vs: jax.Array,
@@ -202,7 +228,7 @@ def breakpoint_if_nonfinite(x):
     lax.cond(is_finite, true_fn, false_fn, x)
 
 
-class MultiheadFastSoftmaxAttention(nn.Module):
+class MultiheadFastAttention(nn.Module):
     r"""Multihead implementation of [FAVOR+](https://arxiv.org/abs/2009.14794).
 
     Args:
@@ -224,6 +250,7 @@ class MultiheadFastSoftmaxAttention(nn.Module):
 
     num_heads: int = 4
     p_dropout: float = 0.0
+    build_phi: Callable = build_stable_positive_softmax_phi
 
     @nn.compact
     def __call__(
@@ -260,7 +287,7 @@ class MultiheadFastSoftmaxAttention(nn.Module):
         vs = vs.reshape(B, K, H, D_V_H).transpose(0, 2, 1, 3).reshape(-1, K, D_V_H)
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
-        ctx, attn = FastSoftmaxAttention(self.p_dropout)(
+        ctx, attn = FastAttention(self.p_dropout, self.build_phi)(
             qs, ks, vs, valid_lens, training, rng_redraw_random_features
         )
         ctx = ctx.reshape(B, H, Q, D_V_H).transpose(0, 2, 1, 3).reshape(B, Q, D_V)

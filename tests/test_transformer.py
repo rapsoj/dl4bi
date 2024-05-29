@@ -9,7 +9,7 @@ from dge import (
     GaussianFourierEmbedding,
     LearnableEmbedding,
     MultiheadAttention,
-    MultiheadFastSoftmaxAttention,
+    MultiheadFastAttention,
     MultiplicativeScorer,
     NeRFEmbedding,
     TransformerEncoder,
@@ -46,7 +46,7 @@ def test_transformer_encoder():
                 ), f"Incorrect {name} output shape!"
                 assert not jnp.isnan(f).any(), f"{name.title()} returned nans!"
         # test fast version too
-        attention = MultiheadFastSoftmaxAttention()
+        attention = MultiheadFastAttention()
         f_enc, _ = TransformerEncoder(attention).init_with_output(
             rng_init, s_e, valid_lens
         )

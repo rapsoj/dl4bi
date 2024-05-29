@@ -11,9 +11,6 @@ from clu import metrics
 from flax import struct
 from flax.training import train_state
 from jax import random
-from sps.gp import GP
-from sps.utils import build_grid
-from tqdm import tqdm
 
 from dge import (
     AdditiveScorer,

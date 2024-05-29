@@ -19,6 +19,7 @@ class KRBlock(nn.Module):
         p_dropout: Dropout rate `AddNorm`s.
         d_ffn: Optional dim for feed forward, defaults to twice the last
             dimension of input `kvs`.
+        act_fn: Activation function, defaults to relu.
 
     Returns:
         An instance of the `KRBlock` model.
@@ -39,14 +40,13 @@ class KRBlock(nn.Module):
     ):
         d = kvs.shape[-1]
         d_ffn = self.d_ffn or 2 * d
-        add_norm_1 = AddNorm(self.p_dropout)
-        add_norm_2 = AddNorm(self.p_dropout)
+        add_norm = AddNorm(self.p_dropout)
         ffn = nn.Sequential([nn.Dense(d_ffn), self.act_fn, nn.Dense(d)])
         qvs2, _ = self.attn(qvs, kvs, kvs, valid_lens)
         kvs2, _ = self.attn(kvs, kvs, kvs, valid_lens)
-        qvs3, kvs3 = add_norm_1(qvs, qvs2, training), add_norm_1(kvs, kvs2, training)
+        qvs3, kvs3 = add_norm(qvs, qvs2), add_norm(kvs, kvs2)
         qvs4, kvs4 = ffn(qvs3), ffn(kvs3)
-        return add_norm_2(qvs3, qvs4, training), add_norm_2(kvs3, kvs4, training)
+        return add_norm(qvs3, qvs4), add_norm(kvs3, kvs4)
 
 
 class KRStack(nn.Module):
@@ -60,7 +60,7 @@ class KRStack(nn.Module):
             dimension of input `kvs`.
 
     Returns:
-        Input transformed by the encoder.
+        An instnace of a `KRStack`.
     """
 
     attn: nn.Module = Attention()
@@ -68,6 +68,7 @@ class KRStack(nn.Module):
     p_dropout: float = 0.0
     d_ffn: Optional[int] = None
     act_fn: Callable = nn.relu
+    skip_every_n: int = 3
 
     @nn.compact
     def __call__(
@@ -78,19 +79,28 @@ class KRStack(nn.Module):
         training: bool = False,
     ):
         d_ffn = self.d_ffn or 2 * kvs.shape[-1]
+        add_norm = AddNorm(self.p_dropout)
         qvs, kvs = KRBlock(
             self.attn,
             self.p_dropout,
             d_ffn,
             self.act_fn,
         )(qvs, kvs, valid_lens, training)
+        skip_qvs, skip_kvs = qvs, kvs
         for i in range(1, self.num_blks):
+            is_skip = i % self.skip_every_n == 0
+            if is_skip:
+                qvs = add_norm(skip_qvs, qvs)
+                kvs = add_norm(skip_kvs, kvs)
             qvs, kvs = KRBlock(
                 self.attn.copy(name=f"attn_{i}"),
                 self.p_dropout,
                 d_ffn,
                 self.act_fn,
             )(qvs, kvs, valid_lens, training)
+            if is_skip:
+                skip_qvs = qvs
+                skip_kvs = kvs
         return qvs, kvs
 
 

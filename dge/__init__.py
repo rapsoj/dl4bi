@@ -16,7 +16,13 @@ from .embed import (
     LearnableEmbedding,
     NeRFEmbedding,
 )
-from .fast_attention import FastSoftmaxAttention, MultiheadFastSoftmaxAttention
+from .fast_attention import (
+    FastAttention,
+    MultiheadFastAttention,
+    build_generalized_kernel_phi,
+    build_simple_positive_softmax_phi,
+    build_stable_positive_softmax_phi,
+)
 from .kernel_regressor import KernelRegressor
 from .mlp import MLP
 from .pi_vae import Phi, PiVAE
