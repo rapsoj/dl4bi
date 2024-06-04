@@ -55,7 +55,7 @@ def prepare_dims(x: jax.Array, y: jax.Array) -> tuple[jax.Array, jax.Array]:
 def mvn_logpdf_tril_cov(x: jax.Array, mean: jax.Array, L: jax.Array):
     """MVN logpdf with lower triangular covariance.
 
-    Based on jax implementation [here](https://github.com/google/jax/blob/main/ jax/_src/scipy/stats/multivariate_normal.py#L25-L73).
+    Based on jax implementation [here](https://github.com/google/jax/blob/main/jax/_src/scipy/stats/multivariate_normal.py#L25-L73).
     """
     x, mean, L = promote_dtypes_inexact(x, mean, L)
     n = mean.shape[-1]

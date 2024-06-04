@@ -3,7 +3,7 @@
 ## TODO
 - [ ] Meta Regression
     - [ ] Add diagnostic plot comparison
-        - [ ] Diagnose TNP-ND uncertainty?
+        - [ ] Diagnose TNP-ND uncertainty? - check for nans
         - [ ] Diagnose NP, ANP large losses
     - [ ] Test self-attn decoder to test locs
     - [ ] Add HMC baseline

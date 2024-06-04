@@ -102,4 +102,4 @@ class NP(nn.Module):
         f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
         # used in original implementation to prevent collapse
         f_std = 0.1 + 0.9 * nn.softplus(f_std)
-        return f_mu, f_std  # [B, n_z, L_test, d_f]
+        return f_mu.mean(axis=1), f_std.mean(axis=1)  # [B, L_test, d_f]

@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import norm
 
+from dge.core import mvn_logpdf_tril_cov
+
 
 def compare(args):
     np.random.seed(args.seed)
@@ -43,15 +45,21 @@ def plot_posterior_predictive(directory: str, batch_id: int, dd: dict, hdi_prob=
     s_test, f_test = s_test[idx], f_test[idx]
     z_score = np.abs(norm.ppf((1 - hdi_prob) / 2))
     fig, axes = plt.subplots(1, len(dd), sharey=True)
-    if not isinstance(axes, list):
-        axes = [axes]
     for ax, (name, preds) in zip(axes, dd.items()):
         f_mu, f_std = preds
         f_mu = f_mu[i, :valid_len_test, 0]
-        if f_mu.shape == f_std.shape:  # diagonal covariance
-            f_std = f_std[i, :valid_lens_test, 0]
-        else:  # lower cholesky covariance, i.e. Sigma=LL^T
-            f_std = np.diag(f_std[i] @ f_std[i].T)
+        if f_mu[i].shape == f_std[i].shape:  # f_std is independent/diagonal
+            f_std = f_std[i, :valid_len_test, 0]
+            nll = -norm.logpdf(f_test, f_mu, f_std)
+        else:  # f_std is a lower triangular covariance matrix
+            # WARNING: This ignores `valid_lens_test` because
+            # mvn_logpdf_tril_cov does yet support masks with `where`.
+            f_std = f_std[i, :valid_len_test, :valid_len_test]
+            nll = -mvn_logpdf_tril_cov(
+                f_test, f_mu, f_std
+            ).mean()  # this is vectorized over batches so create a dummy batch
+            nll = nll / f_test.shape[0]  # average over L_test
+            f_std = np.diag(f_std @ f_std.T)
         f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
         ax.plot(s_test, f_test, color="black")
         ax.plot(s_test, f_mu[idx], color="steelblue")
@@ -64,8 +72,7 @@ def plot_posterior_predictive(directory: str, batch_id: int, dd: dict, hdi_prob=
             color="steelblue",
             interpolate=True,
         )
-        ax = plt.gca()
-        ax.set_title(name.upper())
+        ax.set_title(f"{name.upper()}, NLL: {nll:0.3f}")
     title = f"Batch {batch_id} Sample {i} (var: {var[0]:0.2f}, ls: {ls[0]:0.2f})"
     plt.ylabel("f")
     plt.xlabel("s")

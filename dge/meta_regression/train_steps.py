@@ -201,14 +201,9 @@ def npf_elbo_train_step(
             0.5 * ((z_mu_test - z_mu_ctx) / z_std_ctx) ** 2
             + 0.5 * jnp.expm1(2 * diff_log_scale)
             - diff_log_scale
-        ).mean(axis=-1)  # [B]
-        n_z = f_mu.shape[1]
-        f_test_n_z = jnp.repeat(f_test[:, None, ...], n_z, axis=1)
-        logp_n_z = norm.logpdf(f_test_n_z, f_mu, f_std)  # [B, n_z, L_test, d_f]
-        logp = logp_n_z.mean(axis=1)  # [B, L_test, d_f]
-        nll = -logp.mean(axis=(1, 2), where=mask_test)  # [B]
-        loss = nll + kl_div  # [B]
-        return loss.mean()
+        ).sum(axis=-1) / valid_lens_test  # [B] <- avg KL per valid test loc
+        nll = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
+        return nll + kl_div.mean()
 
     elbo, grads = jax.value_and_grad(loss_fn)(state.params)
     return state.apply_gradients(grads=grads), elbo
