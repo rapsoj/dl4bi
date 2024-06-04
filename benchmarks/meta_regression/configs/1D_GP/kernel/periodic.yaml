@@ -20,4 +20,4 @@ kwargs:
     kwargs:
       dist: fixed
       kwargs:
-        value: 1.25 # ~5 cycles on unit interval (2*pi/5)
+        value: 2.0 # ~3 cycles on unit interval (2*pi/3)
