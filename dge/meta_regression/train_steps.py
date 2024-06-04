@@ -5,8 +5,6 @@ import jax.numpy as jnp
 from jax import jit, random
 from jax.scipy.stats import norm
 
-from dge.core.utils import mvn_logpdf_tril_cov
-
 from ..core import TrainState, mask_from_valid_lens, mvn_logpdf_tril_cov
 
 
