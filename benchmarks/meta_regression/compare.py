@@ -29,14 +29,26 @@ def plot_diff(args):
         "ls",
     ]
     for m in [m1, m2]:
-        with open(dir / f"{m}.pkl", "rb") as f:
+        with open(dir / f"{m}-seed-{args.seed}.pkl", "rb") as f:
             for tpl in pickle.load(f):
                 batch, preds = tpl
                 d = dict(zip(keys, batch))
                 d["f_mu"], d["f_std"] = preds
-                L_test = d["s_test"].shape[1]
-                mask = mask_from_valid_lens(L_test, d["valid_lens_test"])
-                nll = -norm.logpdf(d["f_test"], d["f_mu"], d["f_std"]).mean(where=mask)
+                if d["f_mu"].shape == d["f_std"].shape:
+                    L_test = d["s_test"].shape[1]
+                    mask = mask_from_valid_lens(L_test, d["valid_lens_test"])
+                    nll = -norm.logpdf(d["f_test"], d["f_mu"], d["f_std"]).mean(
+                        where=mask
+                    )
+                else:
+                    B = d["f_test"].shape[0]
+                    mvn_nlls = -mvn_logpdf(
+                        d["f_test"].reshape(B, -1),
+                        d["f_mu"].reshape(B, -1),
+                        d["f_std"],
+                        is_tril=True,
+                    )
+                    nll = (mvn_nlls / d["valid_lens_test"]).mean()
                 nlls[m] += [nll]
                 data[m] += [d]
     nlls_m1 = np.hstack(nlls[m1])
@@ -55,8 +67,11 @@ def plot_diff(args):
         var, ls = d1["var"], d1["ls"]
         s_ctx, f_ctx = d1["s_ctx"][s_idx, :vc], d1["f_ctx"][s_idx, :vc]
         s_test, f_test = d1["s_test"][s_idx, :vt], d1["f_test"][s_idx, :vt]
-        f_mu_1, f_std_1 = d1["f_mu"][s_idx, :vt], d1["f_std"][s_idx, :vt]
-        f_mu_2, f_std_2 = d2["f_mu"][s_idx, :vt], d2["f_std"][s_idx, :vt]
+        # TODO(danj): fix NLL calculation here
+        f_mu_1, f_mu_2 = d1["f_mu"][s_idx, :vt], d2["f_mu"][s_idx, :vt]
+        f_std_1, f_std_2 = d1["f_std"][s_idx], d2["f_std"][s_idx]
+        f_std_1 = np.diag(f_std_1[:vt, :vt]) if f_std_1.ndim > 1 else f_std_1[:vt]
+        f_std_2 = np.diag(f_std_2[:vt, :vt]) if f_std_2.ndim > 1 else f_std_2[:vt]
         title = f"Diff {i+1}: Batch {b_idx}, Sample {s_idx}"
         title += f", var: {var:0.2f}, ls {ls:0.2f}"
         title += f", NLL({m1})-NLL({m2})={diff[n_idx]:0.3f}"
@@ -79,6 +94,10 @@ def plot_pp_comparison(
     f_std_2: np.ndarray,
     hdi_prob=0.95,
 ):
+    if f_mu_1.shape != f_std_1.shape:  # L
+        f_std_1 = np.diag(f_std_1)
+    if f_mu_2.shape != f_std_2.shape:  # L
+        f_std_2 = np.diag(f_std_2)
     idx = np.argsort(s_test)
     z = np.abs(norm.ppf((1 - hdi_prob) / 2))
     f_lower_1, f_upper_1 = f_mu_1 - z * f_std_1, f_mu_1 + z * f_std_1
@@ -208,6 +227,13 @@ def parse_args(argv):
         default="results/1D_GP/rbf",
         help="Directory with pkl files of results.",
     )
+    parser.add_argument(
+        "-s",
+        "--seed",
+        type=int,
+        default=7,
+        help="Random seed.",
+    )
     diff_p.add_argument(
         "model_1",
         type=str,
@@ -234,13 +260,6 @@ def parse_args(argv):
         type=int,
         default=25,
         help="Number of samples to compare.",
-    )
-    random_p.add_argument(
-        "-s",
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed.",
     )
     random_p.add_argument(
         "-o",
