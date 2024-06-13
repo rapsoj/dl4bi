@@ -39,14 +39,10 @@ such degeneracy.
 
 ## TODO
 - [ ] Clean up VAE benchmarks
-- [ ] Meta Regression
-    - [ ] Parameterize L for SPTx
-    - [ ] TNP authors with patch demonstrating TNP-A pathology
-    - [ ] Create plot of MACE by number of observed points
-    - [ ] Write 2D GP benchmark
-    - [ ] Finetune 2D GP model on Heaton benchmark
-    - [ ] Predict ls, var with model and use it to parameterize off-diagonal
-        covariance values for the posterior
-    - [ ] Add HMC baseline
-    - [ ] Add BNP/BANP
-    - [ ] Add ConvNP
+- [ ] Parameterize L for SPTx vs. predict (ls, var) and use GP
+- [ ] Create git patch demonstrating incorrect LL calc for TNP-A
+- [ ] Create a calibration plot / can LL be higher but MACE be lower
+- [ ] Create a 2D GP benchmark
+- [ ] Test Heaton et al benchmark
+- [ ] Code up ConvNP
+- [ ] Code up BNP/BANP
