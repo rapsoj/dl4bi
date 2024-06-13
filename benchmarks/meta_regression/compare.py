@@ -56,9 +56,8 @@ def plot_diff(args):
                         / d["valid_lens_test"]
                     )
                     # TODO(danj): verify this
-                    batch_maces = mace(
-                        d["f_test"], d["f_mu"], vmap(jnp.diag)(d["f_std"])
-                    ).mean(axis=-1)
+                    f_std = vmap(jnp.diag)(d["f_std"])[..., None]  # pointwise
+                    batch_maces = mace(d["f_test"], d["f_mu"], f_std).mean(axis=-1)
                 nlls[m] += [batch_nlls]
                 maces[m] += [batch_maces]
                 data[m] += [d]
@@ -68,7 +67,9 @@ def plot_diff(args):
     p_value = ttest_rel(nlls_m1, nlls_m2).pvalue
     print(f"{m1} MACE: {maces_m1.mean():0.3f}")
     print(f"{m2} MACE: {maces_m2.mean():0.3f}")
-    print(f"Mean diff: {nll_diffs.mean():0.3f}, paired t-test p-value: {p_value:0.3f}")
+    print(
+        f"Mean NLL diff: {nll_diffs.mean():0.3f}, paired t-test p-value: {p_value:0.3f}"
+    )
     n_idxs = np.argsort(nll_diffs)[: args.worst_n]
     batch_size = data[m1][0]["s_test"].shape[0]
     batch_idxs, sample_idxs = n_idxs // batch_size, n_idxs % batch_size
