@@ -11,6 +11,9 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from jax import jit, lax, random, vmap
+from jax.tree_util import Partial
+
+from .mlp import MLP
 
 
 def gaussian_orf(key: jax.Array, m: int, d: int, structured: bool = True):
@@ -92,9 +95,25 @@ def build_stable_positive_softmax_phi(proj: jax.Array):
     return phi
 
 
+def build_exp_phi(proj: jax.Array):
+    return build_generalized_kernel_phi(proj, jnp.exp)
+
+
+def build_elu_phi(proj: jax.Array):
+    return build_generalized_kernel_phi(proj, nn.elu)
+
+
+def build_gelu_phi(proj: jax.Array):
+    return build_generalized_kernel_phi(proj, nn.gelu)
+
+
+def build_relu_phi(proj: jax.Array):
+    return build_generalized_kernel_phi(proj, nn.relu)
+
+
 def build_generalized_kernel_phi(
     proj: jax.Array,
-    kernel_fn: Callable = nn.relu,
+    kernel_fn: Callable,
     eps: float = 0.001,
 ):
     r"""Builds the generalized kernel from equation (7) in [FAVOR+](https://arxiv.org/abs/2009.14794).
@@ -111,7 +130,7 @@ def build_generalized_kernel_phi(
 
     def h(x):
         m = proj.shape[0]
-        return jnp.sqrt(m)  # cancels out coefficient in phi
+        return jnp.sqrt(m)  # cancels sqrt(m) in coef; google's impl has no coef
 
     return build_phi(h, [kernel_fn], proj)
 
@@ -248,6 +267,10 @@ class MultiheadFastAttention(nn.Module):
         $$
     """
 
+    proj_qs: nn.Module = MLP([64])
+    proj_ks: nn.Module = MLP([64])
+    proj_vs: nn.Module = MLP([64])
+    proj_out: nn.Module = MLP([64])
     num_heads: int = 4
     p_dropout: float = 0.0
     build_phi: Callable = build_stable_positive_softmax_phi
@@ -278,9 +301,9 @@ class MultiheadFastAttention(nn.Module):
             `ctx` and `attn`, the updated values and None, respectively,
             since the attention matrix is never materialized in FAVOR+.
         """
+        qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
         (B, Q, D_QK), K, D_V, H = qs.shape, ks.shape[1], vs.shape[-1], self.num_heads
         D_QK_H, D_V_H = D_QK // H, D_V // H
-        qs, ks, vs = nn.Dense(D_QK)(qs), nn.Dense(D_QK)(ks), nn.Dense(D_V)(vs)
         # [B, {Q,K}, D_{QK,V}] -> [B * H, {Q,K}, D_{QK,V}_H]
         qs = qs.reshape(B, Q, H, D_QK_H).transpose(0, 2, 1, 3).reshape(-1, Q, D_QK_H)
         ks = ks.reshape(B, K, H, D_QK_H).transpose(0, 2, 1, 3).reshape(-1, K, D_QK_H)
@@ -291,4 +314,4 @@ class MultiheadFastAttention(nn.Module):
             qs, ks, vs, valid_lens, training, rng_redraw_random_features
         )
         ctx = ctx.reshape(B, H, Q, D_V_H).transpose(0, 2, 1, 3).reshape(B, Q, D_V)
-        return nn.Dense(D_V)(ctx), attn
+        return self.proj_out(ctx), attn

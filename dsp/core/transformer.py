@@ -9,6 +9,7 @@ import flax.linen as nn
 import jax
 
 from .attention import Attention, MultiheadAttention
+from .mlp import MLP
 
 
 class AddNorm(nn.Module):
@@ -204,19 +205,16 @@ class KRBlock(nn.Module):
 
     Args:
         attn: An attention module.
-        p_dropout: Dropout rate `AddNorm`s.
-        d_ffn: Optional dim for feed forward, defaults to twice the last
-            dimension of input `kvs`.
-        act_fn: Activation function, defaults to relu.
+        add_norm: An add and norm module.
+        ffn: A feedforward module.
 
     Returns:
         An instance of the `KRBlock` model.
     """
 
     attn: nn.Module = Attention()
-    p_dropout: float = 0.0
-    d_ffn: Optional[int] = None
-    act_fn: Callable = nn.relu
+    add_norm: nn.Module = AddNorm(0.0)
+    ffn: nn.Module = MLP([64, 64], nn.elu)
 
     @nn.compact
     def __call__(
@@ -226,37 +224,36 @@ class KRBlock(nn.Module):
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
-        d = kvs.shape[-1]
-        d_ffn = self.d_ffn or 2 * d
-        add_norm = AddNorm(self.p_dropout)
-        ffn = nn.Sequential([nn.Dense(d_ffn), self.act_fn, nn.Dense(d)])
         qvs2, _ = self.attn(qvs, kvs, kvs, valid_lens)
         kvs2, _ = self.attn(kvs, kvs, kvs, valid_lens)
-        qvs3, kvs3 = add_norm(qvs, qvs2), add_norm(kvs, kvs2)
-        qvs4, kvs4 = ffn(qvs3), ffn(kvs3)
-        return add_norm(qvs3, qvs4), add_norm(kvs3, kvs4)
+        qvs3, kvs3 = self.add_norm(qvs, qvs2), self.add_norm(kvs, kvs2)
+        qvs4, kvs4 = self.ffn(qvs3), self.ffn(kvs3)
+        return self.add_norm(qvs3, qvs4), self.add_norm(kvs3, kvs4)
 
 
 class KRStack(nn.Module):
     """A stack of `KRBlock`s.
 
     Args:
+        num_blks: Number of times to repeat a single `KRBlock`.
+        skip_every_n: Add a skip connection every n.
+        share_attn: Share attention module between blocks.
+        share_ffn: Share ffn module between blocks.
         attn: An attention module.
-        num_blks: Number of `KRBlock`s.
-        p_dropout: Dropout rate `AddNorm`s.
-        d_ffn: Optional dim for feed forward, defaults to twice the last
-            dimension of input `kvs`.
+        add_norm: An add and norm module.
+        ffn: A feedforward module.
 
     Returns:
         An instance of a `KRStack`.
     """
 
+    num_blks: int = 5
+    skip_every_n: Optional[int] = 2
+    share_attn: bool = True
+    share_ffn: bool = False
     attn: nn.Module = Attention()
-    num_blks: int = 3
-    p_dropout: float = 0.0
-    d_ffn: Optional[int] = None
-    act_fn: Callable = nn.relu
-    skip_every_n: Optional[int] = None
+    add_norm: nn.Module = AddNorm(0.0)
+    ffn: nn.Module = MLP([64, 64], nn.elu)
 
     @nn.compact
     def __call__(
@@ -266,23 +263,19 @@ class KRStack(nn.Module):
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
-        d_ffn = self.d_ffn or 2 * kvs.shape[-1]
-        add_norm = AddNorm(self.p_dropout)
         skip_qvs, skip_kvs = qvs, kvs
         qvs, kvs = KRBlock(
             self.attn,
-            self.p_dropout,
-            d_ffn,
-            self.act_fn,
+            self.add_norm,
+            self.ffn,
         )(qvs, kvs, valid_lens, training)
         for i in range(1, self.num_blks):
             if self.skip_every_n and i % self.skip_every_n == 0:
-                qvs = skip_qvs = add_norm(skip_qvs, qvs)
-                kvs = skip_kvs = add_norm(skip_kvs, kvs)
+                qvs = skip_qvs = self.add_norm(skip_qvs, qvs)
+                kvs = skip_kvs = self.add_norm(skip_kvs, kvs)
             qvs, kvs = KRBlock(
-                self.attn.copy(name=f"attn_{i}"),
-                self.p_dropout,
-                d_ffn,
-                self.act_fn,
+                self.attn if self.share_attn else self.attn.copy(name=f"attn_{i}"),
+                self.add_norm,
+                self.ffn if self.share_ffn else self.ffn.copy(name=f"ffn_{i}"),
             )(qvs, kvs, valid_lens, training)
         return qvs, kvs

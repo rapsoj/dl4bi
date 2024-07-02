@@ -21,11 +21,20 @@ kwargs:
   dec:
     cls: KRStack
     kwargs:
-      attn:
-        cls: MultiheadFastAttention
-      num_blks: 5
+      num_blks: 7
       skip_every_n: 2
-      d_ffn: 64
+      share_attn: True
+      share_ffn: True
+      attn: 
+        cls: MultiheadFastAttention
+        kwargs:
+          build_phi:
+            func: build_exp_phi
+      ffn:
+        cls: MLP
+        kwargs:
+          dims: [64, 64]
+          act_fn: elu
   head:
     cls: MLP
     kwargs:

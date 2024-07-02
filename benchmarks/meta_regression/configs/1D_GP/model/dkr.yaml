@@ -1,5 +1,6 @@
-cls: SPTx
+cls: DKR
 kwargs:
+  depth: 5
   embed_s:
     cls: LearnableEmbedding
     kwargs:
@@ -18,20 +19,14 @@ kwargs:
     kwargs:
       dims: [64]
       act_fn: elu
-  dec:
-    cls: KRStack
-    kwargs:
-      num_blks: 7
-      skip_every_n: 2
-      share_attn: True
-      share_ffn: True
-      attn: 
-        cls: MultiheadAttention
-      ffn:
-        cls: MLP
-        kwargs:
-          dims: [64, 64]
-          act_fn: elu
+  # attn:
+  #   cls: MultiheadAttention
+  #   kwargs:
+  #     proj_out:
+  #       cls: MLP
+  #       kwargs:
+  #         dims: [128, 64]
+  #         act_fn: elu
   head:
     cls: MLP
     kwargs:

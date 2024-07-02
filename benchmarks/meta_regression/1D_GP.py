@@ -27,10 +27,12 @@ from dsp.meta_regression import (
     ANP,
     CANP,
     CNP,
+    DKR,
     NP,
     TNPD,
     TNPDS,
     TNPND,
+    ConvCNP,
     SPTx,
     train_steps,
 )
@@ -82,8 +84,8 @@ def train(
     rng: jax.Array,
     gp: GP,
     model: nn.Module,
-    num_steps: int = 200000,
-    validate_every_n: int = 50000,
+    num_steps: int = 100000,
+    validate_every_n: int = 25000,
     log_every_n: int = 100,
     lr_peak: float = 1e-3,
     lr_pct_warmup: float = 0.3,
@@ -94,15 +96,16 @@ def train(
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls = next(
         loader
     )
-    kwargs = model.init(
-        {"params": rng_params, "latent_z": rng_latent_z},
+    rngs = {"params": rng_params, "latent_z": rng_latent_z}
+    kwargs = model.init(rngs, s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test)
+    params = kwargs.pop("params")
+    param_count = nn.tabulate(model, rngs)(
         s_ctx,
         f_ctx,
         s_test,
         valid_lens_ctx,
         valid_lens_test,
     )
-    params = kwargs.pop("params")
     learning_rate_fn = create_learning_rate_fn(
         num_steps,
         lr_peak,
@@ -115,15 +118,14 @@ def train(
         tx=optax.yogi(learning_rate_fn),
         kwargs=kwargs,
     )
-    param_count = sum(x.size for x in jax.tree_util.tree_leaves(state.params))
-    print(f"{model}\n\nParam count: {param_count}")
+    print(f"{model}\n\n{param_count}")
     train_step = train_steps.train_step
     if isinstance(model, (NP, ANP)):
         train_step = train_steps.npf_elbo_train_step
     elif isinstance(model, (TNPND,)):
         train_step = train_steps.train_step_tril_cov
     losses = np.zeros((num_steps,))
-    for i in (pbar := tqdm(range(num_steps), unit="batch")):
+    for i in (pbar := tqdm(range(num_steps), unit="batch", dynamic_ncols=True)):
         rng_step, rng_train = random.split(rng_train)
         batch = next(loader)
         state, losses[i] = train_step(rng_step, state, batch)
@@ -203,7 +205,7 @@ def validate(
     loader = dataloader(rng_data, gp)
     losses = np.zeros((num_batches,))
     results = []
-    for i in (pbar := tqdm(range(num_batches), unit="batch")):
+    for i in (pbar := tqdm(range(num_batches), unit="batch", dynamic_ncols=True)):
         batch = next(loader)
         s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls = batch
         f_mu, f_std, *_ = jit(state.apply_fn)(

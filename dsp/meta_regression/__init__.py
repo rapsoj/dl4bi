@@ -2,6 +2,8 @@ from . import train_steps
 from .anp import ANP
 from .canp import CANP
 from .cnp import CNP
+from .convcnp import ConvCNP
+from .dkr import DKR
 from .np import NP
 from .sptx import SPTx
 from .tnpd import TNPD

@@ -4,6 +4,8 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
+from .mlp import MLP
+
 
 class DotScorer(nn.Module):
     r"""Performs dot product attention scoring from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
@@ -140,6 +142,10 @@ class MultiheadAttention(nn.Module):
         $$
     """
 
+    proj_qs: nn.Module = MLP([64])
+    proj_ks: nn.Module = MLP([64])
+    proj_vs: nn.Module = MLP([64])
+    proj_out: nn.Module = MLP([64])
     scorer: nn.Module = DotScorer()
     num_heads: int = 4
     p_dropout: float = 0.0
@@ -167,9 +173,9 @@ class MultiheadAttention(nn.Module):
         Returns:
             `ctx` and `attn`, the updated values and attention weights.
         """
+        qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
         (B, Q, D_QK), K, D_V, H = qs.shape, ks.shape[1], vs.shape[-1], self.num_heads
         D_QK_H, D_V_H = D_QK // H, D_V // H
-        qs, ks, vs = nn.Dense(D_QK)(qs), nn.Dense(D_QK)(ks), nn.Dense(D_V)(vs)
         # [B, {Q,K}, D_{QK,V}] -> [B * H, {Q,K}, D_{QK,V}_H]
         qs = qs.reshape(B, Q, H, D_QK_H).transpose(0, 2, 1, 3).reshape(-1, Q, D_QK_H)
         ks = ks.reshape(B, K, H, D_QK_H).transpose(0, 2, 1, 3).reshape(-1, K, D_QK_H)
@@ -182,7 +188,7 @@ class MultiheadAttention(nn.Module):
         )
         # [B * H, Q, D_V_H] -> [B, Q, D_V]
         ctx = ctx.reshape(B, H, Q, D_V_H).transpose(0, 2, 1, 3).reshape(B, Q, D_V)
-        return nn.Dense(D_V)(ctx), attn.reshape(B, H, Q, K)
+        return self.proj_out(ctx), attn.reshape(B, H, Q, K)
 
 
 def masked_softmax(scores: jax.Array, valid_lens: Optional[jax.Array] = None):

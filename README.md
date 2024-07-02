@@ -38,7 +38,6 @@ such degeneracy.
 - Run tests: `poetry run pytest`
 
 ## TODO
-- [ ] Clean up VAE benchmarks
 - [ ] Code up ConvNP
 - [ ] Create a calibration plot / can LL be higher but MACE be lower
 - [ ] Create git patch demonstrating incorrect LL calc for TNP-A & TNP-ND miscalibration

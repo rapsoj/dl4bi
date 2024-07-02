@@ -21,7 +21,7 @@ class TNPD(nn.Module):
 
     embed_s_f: nn.Module = LearnableEmbedding(lambda x: x, MLP([64] * 4))
     enc: nn.Module = TransformerEncoder(num_blks=6, d_ffn=128)
-    head: nn.Module = MLP([128] * 2 + [2])
+    head: nn.Module = MLP([128, 2])
 
     @nn.compact
     def __call__(

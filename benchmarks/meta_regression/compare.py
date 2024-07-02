@@ -91,7 +91,7 @@ def plot_diff(args):
         title += (
             f"\nMACE({m1})={maces_m1[n_idx]:0.3f}, MACE({m2})={maces_m2[n_idx]:0.3f}"
         )
-        path = dir / f"{title}.pdf"
+        path = dir / f"{title}.png"
         plot_pp_comparison(
             path,
             title,

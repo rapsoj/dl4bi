@@ -20,7 +20,7 @@ class TNPDS(nn.Module):
     """
 
     embed_s_f: nn.Module = LearnableEmbedding(lambda x: x, MLP([64] * 4))
-    enc: nn.Module = KRStack(num_blks=6, d_ffn=128)
+    enc: nn.Module = KRStack(num_blks=6)
     head: nn.Module = MLP([128] * 2 + [2])
 
     @nn.compact

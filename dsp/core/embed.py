@@ -89,9 +89,6 @@ class GaussianFourierEmbedding(nn.Module):
     r"""Gaussian Fourier Feature (GFF) positional encoding from ["Fourier Features Let Networks Learn
         High Frequency Functions in Low Dimensional Domains"](https://arxiv.org/abs/2006.10739).
 
-    Must provide a starting $\mathbf{B}$, which can be generated with `B =
-    random.normal(key, (embed_dim // 2, input_dim))`.
-
     $$
     \begin{aligned}
         \gamma(\mathbf{v})&=[\cos (2 \pi \mathbf{B v}), \sin (2 \pi \mathbf{B} \mathbf{v})] \\\\

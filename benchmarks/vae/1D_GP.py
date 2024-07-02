@@ -92,6 +92,7 @@ def train(
     x = f if isinstance(model, PriorCVAE) else z  # decoder-only, e.g. DeepChol
     kwargs = model.init(rngs, x, var, ls)
     params = kwargs.pop("params")
+    param_count = nn.tabulate(model, rngs)(x, var, ls)
     learning_rate_fn = create_learning_rate_fn(
         num_steps,
         lr_peak,
@@ -104,15 +105,14 @@ def train(
         tx=optax.yogi(learning_rate_fn),
         kwargs=kwargs,
     )
-    param_count = sum(x.size for x in jax.tree_util.tree_leaves(state.params))
-    print(f"{model}\n\nParam count: {param_count}")
+    print(f"{model}\n\n{param_count}")
     is_decoder_only = False
     train_step = train_steps.elbo_train_step
     if isinstance(model, (DeepChol,)):
         is_decoder_only = True
         train_step = train_steps.mse_train_step
     losses = np.zeros((num_steps,))
-    for i in (pbar := tqdm(range(num_steps), unit="batch")):
+    for i in (pbar := tqdm(range(num_steps), unit="batch", dynamic_ncols=True)):
         rng_step, rng_train = random.split(rng_train)
         batch = next(loader)
         state, losses[i] = train_step(rng_step, state, batch)
@@ -173,7 +173,7 @@ def validate(
     loader = dataloader(rng_data, gp, s)
     losses = np.zeros((num_batches,))
     results = []
-    for i in (pbar := tqdm(range(num_batches), unit="batch")):
+    for i in (pbar := tqdm(range(num_batches), unit="batch", dynamic_ncols=True)):
         batch = next(loader)
         var, ls, z, f = batch
         params = {"params": state.params, **state.kwargs}

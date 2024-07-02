@@ -5,6 +5,17 @@ from .attention import (
     MultiheadAttention,
     MultiplicativeScorer,
 )
+from .conv import (
+    ConvCNPBlock,
+    ConvCNPNet,
+    ConvDeepSet,
+    DenseBlock,
+    ResNetBlock,
+    ResNeXtBlock,
+    SimpleConv,
+    TransitionBlock,
+    UNet,
+)
 from .embed import (
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
@@ -14,7 +25,11 @@ from .embed import (
 from .fast_attention import (
     FastAttention,
     MultiheadFastAttention,
+    build_elu_phi,
+    build_exp_phi,
+    build_gelu_phi,
     build_generalized_kernel_phi,
+    build_relu_phi,
     build_simple_positive_softmax_phi,
     build_stable_positive_softmax_phi,
 )
@@ -26,6 +41,7 @@ from .metrics import (
 )
 from .mlp import MLP
 from .transformer import (
+    AddNorm,
     KRBlock,
     KRStack,
     TransformerDecoder,
@@ -36,4 +52,5 @@ from .transformer import (
 from .utils import (
     TrainState,
     mask_from_valid_lens,
+    pad_concat,
 )
