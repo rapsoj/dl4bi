@@ -13,11 +13,31 @@ class ANP(nn.Module):
 
     This implementation is based on Google's official implementation
     [here](https://github.com/google-deepmind/neural-processes/tree/master)
-    and the hyperparameters follow Figure 8 on page 11 in the paper.
+    and the hyperparameters follow Figure 8 on page 12 in the paper.
+
+    .. note::
+        The paper does not indicate that there are any projection matrices for
+        queries, keys, values in MultiheadAttention, but does specify a linear
+        projection for outputs. On the other hand, the code implementation
+        uses a 2-layer MLP for queries and keys, and nothing for values or
+        outputs. Here, we follow the standard MultiheadAttention setup where all
+        projection matrices are single layer linear projections of dim `d_ffn`.
+
+    .. note::
+        The paper specifies different MLPs and attention modules for the
+        latent and deterministic paths, but the code implementation reuses the
+        deterministic representation inside the latent path. Here, we follow
+        the paper and compute both paths separately.
 
     Args:
-        d_ffn: The hidden dimension for all MLPs.
-        d_z: The latent hidden dimension.
+        embed_s: An embedding module for locations.
+        enc_det: An encoder for the deterministic path.
+        enc_lat: An encoder for the latent path.
+        self_attn_det: A self attention module for the deterministic path.
+        self_attn_lat: A self attention module for the latent path.
+        z_dist: A module that converts hidden representation to `z` mu and sigma.
+        dec: A decoder for test locations.
+        cross_attn: A cross attention module used in decoding.
         n_z: Number of latent `z` samples to use.
         min_std: Bounds standard deviation, default 0.0 (original 0.1).
 
@@ -25,8 +45,32 @@ class ANP(nn.Module):
         An instance of an `ANP`.
     """
 
-    d_ffn: int = 128
-    d_z: int = 128
+    embed_s: nn.Module = MLP([128] * 2)
+    enc_det: nn.Module = MLP([128] * 3)
+    enc_lat: nn.Module = MLP([128] * 3)
+    self_attn_det: nn.Module = MultiheadAttention(
+        proj_qs=MLP([128]),
+        proj_ks=MLP([128]),
+        proj_vs=MLP([128]),
+        proj_out=MLP([128]),
+        num_heads=8,
+    )
+    self_attn_lat: nn.Module = MultiheadAttention(
+        proj_qs=MLP([128]),
+        proj_ks=MLP([128]),
+        proj_vs=MLP([128]),
+        proj_out=MLP([128]),
+        num_heads=8,
+    )
+    z_dist: nn.Module = MLP([128, 256])
+    cross_attn: nn.Module = MultiheadAttention(
+        proj_qs=MLP([128]),
+        proj_ks=MLP([128]),
+        proj_vs=MLP([128]),
+        proj_out=MLP([128]),
+        num_heads=8,
+    )
+    dec: nn.Module = MLP([128] * 4 + [2])
     n_z: int = 1
     min_std: float = 0.0
 
@@ -41,7 +85,6 @@ class ANP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        d_f = f_ctx.shape[-1]
         r = self.encode_deterministic(s_ctx, f_ctx, valid_lens_ctx, training)
         z_mu_ctx, z_std_ctx = self.encode_latent(s_ctx, f_ctx, valid_lens_ctx, training)
         rng_z, z_shape = self.make_rng("latent_z"), (self.n_z, *z_mu_ctx.shape)
@@ -53,53 +96,51 @@ class ANP(nn.Module):
             s_ctx,
             s_test,
             valid_lens_ctx,
-            d_f,
             training,
-        )  # [B, n_z, L_test, d_f]
+        )
         return f_mu, f_std, z_mu_ctx, z_std_ctx
 
     def encode_deterministic(
         self,
-        s: jax.Array,  # [B, L, D_s]
-        f: jax.Array,  # [B, L, D_f]
-        valid_lens: Optional[jax.Array] = None,  # [B]
+        s_ctx: jax.Array,  # [B, L, D_s]
+        f_ctx: jax.Array,  # [B, L, D_f]
+        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
         training: bool = False,
     ):
-        s_f = jnp.concatenate([s, f], -1)
-        s_f_embed = MLP([self.d_ffn] * 3)(s_f, training)
-        r, _ = MultiheadAttention()(
-            s_f_embed,
-            s_f_embed,
-            s_f_embed,
-            valid_lens,
+        s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
+        s_f_ctx_embed = self.enc_det(s_f_ctx, training)
+        r_ctx, _ = self.self_attn_det(
+            s_f_ctx_embed,
+            s_f_ctx_embed,
+            s_f_ctx_embed,
+            valid_lens_ctx,
             training,
         )
-        return r
+        return r_ctx
 
     def encode_latent(
         self,
-        s: jax.Array,  # [B, L, D_s]
-        f: jax.Array,  # [B, L, D_f]
-        valid_lens: Optional[jax.Array] = None,  # [B]
+        s_ctx: jax.Array,  # [B, L, D_s]
+        f_ctx: jax.Array,  # [B, L, D_f]
+        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
         training: bool = False,
     ):
-        (B, L, _) = s.shape
-        if valid_lens is None:
-            valid_lens = jnp.repeat(L, B)
-        mask = mask_from_valid_lens(L, valid_lens)
-        s_f = jnp.concatenate([s, f], -1)
-        s_f_embed = MLP([self.d_ffn] * 3)(s_f, training)
-        s_f_enc, _ = MultiheadAttention()(
-            s_f_embed,
-            s_f_embed,
-            s_f_embed,
-            valid_lens,
+        (B, L, _) = s_ctx.shape
+        if valid_lens_ctx is None:
+            valid_lens_ctx = jnp.repeat(L, B)
+        mask = mask_from_valid_lens(L, valid_lens_ctx)
+        s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
+        s_f_ctx_embed = self.enc_lat(s_f_ctx, training)
+        s_f_ctx_enc, _ = self.self_attn_lat(
+            s_f_ctx_embed,
+            s_f_ctx_embed,
+            s_f_ctx_embed,
+            valid_lens_ctx,
             training,
         )
-        s_f_means = jnp.mean(s_f_enc, axis=1, where=mask)
-        z_dist = MLP([self.d_ffn, 2 * self.d_z])(s_f_means, training)
+        s_f_ctx_means = jnp.mean(s_f_ctx_enc, axis=1, where=mask)
+        z_dist = self.z_dist(s_f_ctx_means, training)
         z_mu, z_std = jnp.split(z_dist, 2, axis=-1)
-        # used in original implementation to prevent collapse
         z_std = 0.1 + 0.9 * nn.sigmoid(z_std)
         return z_mu, z_std  # [B, d_z]
 
@@ -110,14 +151,12 @@ class ANP(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         s_test: jax.Array,  # [B, L_test, D_s]
         valid_lens_ctx: Optional[jax.Array],  # [B]
-        d_f: int,
         training: bool = False,
     ):
         L_test = s_test.shape[1]
-        embed = MLP([self.d_ffn] * 2)
-        r, _ = MultiheadAttention()(
-            embed(s_test),  # qs
-            embed(s_ctx),  # ks
+        r, _ = self.cross_attn(
+            self.embed_s(s_test),  # qs
+            self.embed_s(s_ctx),  # ks
             r_ctx,  # vs
             valid_lens_ctx,
             training,
@@ -126,7 +165,7 @@ class ANP(nn.Module):
         s = jnp.repeat(s_test[:, None, ...], self.n_z, axis=1)  # [B, n_z, L_test, D_s]
         z = jnp.repeat(z[..., None, :], L_test, axis=-2)  # [B, n_z, L_test, d_z]
         q = jnp.concatenate([s, r, z], -1)  # [B, n_z, L_test, D_s + d_ffn + d_z]
-        f_dist = MLP([self.d_ffn] * 4 + [2 * d_f])(q, training)
+        f_dist = self.dec(q, training)
         f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
         f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
         return f_mu.mean(axis=1), f_std.mean(axis=1)  # [B, L_test, d_f]

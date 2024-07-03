@@ -38,10 +38,8 @@ such degeneracy.
 - Run tests: `poetry run pytest`
 
 ## TODO
-- [ ] Code up ConvNP
-- [ ] Create a calibration plot / can LL be higher but MACE be lower
-- [ ] Create git patch demonstrating incorrect LL calc for TNP-A & TNP-ND miscalibration
+- [ ] Code up BNP/BANP
+- [ ] Sanity test with no valid_lens_ctx to ensure no data leaks
 - [ ] Create a 2D GP benchmark
 - [ ] Test Heaton et al benchmark
-- [ ] Code up BNP/BANP
 - [ ] SPTx sampling: predict L vs. predict (ls, var) and use GP

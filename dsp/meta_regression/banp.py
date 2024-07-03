@@ -77,18 +77,18 @@ class CANP(nn.Module):
 
     def encode_deterministic(
         self,
-        s_ctx: jax.Array,  # [B, L, D_s]
-        f_ctx: jax.Array,  # [B, L, D_f]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
+        s: jax.Array,  # [B, L, D_s]
+        f: jax.Array,  # [B, L, D_f]
+        valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
     ):
-        s_f_ctx = jnp.concatenate([s_ctx, f_ctx], -1)
-        s_f_ctx_embed = self.enc_det(s_f_ctx, training)
+        s_f = jnp.concatenate([s, f], -1)
+        s_f_embed = self.enc_det(s_f, training)
         r_ctx, _ = self.self_attn_det(
-            s_f_ctx_embed,
-            s_f_ctx_embed,
-            s_f_ctx_embed,
-            valid_lens_ctx,
+            s_f_embed,
+            s_f_embed,
+            s_f_embed,
+            valid_lens,
             training,
         )
         return r_ctx
