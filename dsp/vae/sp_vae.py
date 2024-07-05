@@ -58,7 +58,7 @@ class SPVAE(nn.Module):
             losses involving KL divergence.
         """
         B, L, _ = s.shape
-        rng = self.make_rng("latent_z")
+        rng = self.make_rng("extra")
         rng_keep, rng_z = random.split(rng)
         num_keep = L - int(L * self.p_holdout)
         keep_idx = random.choice(rng_keep, jnp.arange(L), (num_keep,), replace=False)

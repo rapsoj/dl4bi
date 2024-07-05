@@ -18,7 +18,7 @@ def main(kernel_name: str, num_batches: int):
     rbf_dim, hidden_dim, beta_dim = 32, 128, 128
     z_dim, loc_dims = 32, (32, 1)
     key = random.key(42)
-    rng_data, rng_params, rng_z, rng_train, rng_sample = random.split(key, 5)
+    rng_data, rng_params, rng_extra, rng_train, rng_sample = random.split(key, 5)
     kernel = getattr(kernels, kernel_name)
     loader = dataloader(rng_data, GP(kernel), loc_dims)
     s, f = next(loader)
@@ -28,7 +28,7 @@ def main(kernel_name: str, num_batches: int):
     model = PiVAE(phi, encoder, decoder, z_dim)
     state = TrainState.create(
         apply_fn=model.apply,
-        params=model.init({"params": rng_params, "latent_z": rng_z}, s, f)["params"],
+        params=model.init({"params": rng_params, "extra": rng_extra}, s, f)["params"],
         tx=optax.adam(1e-3),
     )
     with tqdm(range(1, num_batches + 1), unit="batch") as pbar:
@@ -39,7 +39,7 @@ def main(kernel_name: str, num_batches: int):
             pbar.set_postfix(loss=f"{loss:0.3f}")
     s, f = next(loader)
     f_hat_beta, _f_hat_beta_hat, _mu, _log_var = state.apply_fn(
-        {"params": state.params}, s, f, rngs={"latent_z": rng_z}
+        {"params": state.params}, s, f, rngs={"extra": rng_extra}
     )
     s_5 = s[:5].squeeze().T
     plt.title("f vs f_hat samples")
@@ -67,7 +67,7 @@ def train_step(rng, state, batch):
     def loss_fn(params):
         s, f = batch
         f_hat_beta, f_hat_beta_hat, z_mu, z_std = state.apply_fn(
-            {"params": params}, s, f, rngs={"latent_z": rng}
+            {"params": params}, s, f, rngs={"extra": rng}
         )
         loss_1 = optax.squared_error(f_hat_beta, f).mean()
         loss_2 = optax.squared_error(f_hat_beta_hat, f).mean()

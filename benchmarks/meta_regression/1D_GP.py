@@ -15,6 +15,7 @@ import orbax.checkpoint as ocp
 import wandb
 from hydra.core.hydra_config import HydraConfig
 from jax import jit, random
+from jax.scipy.special import logsumexp
 from jax.scipy.stats import norm
 from omegaconf import DictConfig, OmegaConf
 from sps.gp import GP
@@ -25,6 +26,8 @@ from tqdm import tqdm
 from dsp.core import *  # noqa: F403
 from dsp.meta_regression import (
     ANP,
+    BANP,
+    BNP,
     CANP,
     CNP,
     DKR,
@@ -91,12 +94,12 @@ def train(
     lr_pct_warmup: float = 0.3,
     lr_num_cycles: int = 1,
 ):
-    rng_data, rng_params, rng_latent_z, rng_train = random.split(rng, 4)
+    rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
     loader = dataloader(rng_data, gp)
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls = next(
         loader
     )
-    rngs = {"params": rng_params, "latent_z": rng_latent_z}
+    rngs = {"params": rng_params, "extra": rng_extra}
     kwargs = model.init(rngs, s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test)
     params = kwargs.pop("params")
     param_count = nn.tabulate(model, rngs)(
@@ -122,6 +125,8 @@ def train(
     train_step = train_steps.train_step
     if isinstance(model, (NP, ANP)):
         train_step = train_steps.npf_elbo_train_step
+    elif isinstance(model, (BNP, BANP)):
+        train_step = train_steps.bootstrap_train_step
     elif isinstance(model, (TNPND,)):
         train_step = train_steps.train_step_tril_cov
     losses = np.zeros((num_steps,))
@@ -201,7 +206,7 @@ def validate(
     wandb_key: str = "",
     results_path: Optional[Path] = None,
 ):
-    rng_data, rng_latent_z, rng_plots = random.split(rng, 3)
+    rng_data, rng_extra, rng_plots = random.split(rng, 3)
     loader = dataloader(rng_data, gp)
     losses = np.zeros((num_batches,))
     results = []
@@ -215,17 +220,29 @@ def validate(
             s_test,
             valid_lens_ctx,
             valid_lens_test,
-            rngs={"latent_z": rng_latent_z},  # used by NP family
+            rngs={"extra": rng_extra},
         )
         if f_mu.shape == f_std.shape:  # f_std is independent/diagonal
             mask_test = mask_from_valid_lens(s_test.shape[1], valid_lens_test)
-            losses[i] = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
+            if f_mu.shape == f_ctx.shape:
+                losses[i] = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
+            else:  # bootstrapped
+                B, L_test, _ = s_test.shape
+                K = f_mu.shape[0] // f_ctx.shape[0]
+                f_test_boot = jnp.repeat(f_test, K, axis=0)
+                ll_boot = norm.logpdf(f_test_boot, f_mu, f_std)
+                # log of likelihood averaged over K bootstrapped samples
+                ll_boot = logsumexp(
+                    ll_boot.reshape(B, K, L_test, -1), axis=1
+                ) - jnp.log(K)
+                losses[i] = -ll_boot.mean(where=mask_test)
         else:  # f_std is a lower triangular covariance matrix
             # WARNING: This ignores `valid_lens_test` because
             # mvn_logpdf does yet support masks with `where`.
             B = f_test.shape[0]
             f_test_flat, f_mu_flat = f_test.reshape(B, -1), f_mu.reshape(B, -1)
             nlls = -mvn_logpdf(f_test_flat, f_mu_flat, f_std, is_tril=True)
+            # average over valid lens to create average pointwise log-likelihood
             losses[i] = (nlls / valid_lens_test).mean()
         if results_path:
             b = [np.array(v) for v in batch]
@@ -253,23 +270,40 @@ def log_plots(
     batch_size = s_test.shape[0]
     sample_paths = []
     for i in random.choice(rng, batch_size, (num_plots,), replace=False):
-        f_std_i = f_std[i].squeeze()
-        # TODO(danj): is this legitimate?
-        if f_mu[i].shape != f_std[i].shape:
-            f_std_i = jnp.diag(f_std_i)
-        sample_path = plot_posterior_predictive(
-            i,
-            s_ctx[i].squeeze(),
-            f_ctx[i].squeeze(),
-            valid_lens_ctx[i],
-            s_test[i].squeeze(),
-            f_test[i].squeeze(),
-            valid_lens_test[i],
-            f_mu[i].squeeze(),
-            f_std_i,
-            var,
-            ls,
-        )
+        if f_mu[i].shape != f_std[i].shape:  # marginal from tril cov
+            f_std_i = jnp.diag(f_std[i])  # TODO(danj): is this valid?
+        if f_mu.shape == f_test.shape:
+            f_std_i = f_std[i].squeeze()
+            sample_path = plot_posterior_predictive(
+                i,
+                s_ctx[i].squeeze(),
+                f_ctx[i].squeeze(),
+                valid_lens_ctx[i],
+                s_test[i].squeeze(),
+                f_test[i].squeeze(),
+                valid_lens_test[i],
+                f_mu[i].squeeze(),
+                f_std_i,
+                var,
+                ls,
+            )
+        else:  # bootstrapped
+            K = f_mu.shape[0] // f_test.shape[0]
+            s = i * K
+            sample_path = plot_posterior_predictive(
+                i,
+                s_ctx[i].squeeze(),
+                f_ctx[i].squeeze(),
+                valid_lens_ctx[i],
+                s_test[i].squeeze(),
+                f_test[i].squeeze(),
+                valid_lens_test[i],
+                f_mu[s : s + K].squeeze(),
+                f_std[s : s + K].squeeze(),
+                var,
+                ls,
+            )
+
         sample_paths += [sample_path]
     wandb.log({wandb_key: [wandb.Image(p) for p in sample_paths]})
 
@@ -289,24 +323,28 @@ def plot_posterior_predictive(
     hdi_prob=0.95,
 ):
     """Plots the posterior predictive alongside true values."""
+    f_mu = f_mu[None, ...] if f_mu.ndim == 1 else f_mu
+    f_std = f_std[None, ...] if f_std.ndim == 1 else f_std
     z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
     f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
     s_ctx, f_ctx = s_ctx[:valid_len_ctx], f_ctx[:valid_len_ctx]
     s_test, f_test = s_test[:valid_len_test], f_test[:valid_len_test]
-    f_mu = f_mu[:valid_len_test]
-    f_lower, f_upper = f_lower[:valid_len_test], f_upper[:valid_len_test]
     idx = jnp.argsort(s_test)
     plt.plot(s_test[idx], f_test[idx], color="black")
-    plt.plot(s_test[idx], f_mu[idx], color="steelblue")
     plt.scatter(s_ctx, f_ctx, color="black")
-    plt.fill_between(
-        s_test[idx],
-        f_lower[idx],
-        f_upper[idx],
-        alpha=0.4,
-        color="steelblue",
-        interpolate=True,
-    )
+    K = f_mu.shape[0]
+    for i in range(K):
+        f_mu_i = f_mu[i, :valid_len_test]
+        plt.plot(s_test[idx], f_mu_i[idx], color="steelblue")
+        f_lower_i, f_upper_i = f_lower[i, :valid_len_test], f_upper[i, :valid_len_test]
+        plt.fill_between(
+            s_test[idx],
+            f_lower_i[idx],
+            f_upper_i[idx],
+            alpha=0.4 / K,
+            color="steelblue",
+            interpolate=True,
+        )
     ax = plt.gca()
     ax.set_xlabel("s")
     ax.set_ylabel("f")

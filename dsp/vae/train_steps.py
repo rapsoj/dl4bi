@@ -28,7 +28,7 @@ def elbo_train_step(
     def elbo_loss(params):
         var, ls, _z, f = batch
         f_hat, z_mu, z_std = state.apply_fn(
-            {"params": params}, f, var, ls, rngs={"latent_z": rng}
+            {"params": params}, f, var, ls, rngs={"extra": rng}
         )
         kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
         logp = norm.logpdf(f, f_hat, 1.0).mean()

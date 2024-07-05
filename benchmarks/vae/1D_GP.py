@@ -85,10 +85,10 @@ def train(
     lr_pct_warmup: float = 0.3,
     lr_num_cycles: int = 1,
 ):
-    rng_data, rng_params, rng_latent_z, rng_train = random.split(rng, 4)
+    rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
     loader = dataloader(rng_data, gp, s, batch_size)
     var, ls, z, f = next(loader)
-    rngs = {"params": rng_params, "latent_z": rng_latent_z}
+    rngs = {"params": rng_params, "extra": rng_extra}
     x = f if isinstance(model, PriorCVAE) else z  # decoder-only, e.g. DeepChol
     kwargs = model.init(rngs, x, var, ls)
     params = kwargs.pop("params")
@@ -169,7 +169,7 @@ def validate(
     wandb_key: str = "",
     results_path: Optional[Path] = None,
 ):
-    rng_data, rng_latent_z, rng_plots = random.split(rng, 3)
+    rng_data, rng_extra, rng_plots = random.split(rng, 3)
     loader = dataloader(rng_data, gp, s)
     losses = np.zeros((num_batches,))
     results = []
@@ -177,7 +177,7 @@ def validate(
         batch = next(loader)
         var, ls, z, f = batch
         params = {"params": state.params, **state.kwargs}
-        rngs = {"latent_z": rng_latent_z}
+        rngs = {"extra": rng_extra}
         if is_decoder_only:
             f_hat = jit(state.apply_fn)(params, z, var, ls)
             losses[i] = optax.squared_error(f_hat, f.squeeze()).mean()
@@ -245,12 +245,12 @@ def load_ckpt(path: Path):
     num_steps, batch_size = 100000, 1024
     lr_peak, lr_pct_warmup, lr_num_cycles = 1e-3, 0.1, 1
     rng = random.key(42)
-    rng_gp, rng_params, rng_latent_z = random.split(rng, 3)
+    rng_gp, rng_params, rng_extra = random.split(rng, 3)
     s = build_grid([{"start": 0, "stop": 1.0, "num": 128}])
     gp, model = instantiate(cfg.kernel), instantiate(cfg.model)
     var, ls, z, f = gp.simulate(rng_gp, s, batch_size)
     x = f if isinstance(model, PriorCVAE) else z  # decoder-only, e.g. DeepChol
-    rngs = {"params": rng_params, "latent_z": rng_latent_z}
+    rngs = {"params": rng_params, "extra": rng_extra}
     kwargs = model.init(rngs, x, var, ls)
     params = kwargs.pop("params")
     learning_rate_fn = create_learning_rate_fn(

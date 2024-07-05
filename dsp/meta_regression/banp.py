@@ -3,26 +3,28 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from jax import jit, random
+from jax.lax import stop_gradient as no_grad
 
-from ..core import MLP, MultiheadAttention
+from ..core import MLP, MultiheadAttention, bootstrap, mask_from_valid_lens
 
 
-class CANP(nn.Module):
-    """The Conditional Attentive Neural Process as detailed in [Attentive Neural Processes](https://arxiv.org/abs/1901.05761) and [Conditional Neural Processes](https://arxiv.org/pdf/1807.01613).
+class BANP(nn.Module):
+    """The Bootstrapping Attentive Neural Process as detailed in [Bootstrapping Neural Processes](https://arxiv.org/abs/2008.02956).
 
-    This implementation is based on Google's official implementation [here]
-    (https://github.com/google-deepmind/neural-processes/tree/master) and the
-    hyperparameters follow Figure 8 on page 12 in [Attentive Neural Processes]
-    (https://arxiv.org/abs/1901.05761) for comparison to the original Neural
-    Process.
+    This implementation is based on the official implementation
+    [here](https://github.com/juho-lee/bnp/tree/master), although
+    we use the hyperparameters specified in Figure 8 on page 12 of
+    [Attentive Neural Processes](https://arxiv.org/abs/1901.05761)
+    to keep comparisons among models consistent.
 
     .. note::
-        The paper does not indicate that there are any projection matrices for
-        queries, keys, values in MultiheadAttention, but does specify a linear
-        projection for outputs. On the other hand, the code implementation
-        uses a 2-layer MLP for queries and keys, and nothing for values or
-        outputs. Here, we follow the standard MultiheadAttention setup where all
-        projection matrices are single layer linear projections of dim `d_ffn`.
+        The Attentive Neural Processes paper does not indicate that there are
+        any projection matrices for queries, keys, values in MultiheadAttention,
+        but does specify a linear projection for outputs. On the other hand, the
+        code implementation uses a 2-layer MLP for queries and keys, and nothing
+        for values or outputs. Here, we follow the standard MultiheadAttention
+        setup where all projection matrices are single layer linear projections.
 
     Args:
         embed_s: An embedding module for locations.
@@ -33,7 +35,7 @@ class CANP(nn.Module):
         min_std: Bounds standard deviation, default 0.0 (original 0.1).
 
     Returns:
-        An instance of an `CANP`.
+        An instance of a `BANP`.
     """
 
     embed_s: nn.Module = MLP([128] * 2)
@@ -52,7 +54,10 @@ class CANP(nn.Module):
         proj_out=MLP([128]),
         num_heads=8,
     )
-    dec: nn.Module = MLP([128] * 4 + [2])
+    dec_hid: nn.Module = MLP([128])
+    dec_boot: nn.Module = MLP([128] * 2)
+    dec_dist: nn.Module = MLP([128] * 3 + [2])
+    num_samples: int = 4
     min_std: float = 0.0
 
     @nn.compact
@@ -66,13 +71,64 @@ class CANP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
+        rep = jit(lambda x: jnp.repeat(x, self.num_samples, axis=0))
         r_ctx = self.encode_deterministic(s_ctx, f_ctx, valid_lens_ctx, training)
-        return self.decode(
-            r_ctx,
-            s_ctx,
-            s_test,
-            valid_lens_ctx,
+        s_ctx_boot, f_ctx_boot, valid_lens_ctx_boot = self.sample_with_replacement(
+            s_ctx, f_ctx, valid_lens_ctx
+        )
+        r_ctx_boot = self.encode_deterministic(
+            s_ctx_boot, f_ctx_boot, valid_lens_ctx_boot, training
+        )
+        f_mu_boot, f_std_boot = self.decode(
+            rep(r_ctx),
+            rep(s_ctx),
+            rep(s_test),
+            valid_lens_ctx_boot,
             training,
+            r_ctx_boot,
+        )
+        f_mu, f_std = self.decode(r_ctx, s_ctx, s_test, valid_lens_ctx, training)
+        return f_mu_boot, f_std_boot, f_mu, f_std
+
+    def sample_with_replacement(
+        self,
+        s_ctx: jax.Array,
+        f_ctx: jax.Array,
+        valid_lens_ctx: Optional[jax.Array] = None,
+    ):
+        (B, L, _), K = s_ctx.shape, self.num_samples
+        if valid_lens_ctx is None:
+            valid_lens_ctx = jnp.repeat(L, B)
+        # turn off gradients
+        s_ctx, f_ctx, valid_lens_ctx = (
+            no_grad(s_ctx),
+            no_grad(f_ctx),
+            no_grad(valid_lens_ctx),
+        )
+        # bootstrap sample residuals
+        rng_ctx_boot, rng_res_boot = random.split(self.make_rng("extra"))
+        rep = jit(lambda x: jnp.repeat(x, K, axis=0))
+        s_ctx_boot, valid_lens_ctx_boot = bootstrap(
+            rng_ctx_boot, s_ctx, valid_lens_ctx, K
+        )
+        f_ctx_boot, valid_lens_ctx_boot = bootstrap(
+            rng_ctx_boot, f_ctx, valid_lens_ctx, K
+        )
+        r_ctx_boot = self.encode_deterministic(
+            s_ctx_boot, f_ctx_boot, valid_lens_ctx_boot
+        )
+        s_ctx_rep = rep(s_ctx)
+        f_ctx_mu_boot, f_ctx_std_boot = self.decode(
+            r_ctx_boot, s_ctx_rep, s_ctx_rep, valid_lens_ctx_boot
+        )
+        res = (rep(f_ctx) - f_ctx_mu_boot) / f_ctx_std_boot
+        res_boot, _ = bootstrap(rng_res_boot, res, valid_lens_ctx_boot)
+        mask = mask_from_valid_lens(L, valid_lens_ctx_boot)
+        res_boot -= res_boot.mean(axis=1, where=mask, keepdims=True)
+        return (
+            s_ctx_rep,
+            f_ctx_mu_boot + f_ctx_std_boot * res_boot,
+            valid_lens_ctx_boot,
         )
 
     def encode_deterministic(
@@ -95,22 +151,34 @@ class CANP(nn.Module):
 
     def decode(
         self,
-        r_ctx: jax.Array,  # [B, d_ffn]
-        s_ctx: jax.Array,  # [B, L_ctx, D_s]
-        s_test: jax.Array,  # [B, L_test, D_s]
-        valid_lens_ctx: Optional[jax.Array],  # [B]
-        d_f: int,
+        r_ctx: jax.Array,
+        s_ctx: jax.Array,
+        s_test: jax.Array,
+        valid_lens_ctx: Optional[jax.Array] = None,
         training: bool = False,
+        r_ctx_boot: Optional[jax.Array] = None,
     ):
+        s_ctx_embed = self.embed_s(s_ctx)
+        s_test_embed = self.embed_s(s_test)
         r, _ = self.cross_attn(
-            self.embed_s(s_test),  # qs
-            self.embed_s(s_ctx),  # ks
+            s_test_embed,  # qs
+            s_ctx_embed,  # ks
             r_ctx,  # vs
             valid_lens_ctx,
             training,
-        )  # [B, L_test, d_ffn]
-        q = jnp.concatenate([r, s_test], -1)  # [B, L_test, d_ffn + D_s]
-        f_dist = self.dec(q, training)
+        )  # [B*K, L_test, d_ffn]
+        q = jnp.concatenate([r, s_test], -1)  # [B*K, L_test, d_ffn + D_s]
+        h = self.dec_hid(q, training)
+        if r_ctx_boot is not None:
+            r_boot, _ = self.cross_attn(
+                s_test_embed,  # qs
+                s_ctx_embed,  # ks
+                r_ctx_boot,  # vs
+                valid_lens_ctx,
+                training,
+            )  # [B*K, L_test, d_ffn]
+            h += self.dec_boot(r_boot, training)
+        f_dist = self.dec_dist(h, training)
         f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
         f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
-        return f_mu, f_std  # [B, L_test, d_f]
+        return f_mu, f_std  # [B*K, L_test, d_f]

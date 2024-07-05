@@ -62,7 +62,7 @@ class PiVAE(nn.Module):
         z_mu = nn.Dense(self.z_dim)(latents)
         z_log_var = nn.Dense(self.z_dim)(latents)
         z_std = jnp.exp(z_log_var / 2)
-        eps = random.normal(self.make_rng("latent_z"), z_std.shape)
+        eps = random.normal(self.make_rng("extra"), z_std.shape)
         z = z_mu + z_std * eps
         beta_hats = self.decoder(z)
         f_hat_beta_hat = jnp.einsum("BF,BLF->BL", beta_hats, phi_s)

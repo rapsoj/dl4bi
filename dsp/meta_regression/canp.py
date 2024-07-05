@@ -22,7 +22,7 @@ class CANP(nn.Module):
         projection for outputs. On the other hand, the code implementation
         uses a 2-layer MLP for queries and keys, and nothing for values or
         outputs. Here, we follow the standard MultiheadAttention setup where all
-        projection matrices are single layer linear projections of dim `d_ffn`.
+        projection matrices are single layer linear projections.
 
     Args:
         embed_s: An embedding module for locations.
@@ -33,7 +33,7 @@ class CANP(nn.Module):
         min_std: Bounds standard deviation, default 0.0 (original 0.1).
 
     Returns:
-        An instance of an `CANP`.
+        An instance of a `CANP`.
     """
 
     embed_s: nn.Module = MLP([128] * 2)
