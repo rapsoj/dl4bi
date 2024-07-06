@@ -49,7 +49,7 @@ def test_meta_regression_data_leaks():
     s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, S, D_s=1]
     valid_lens_ctx = jnp.array([N] * B)
     valid_lens_test = jnp.array([L] * B)
-    f = random.normal(rng_data, s.shape)
+    f = 10 * random.normal(rng_data, s.shape)
     # set second half to 0s (different from using half the array because of attn)
     s2 = s.at[:, N:, :].set(jnp.zeros((B, L - N, 1)))
     f2 = f.at[:, N:, :].set(jnp.zeros((B, L - N, 1)))
