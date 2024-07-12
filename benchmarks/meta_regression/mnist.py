@@ -37,7 +37,7 @@ def main(cfg: DictConfig):
     rng_train, rng_valid = random.split(rng)
     train_dataloader, valid_dataloader = build_dataloaders()
     train_num_steps, valid_num_steps = 100000, None  # exhaust valid dataloader
-    valid_interval, plot_interval = 25000, 25000
+    valid_interval, plot_interval = 25000, 50000
     optimizer = optax.yogi(1e-4)
     state = train(
         rng_train,
