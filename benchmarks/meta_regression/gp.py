@@ -32,6 +32,7 @@ def main(cfg: DictConfig):
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if "wandb" in cfg else "disabled",
         name=cfg.get("name", f"{exp} {kernel} - {model_name} - seed {cfg.seed}"),
+        project="SPTx - GPs",
     )
     rng = random.key(cfg.seed)
     rng_train, rng_valid = random.split(rng)
