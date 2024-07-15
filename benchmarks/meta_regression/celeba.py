@@ -23,7 +23,7 @@ from dsp.meta_regression.train_utils import (
 )
 
 
-@hydra.main("configs/mnist", version_base=None)
+@hydra.main("configs/celeba", version_base=None)
 def main(cfg: DictConfig):
     d = HydraConfig.get().runtime.choices
     model_cfg_name = d["model"]
@@ -31,15 +31,13 @@ def main(cfg: DictConfig):
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if "wandb" in cfg else "disabled",
         name=cfg.get("name", model_cfg_name),
-        project="SPTx - MNIST",
+        project="SPTx - CelebA",
     )
     rng = random.key(cfg.seed)
     rng_train, rng_valid = random.split(rng)
     train_dataloader, valid_dataloader = build_dataloaders()
-    # train_num_steps, valid_num_steps = 100000, None  # exhaust valid dataloader
-    # valid_interval, plot_interval = 25000, 50000
-    train_num_steps, valid_num_steps = 100, 25  # exhaust valid dataloader
-    valid_interval, plot_interval = 25, 50
+    train_num_steps, valid_num_steps = 100000, None  # exhaust valid dataloader
+    valid_interval, plot_interval = 25000, 50000
     optimizer = optax.yogi(1e-4)
     state = train(
         rng_train,

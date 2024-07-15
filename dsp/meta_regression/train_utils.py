@@ -1,3 +1,4 @@
+import math
 import pickle
 import shutil
 from collections.abc import Callable
@@ -8,6 +9,7 @@ from typing import Optional, Union
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
@@ -514,3 +516,94 @@ def npf_elbo_train_step(
 
     elbo, grads = jax.value_and_grad(loss_fn)(state.params)
     return state.apply_gradients(grads=grads), elbo
+
+
+def log_img_plots(
+    step: int,
+    rng_step: int,
+    state: TrainState,
+    batch: tuple,
+    shape: tuple[int, int],
+    num_plots: int = 16,
+):
+    """Logs `num_plots` from the given batch."""
+    rng_dropout, rng_extra = random.split(rng_step)
+    (
+        s_ctx,
+        f_ctx,
+        valid_lens_ctx,
+        s_test,
+        f_test,
+        valid_lens_test,
+        s_test_full,
+        f_test_full,
+        inv_permute_idx,
+    ) = batch
+    f_mu, f_std, *_ = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        s_ctx,
+        f_ctx,
+        s_test_full,
+        valid_lens_ctx,
+        valid_lens_test=None,
+        rngs={"dropout": rng_dropout, "extra": rng_extra},
+    )
+    paths = []
+    for i in range(num_plots):
+        v = valid_lens_ctx[i]
+        f_ctx_i = f_ctx[i, :v, :]
+        f_mu_i = f_mu[i]
+        f_test_full_i = f_test_full[i]
+        if f_mu.shape != f_test.shape:  # bootstrapped
+            K = f_mu.shape[0] // f_test.shape[0]
+            s = i * K
+            f_mu_i = f_mu[s : s + K].mean(axis=0)  # TODO(danj): legitimate?
+        path = plot_img(i, shape, f_ctx_i, f_mu_i, f_test_full_i, inv_permute_idx)
+        paths += [path]
+    wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
+
+
+def plot_img(
+    id: int,
+    shape: tuple[int, int],
+    f_ctx: jax.Array,  # [L_ctx, 1]
+    f_mu: jax.Array,  # [L, 1]
+    f_test: jax.Array,  # [L, 1]
+    inv_permute_idx: jax.Array,  # [L]
+):
+    """Plots a triptych of [task, pred, truth]."""
+    task = f_ctx_to_img_task(shape, f_ctx, inv_permute_idx)
+    task_pred = f_to_img_task(shape, f_mu)
+    task_true = f_to_img_task(shape, f_test)
+    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+    axs[0].imshow(task)
+    axs[0].set_title("Task")
+    axs[1].imshow(task_pred)
+    axs[1].set_title("Predicted")
+    axs[2].imshow(task_true)
+    axs[2].set_title("Ground Truth")
+    path = f"/tmp/mnist_sample_{id}.png"
+    plt.tight_layout()
+    plt.savefig(path, dpi=150)
+    plt.clf()
+    plt.close(fig)
+    return path
+
+
+def f_ctx_to_img_task(
+    shape: tuple[int, int],
+    f_ctx: jax.Array,
+    inv_permute_idx: jax.Array,
+):
+    L, L_ctx = math.prod(shape), f_ctx.shape[0]
+    task = jnp.pad(f_ctx, ((0, L - L_ctx), (0, 0)))  # [L_ctx, 1] -> [L, 1]
+    task = jnp.repeat(task, 3, axis=-1)  # [L, 1] -> [L, 3]
+    task = task.at[L_ctx:, 2].set(1.0)  # set non-context points to blue
+    task = task[inv_permute_idx, :]  # permute back to original ordering
+    return task.reshape(28, 28, 3)  # reshape to [28, 28, 3] image
+
+
+def f_to_img_task(shape: tuple[int, int], f: jax.Array):
+    task = f.reshape(*shape, 1)  # [H, W, 1]
+    task = jnp.repeat(task, 3, axis=-1)  # [H, W, 3]
+    return jnp.clip(task, 0, 1)  # to avoid matplotlib warnings
