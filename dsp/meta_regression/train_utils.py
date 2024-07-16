@@ -106,7 +106,7 @@ def train(
             wandb.log({"train_loss": train_loss})
         if i % valid_interval == 0:
             rng_valid, rng_train = random.split(rng_train)
-            valid_loss = validate(rng_valid, state, valid_dataloader, valid_num_steps)
+            valid_loss = evaluate(rng_valid, state, valid_dataloader, valid_num_steps)
             wandb.log({"valid_loss": valid_loss})
         for cbk in callbacks:
             if i % cbk.interval == 0:
@@ -117,26 +117,26 @@ def train(
     return state
 
 
-def validate(
+def evaluate(
     rng: jax.Array,
     state: TrainState,
-    valid_dataloader: Callable,
-    valid_num_steps: Optional[float] = None,
+    dataloader: Callable,
+    num_steps: Optional[float] = None,
     results_path: Optional[Path] = None,
 ):
     rng_data, rng_extra, rng_plots = random.split(rng, 3)
     losses, results = [], []
-    valid_num_steps = valid_num_steps or float("inf")
+    num_steps = num_steps or float("inf")
     pbar = tqdm(
-        valid_dataloader(rng_data),
-        total=valid_num_steps,
+        dataloader(rng_data),
+        total=num_steps,
         unit=" batches",
         leave=False,
         dynamic_ncols=True,
     )
     for i, batch in enumerate(pbar):
         # early stopping for infinite dataloaders
-        if i >= valid_num_steps:
+        if i >= num_steps:
             break
         s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
         f_mu, f_std, *_ = jit(state.apply_fn)(

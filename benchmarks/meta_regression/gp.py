@@ -21,7 +21,7 @@ from dsp.meta_regression.train_utils import (
     instantiate,
     save_ckpt,
     train,
-    validate,
+    evaluate,
 )
 
 
@@ -36,7 +36,7 @@ def main(cfg: DictConfig):
         project="SPTx - GPs",
     )
     rng = random.key(cfg.seed)
-    rng_train, rng_valid = random.split(rng)
+    rng_train, rng_test = random.split(rng)
     dataloader = build_dataloader(cfg.exp, cfg.kernel)
     train_num_steps, valid_num_steps = 100000, 5000
     valid_interval, plot_interval = 25000, 50000
@@ -56,8 +56,8 @@ def main(cfg: DictConfig):
     )
     path = Path(f"results/gp/{exp}-{kernel}-{model_cfg_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    loss = validate(
-        rng_valid,
+    loss = evaluate(
+        rng_test,
         state,
         dataloader,
         valid_num_steps,

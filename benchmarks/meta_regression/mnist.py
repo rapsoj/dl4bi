@@ -20,7 +20,7 @@ from dsp.meta_regression.train_utils import (
     log_img_plots,
     save_ckpt,
     train,
-    validate,
+    evaluate,
 )
 
 
@@ -35,7 +35,7 @@ def main(cfg: DictConfig):
         project="SPTx - MNIST",
     )
     rng = random.key(cfg.seed)
-    rng_train, rng_valid = random.split(rng)
+    rng_train, rng_test = random.split(rng)
     train_dataloader, valid_dataloader = build_dataloaders()
     train_num_steps, valid_num_steps = 200000, None  # exhaust valid dataloader
     valid_interval, plot_interval = 25000, 50000
@@ -55,8 +55,8 @@ def main(cfg: DictConfig):
     )
     path = Path(f"results/mnist/{model_cfg_name}-seed-{cfg.seed}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    loss = validate(
-        rng_valid,
+    loss = evaluate(
+        rng_test,
         state,
         valid_dataloader,
         valid_num_steps,
