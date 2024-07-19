@@ -26,7 +26,7 @@ def test_transformer_encoder():
     for embedder in [
         FixedSinusoidalEmbedding(embed_dim // feature_dim),
         NeRFEmbedding(embed_dim // feature_dim),
-        GaussianFourierEmbedding(embed_dim // 2),
+        GaussianFourierEmbedding(embed_dim),
         LearnableEmbedding(post_process=MLP([embed_dim, embed_dim])),
     ]:
         s_e, _ = embedder.init_with_output(rng_init, s)

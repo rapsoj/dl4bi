@@ -112,7 +112,7 @@ def test_train_step_loss():
             valid_lens_test=valid_lens_test_1,
         )
         params = kwargs.pop("params")
-        learning_rate_fn = tu.create_learning_rate_fn()
+        learning_rate_fn = tu.cosine_annealing_lr()
         state = tu.TrainState.create(
             apply_fn=model.apply,
             params=params,
