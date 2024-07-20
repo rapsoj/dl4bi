@@ -3,15 +3,15 @@ kwargs:
   embed_s:
     cls: LearnableEmbedding
     kwargs:
-      map:
-        cls: GaussianFourierEmbedding
-        kwargs:
-          embed_dim: 256
-          var: 4.0
+      # map:
+      #   cls: GaussianFourierEmbedding
+      #   kwargs:
+      #     embed_dim: 256
+      #     var: 4.0
       post_process:
         cls: MLP
         kwargs:
-          dims: [64, 64, 64, 64]
+          dims: [256, 64, 64, 64]
           act_fn: elu
   embed_s_f:
     cls: MLP
