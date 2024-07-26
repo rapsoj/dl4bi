@@ -35,7 +35,7 @@ def main(cfg: DictConfig):
     dataloader = build_gp_dataloader(cfg.exp, cfg.kernel)
     train_num_steps, valid_num_steps = 100000, 5000
     valid_interval, plot_interval = 25000, 50000
-    lr_peak, lr_pct_warmup = 1e-3, 0.3
+    lr_peak, lr_pct_warmup = 5e-4, 0.3
     lr_schedule = cosine_annealing_lr(train_num_steps, lr_peak, lr_pct_warmup)
     optimizer = optax.yogi(lr_schedule)
     model = instantiate(cfg.model)
