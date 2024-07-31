@@ -20,5 +20,5 @@ kwargs:
     kwargs:
       dist: uniform
       kwargs:
-        minval: 0.5 # ~8 cycles on [-2, 2]
-        maxval: 1.5 # ~3 cycles on [-2, 2]
+        minval: 0.5 # 8 cycles on [-2, 2]
+        maxval: 2 # 2 cycles on [-2, 2]
