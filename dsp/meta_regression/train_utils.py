@@ -5,20 +5,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
+import flax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import orbax.checkpoint as ocp
 import wandb
 from flax.core import FrozenDict
-from flax.training import train_state
+from flax.training import orbax_utils, train_state
 from jax import jit, random
 from jax.scipy.special import logsumexp
 from jax.scipy.stats import norm
 from omegaconf import DictConfig, OmegaConf
+from orbax.checkpoint import PyTreeCheckpointer
 from sps.gp import GP
 from sps.kernels import matern_3_2, periodic, rbf
 from sps.priors import Prior
@@ -40,6 +41,7 @@ from .tnpds import TNPDS
 from .tnpnd import TNPND
 
 
+@flax.struct.dataclass
 class TrainState(train_state.TrainState):
     # kwargs stores any extra information associated with training,
     # i.e. batch norm stats or fixed (random) projections
@@ -179,6 +181,14 @@ def evaluate(
     return loss
 
 
+def cfg_to_run_name(cfg: DictConfig):
+    model = cfg.model.cls
+    if model == "SPTx":
+        is_fast = "Fast" in cfg.model.kwargs.dec.kwargs.blk.kwargs.attn.cls
+        model += " Fast" if is_fast else " Full"
+    return model
+
+
 def instantiate(d: Union[dict, DictConfig]):
     """Convenience function to instantiate an object from a config."""
     if isinstance(d, DictConfig):
@@ -196,19 +206,21 @@ def instantiate(d: Union[dict, DictConfig]):
     return d
 
 
-def build_gp_dataloader(exp: DictConfig, kernel: DictConfig):
+def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
     """Generates batches of GP samples."""
     gp = instantiate(kernel)
-    s_dim = len(exp.s)
-    s_grid = build_grid(exp.s).reshape(-1, s_dim)  # flatten spatial dims
-    obs_noise, batch_size = exp.obs_noise, exp.batch_size
-    valid_lens_test = jnp.repeat(exp.num_ctx.max + s_grid.shape[0], batch_size)
-    min_s = jnp.array([axis["start"] for axis in exp.s])
-    max_s = jnp.array([axis["stop"] for axis in exp.s])
+    s_dim = len(data.s)
+    s_grid = build_grid(data.s).reshape(-1, s_dim)  # flatten spatial dims
+    obs_noise, batch_size = data.obs_noise, data.batch_size
+    valid_lens_test = jnp.repeat(data.num_ctx.max + s_grid.shape[0], batch_size)
+    min_s = jnp.array([axis["start"] for axis in data.s])
+    max_s = jnp.array([axis["stop"] for axis in data.s])
 
     @jit
     def gen_s_random(rng: jax.Array):
-        return random.uniform(rng, (exp.num_ctx.max, s_dim), minval=min_s, maxval=max_s)
+        return random.uniform(
+            rng, (data.num_ctx.max, s_dim), minval=min_s, maxval=max_s
+        )
 
     @jit
     def gen_batch(rng: jax.Array):
@@ -219,8 +231,8 @@ def build_gp_dataloader(exp: DictConfig, kernel: DictConfig):
         valid_lens_ctx = random.randint(
             rng_valid_lens_ctx,
             (batch_size,),
-            exp.num_ctx.min,
-            exp.num_ctx.max,
+            data.num_ctx.min,
+            data.num_ctx.max,
         )
         s = jnp.repeat(s[None, ...], batch_size, axis=0)
         f_noisy = f + obs_noise * random.normal(rng_eps, f.shape)
@@ -235,51 +247,28 @@ def build_gp_dataloader(exp: DictConfig, kernel: DictConfig):
 
 
 def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
-    """Saves a checkpoint."""
+    "Save a checkpoint."
     shutil.rmtree(path, ignore_errors=True)
-    ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
-    cfg_d = OmegaConf.to_container(cfg, resolve=True)
-    ckptr.save(
-        path.absolute(),
-        args=ocp.args.Composite(
-            state=ocp.args.StandardSave(state),
-            config=ocp.args.JsonSave(cfg_d),
-        ),
-    )
+    ckptr = PyTreeCheckpointer()
+    ckpt = {"state": state, "config": OmegaConf.to_container(cfg, resolve=True)}
+    save_args = orbax_utils.save_args_from_target(ckpt)
+    ckptr.save(path.absolute(), ckpt, save_args=save_args)
 
 
-def load_ckpt(path: Path, sample_batch: tuple):
-    """Loads a checkpoint."""
-    ckptr = ocp.Checkpointer(ocp.CompositeCheckpointHandler("state", "config"))
-    # restore config and use it to create model template
-    ckpt = ckptr.restore(
-        path.absolute(),
-        args=ocp.args.Composite(config=ocp.args.JsonRestore()),
-    )
+def load_ckpt(path: Path):
+    "Load a checkpoint."
+    ckptr = PyTreeCheckpointer()
+    ckpt = ckptr.restore(path.absolute())
     cfg = OmegaConf.create(ckpt["config"])
-    rng, num_steps = random.key(42), 100000
-    lr_peak, lr_pct_warmup, lr_num_cycles = 1e-3, 0.1, 1
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = sample_batch
     model = instantiate(cfg.model)
-    kwargs = model.init(rng, s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test)
-    params = kwargs.pop("params")
-    learning_rate_fn = cosine_annealing_lr(
-        num_steps,
-        lr_peak,
-        lr_pct_warmup,
-        lr_num_cycles,
-    )
     state = TrainState.create(
         apply_fn=model.apply,
-        params=params,
-        tx=optax.yogi(learning_rate_fn),
-        kwargs=kwargs,
+        # TODO(danj): reload optimizer state
+        tx=optax.yogi(cosine_annealing_lr()),
+        params=ckpt["state"]["params"],
+        kwargs=ckpt["state"]["kwargs"],
     )
-    ckpt = ckptr.restore(
-        path.absolute(),
-        args=ocp.args.Composite(state=ocp.args.StandardRestore(state)),
-    )
-    return ckpt["state"], cfg
+    return state, cfg
 
 
 def cosine_annealing_lr(
@@ -728,6 +717,7 @@ def f_ctx_to_img_task(
 ):
     H, W, D = shape
     L, L_ctx = H * W, f_ctx.shape[0]
+    f_ctx = f_ctx / 2 + 0.5  # [-1, 1] -> [0, 1]
     task = jnp.pad(f_ctx, ((0, L - L_ctx), (0, 0)))  # [L_ctx, 1] -> [L, 1]
     if D == 1:  # if black/white, convert to RGB
         task = jnp.repeat(task, 3, axis=-1)  # [L, 1] -> [L, 3]
@@ -738,6 +728,7 @@ def f_ctx_to_img_task(
 
 def f_to_img_task(shape: tuple[int, int, int], f: jax.Array):
     task = f.reshape(shape)  # [H, W, D]
+    task = task / 2 + 0.5  # [-1, 1] -> [0, 1]
     if shape[-1] == 1:  # if black/white, convert to RGB
         task = jnp.repeat(task, 3, axis=-1)  # [H, W, 3]
     return jnp.clip(task, 0, 1)  # to avoid matplotlib warnings

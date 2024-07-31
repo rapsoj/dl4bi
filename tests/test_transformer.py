@@ -7,7 +7,6 @@ from dsp.core import (
     DotScorer,
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
-    LearnableEmbedding,
     MultiheadAttention,
     MultiheadFastAttention,
     MultiplicativeScorer,
@@ -27,7 +26,7 @@ def test_transformer_encoder():
         FixedSinusoidalEmbedding(embed_dim // feature_dim),
         NeRFEmbedding(embed_dim // feature_dim),
         GaussianFourierEmbedding(embed_dim),
-        LearnableEmbedding(post_process=MLP([embed_dim, embed_dim])),
+        MLP([embed_dim, embed_dim]),
     ]:
         s_e, _ = embedder.init_with_output(rng_init, s)
         for scorer in [AdditiveScorer(), MultiplicativeScorer(), DotScorer()]:

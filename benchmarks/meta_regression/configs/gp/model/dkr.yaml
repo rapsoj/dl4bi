@@ -3,13 +3,10 @@ kwargs:
   num_layers: 3
   num_repeats: 2
   embed_s:
-    cls: LearnableEmbedding
+    cls: MLP
     kwargs:
-      post_process:
-        cls: MLP
-        kwargs:
-          dims: [64, 64, 64, 64]
-          act_fn: elu
+      dims: [64, 64, 64, 64]
+      act_fn: elu
   embed_s_f:
     cls: MLP
     kwargs:

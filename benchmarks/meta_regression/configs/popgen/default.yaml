@@ -1,0 +1,11 @@
+defaults:
+  - _self_ # use default global values below
+  - model: sptx_fast
+seed: 42
+wandb: True
+train_num_steps: 500000
+valid_num_steps: 5000
+valid_interval: 25000
+plot_interval: 25000
+batch_size: 16
+lr_peak: 1.0e-3

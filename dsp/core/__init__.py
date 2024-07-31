@@ -19,7 +19,6 @@ from .conv import (
 from .embed import (
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
-    LearnableEmbedding,
     NeRFEmbedding,
 )
 from .fast_attention import (

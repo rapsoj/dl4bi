@@ -9,7 +9,6 @@ from dsp.core.attention import MultiheadAttention
 from ..core import (
     MLP,
     AddNorm,
-    LearnableEmbedding,
 )
 
 
@@ -20,7 +19,7 @@ class DKR(nn.Module):
         num_layers: Number of attention layers.
         num_repeats: Number of times to repeat each attention layer.
         embed_s: An embedding module for locations.
-        embed_s_f: A module or combining embedded locations and function values.
+        embed_s_f: A module that embeds positions and function values.
         attn: An attention module.
         head: A prediction head for decoded output.
         add_norm: An `AddNorm` module applied between layers.
@@ -31,7 +30,7 @@ class DKR(nn.Module):
 
     num_layers: int = 3
     num_repeats: int = 2
-    embed_s: nn.Module = LearnableEmbedding(post_process=MLP([64, 64]))
+    embed_s: nn.Module = MLP([64, 64])
     embed_s_f: nn.Module = MLP([64])
     attn: nn.Module = MultiheadAttention()
     head: nn.Module = MLP([64] * 2 + [2])
@@ -40,9 +39,9 @@ class DKR(nn.Module):
     @nn.compact
     def __call__(
         self,
-        s_ctx: jax.Array,  # [B, S_ctx, D_S]
-        f_ctx: jax.Array,  # [B, S_ctx, D_F]
-        s_test: jax.Array,  # [B, S_test, D_S]
+        s_ctx: jax.Array,  # [B, L_ctx, D_S]
+        f_ctx: jax.Array,  # [B, L_ctx, D_F]
+        s_test: jax.Array,  # [B, L_test, D_S]
         valid_lens_ctx: Optional[jax.Array] = None,  # [B]
         valid_lens_test: Optional[jax.Array] = None,  # [B]
         training: bool = False,
@@ -52,24 +51,24 @@ class DKR(nn.Module):
 
         Args:
             rng: A psuedo-random number generator.
-            s_ctx: A location array of shape `[B, S_ctx, D_S]` where
-                `B` is batch size, `S_ctx` is number of context
+            s_ctx: A location array of shape `[B, L_ctx, D_S]` where
+                `B` is batch size, `L_ctx` is number of context
                 locations, and `D_S` is the dimension of each location.
-            f_ctx: A function value array of shape `[B, S_ctx, D_F]` where `B` is
-                batch size, `S_ctx` is number of context locations, and `D_F` is
+            f_ctx: A function value array of shape `[B, L_ctx, D_F]` where `B` is
+                batch size, `L_ctx` is number of context locations, and `D_F` is
                 the dimension of each function value.
-            s_test: A location array of shape `[B, S_test, D_S]` where `B` is
-                batch size, `S_test` is number of test locations, and `D_S`
+            s_test: A location array of shape `[B, L_test, D_S]` where `B` is
+                batch size, `L_test` is number of test locations, and `D_S`
                 is the dimension of each location.
             valid_lens_ctx: An optional array of shape `(B,)` indicating the
-                valid positions for each `S_ctx` sequence in the batch.
+                valid positions for each `L_ctx` sequence in the batch.
             valid_lens_test: An optional array of shape `(B,)` indicating the
-                valid positions for each `S_test` sequence in the batch.
+                valid positions for each `L_test` sequence in the batch.
             training: A boolean indicating whether this call is performed during
                 training.
 
         Returns:
-            $\mu_f,\sigma_f\in\mathbb{R}^{B\times S_\text{test}\times 2D_F}$.
+            $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
         ks = self.embed_s(s_ctx, training)
         qvs = self.embed_s(s_test, training)

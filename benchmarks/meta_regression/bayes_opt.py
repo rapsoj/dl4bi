@@ -7,7 +7,6 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import wandb
-from hydra.core.hydra_config import HydraConfig
 from jax import jit, random
 from jax.scipy import stats
 from omegaconf import DictConfig, OmegaConf
@@ -17,6 +16,7 @@ from dsp.core import mask_from_valid_lens
 from dsp.meta_regression.train_utils import (
     TrainState,
     build_gp_dataloader,
+    cfg_to_run_name,
     load_ckpt,
     log_wandb_line,
     plot_posterior_predictive,
@@ -24,33 +24,31 @@ from dsp.meta_regression.train_utils import (
 
 
 # NOTE: use the same configs as the Gaussian Process (GP) models
-@hydra.main("configs/gp", version_base=None)
+@hydra.main("configs/gp", config_name="default", version_base=None)
 def main(cfg: DictConfig):
-    d = HydraConfig.get().runtime.choices
-    exp, kernel, model_cfg_name = d["exp"], d["kernel"], d["model"]
+    run_name = cfg.get("name", cfg_to_run_name(cfg))
+    path = f"results/gp/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
+    path = Path(path)
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
-        mode="online" if "wandb" in cfg else "disabled",
-        name=cfg.get("name", model_cfg_name),
+        mode="online" if cfg.wandb else "disabled",
+        name=cfg.get("name", run_name),
         project="SPTx - Bayesian Optimization",
+        reinit=True,  # allows reinitialization for multiple runs
     )
     num_tasks, budget, num_init = 100, 50, 10
-    cfg.exp.batch_size = 1  # override GP batch argument
+    cfg.data.batch_size = 1  # override GP batch argument
     rng = random.key(cfg.seed)
-    rng_init, rng_data, rng_opt = random.split(rng, 3)
-    dataloader = build_gp_dataloader(cfg.exp, cfg.kernel)
-    sample_batch = next(dataloader(rng_init))
-    model_name = f"{exp}-{kernel}-{model_cfg_name}-seed-{cfg.seed}"
-    model_ckpt_path = Path("results/gp") / (model_name + ".ckpt")
-    model_state, _ = load_ckpt(model_ckpt_path, sample_batch)
+    rng_data, rng_opt = random.split(rng)
+    dataloader = build_gp_dataloader(cfg.data, cfg.kernel)
+    model_state, _ = load_ckpt(path.with_suffix(".ckpt"))
     model_fn = jit_model_fn(model_state)
     s_test, f_test = build_dataset(rng_data, dataloader, num_tasks)
     regret, s_ctx, f_ctx, f_mu, f_std = optimize(
         rng_opt, s_test, f_test, model_fn, num_init, budget
     )
-    regret_path = Path(f"results/bayes_opt/{model_name}-regret")
-    regret_path.parent.mkdir(parents=True, exist_ok=True)
-    jnp.save(regret_path, regret)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    jnp.save(path.with_suffix(".npy"), regret)
     log_wandb_line(regret.mean(axis=0), "Regret mu")
     log_wandb_line(regret.std(axis=0), "Regret std")
     log_regret_dist(regret)

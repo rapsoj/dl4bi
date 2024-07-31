@@ -6,17 +6,6 @@ import jax.numpy as jnp
 from jax import jit, random, vmap
 from jax.tree_util import Partial
 
-from .mlp import MLP
-
-
-class LearnableEmbedding(nn.Module):
-    map: Callable = lambda x: x
-    post_process: Callable = MLP([256, 256])
-
-    @nn.compact
-    def __call__(self, s: jax.Array, training=False):
-        return self.post_process(self.map(s), training)
-
 
 class FixedSinusoidalEmbedding(nn.Module):
     r"""Fixed sinusoidal positional encoding from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).

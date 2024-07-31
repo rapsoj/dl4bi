@@ -18,6 +18,7 @@ kwargs:
   period:
     cls: Prior
     kwargs:
-      dist: fixed
+      dist: uniform
       kwargs:
-        value: 2.0 # ~3 cycles on unit interval (2*pi/3)
+        minval: 1.57 # ~4 cycles on unit interval (2π / 4)
+        maxval: 6.28 # ~1 cycle on unit interval (2π / 1)

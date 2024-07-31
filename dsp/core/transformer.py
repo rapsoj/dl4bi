@@ -8,7 +8,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 
-from .attention import Attention, MultiheadAttention
+from .attention import MultiheadAttention
 from .mlp import MLP
 
 
@@ -212,9 +212,9 @@ class KRBlock(nn.Module):
         An instance of the `KRBlock` model.
     """
 
-    attn: nn.Module = Attention()
+    attn: nn.Module = MultiheadAttention()
     add_norm: nn.Module = AddNorm(0.0)
-    ffn: nn.Module = MLP([64, 64], nn.elu)
+    ffn: nn.Module = MLP([128, 64], nn.relu)
 
     @nn.compact
     def __call__(

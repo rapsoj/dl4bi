@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import shutil
-import sys
 from functools import partial
 from pathlib import Path
 from urllib import request
@@ -12,7 +11,6 @@ import numpy as np
 import optax
 import pandas as pd
 import wandb
-from hydra.core.hydra_config import HydraConfig
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
@@ -21,6 +19,7 @@ from tqdm import tqdm
 
 from dsp.meta_regression.train_utils import (
     Callback,
+    cfg_to_run_name,
     cosine_annealing_lr,
     evaluate,
     instantiate,
@@ -30,24 +29,28 @@ from dsp.meta_regression.train_utils import (
 )
 
 
-@hydra.main("configs/celeba", version_base=None)
+@hydra.main("configs/celeba", config_name="default", version_base=None)
 def main(cfg: DictConfig):
-    d = HydraConfig.get().runtime.choices
-    model_cfg_name = d["model"]
+    run_name = cfg.get("name", cfg_to_run_name(cfg))
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
-        mode="online" if "wandb" in cfg else "disabled",
-        name=cfg.get("name", model_cfg_name),
+        mode="online" if cfg.wandb else "disabled",
+        name=cfg.get("name", run_name),
         project="SPTx - CelebA",
+        reinit=True,  # allows reinitialization for multiple runs
     )
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader, valid_dataloader, test_dataloader = build_dataloaders()
-    train_num_steps, valid_num_steps, test_num_steps = 100000, 5000, 5000
-    valid_interval, plot_interval = 25000, 50000
-    lr_peak, lr_pct_warmup = 5e-4, 0.3
-    lr_schedule = cosine_annealing_lr(train_num_steps, lr_peak, lr_pct_warmup)
-    optimizer = optax.yogi(lr_schedule)
+    lr_schedule = cosine_annealing_lr(
+        cfg.train_num_steps,
+        cfg.lr_peak,
+        cfg.lr_pct_warmup,
+    )
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(cfg.clip_max_norm),
+        optax.yogi(lr_schedule),
+    )
     model = instantiate(cfg.model)
     state = train(
         rng_train,
@@ -55,14 +58,16 @@ def main(cfg: DictConfig):
         optimizer,
         train_dataloader,
         valid_dataloader,
-        train_num_steps,
-        valid_num_steps,
-        valid_interval,
-        callbacks=[Callback(partial(log_img_plots, shape=(32, 32, 3)), plot_interval)],
+        cfg.train_num_steps,
+        cfg.valid_num_steps,
+        cfg.valid_interval,
+        callbacks=[
+            Callback(partial(log_img_plots, shape=(32, 32, 3)), cfg.plot_interval)
+        ],
     )
-    loss = evaluate(rng_test, state, test_dataloader, test_num_steps)
+    loss = evaluate(rng_test, state, test_dataloader, cfg.valid_num_steps)
     wandb.log({"test_loss": loss})
-    path = Path(f"results/celeba/{model_cfg_name}-seed-{cfg.seed}")
+    path = Path(f"results/celeba/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
@@ -75,10 +80,10 @@ def build_dataloaders(
 ):
     prepare_data()
     B, L = batch_size, 32 * 32
-    # load & convert from [0, 255] -> [0, 1]
-    train_ds = np.load("cache/celeba/train.npy", mmap_mode="r") / 255.0
-    valid_ds = np.load("cache/celeba/valid.npy", mmap_mode="r") / 255.0
-    test_ds = np.load("cache/celeba/test.npy", mmap_mode="r") / 255.0
+    # load & convert from [0, 255] -> [-0.5, 0.5] -> [-1, 1]
+    train_ds = 2 * (np.load("cache/celeba/train.npy", mmap_mode="r") / 255.0 - 0.5)
+    valid_ds = 2 * (np.load("cache/celeba/valid.npy", mmap_mode="r") / 255.0 - 0.5)
+    test_ds = 2 * (np.load("cache/celeba/test.npy", mmap_mode="r") / 255.0 - 0.5)
     s_test = build_grid([dict(start=-1.0, stop=1.0, num=32)] * 2).reshape(L, 2)
     s_test = jnp.repeat(s_test[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
     valid_lens_test = jnp.repeat(num_test_max, B)  # similar to ANP, Appendix D

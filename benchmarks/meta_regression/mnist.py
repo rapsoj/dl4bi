@@ -9,13 +9,13 @@ import optax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import wandb
-from hydra.core.hydra_config import HydraConfig
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
 from dsp.meta_regression.train_utils import (
     Callback,
+    cfg_to_run_name,
     cosine_annealing_lr,
     evaluate,
     instantiate,
@@ -25,24 +25,28 @@ from dsp.meta_regression.train_utils import (
 )
 
 
-@hydra.main("configs/mnist", version_base=None)
+@hydra.main("configs/mnist", config_name="default", version_base=None)
 def main(cfg: DictConfig):
-    d = HydraConfig.get().runtime.choices
-    model_cfg_name = d["model"]
+    run_name = cfg.get("name", cfg_to_run_name(cfg))
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
-        mode="online" if "wandb" in cfg else "disabled",
-        name=cfg.get("name", model_cfg_name),
+        mode="online" if cfg.wandb else "disabled",
+        name=cfg.get("name", run_name),
         project="SPTx - MNIST",
+        reinit=True,  # allows reinitialization for multiple runs
     )
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader, valid_dataloader = build_dataloaders()
-    train_num_steps, valid_num_steps = 200000, None  # exhaust valid dataloader
-    valid_interval, plot_interval = 25000, 50000
-    lr_peak, lr_pct_warmup = 5e-4, 0.3
-    lr_schedule = cosine_annealing_lr(train_num_steps, lr_peak, lr_pct_warmup)
-    optimizer = optax.yogi(lr_schedule)
+    lr_schedule = cosine_annealing_lr(
+        cfg.train_num_steps,
+        cfg.lr_peak,
+        cfg.lr_pct_warmup,
+    )
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(cfg.clip_max_norm),
+        optax.yogi(lr_schedule),
+    )
     model = instantiate(cfg.model)
     state = train(
         rng_train,
@@ -50,14 +54,16 @@ def main(cfg: DictConfig):
         optimizer,
         train_dataloader,
         valid_dataloader,
-        train_num_steps,
-        valid_num_steps,
-        valid_interval,
-        callbacks=[Callback(partial(log_img_plots, shape=(28, 28, 1)), plot_interval)],
+        cfg.train_num_steps,
+        cfg.valid_num_steps,
+        cfg.valid_interval,
+        callbacks=[
+            Callback(partial(log_img_plots, shape=(28, 28, 1)), cfg.plot_interval)
+        ],
     )
-    loss = evaluate(rng_test, state, valid_dataloader, valid_num_steps)
+    loss = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
     wandb.log({"test_loss": loss})
-    path = Path(f"results/mnist/{model_cfg_name}-seed-{cfg.seed}")
+    path = Path(f"results/mnist/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
@@ -70,7 +76,9 @@ def build_dataloaders(
     num_test_max: int = 200,
 ):
     B, L = batch_size, 28 * 28
-    normalize = lambda sample: tf.cast(sample["image"], tf.float32) / 255.0
+    normalize = lambda sample: 2 * (
+        tf.cast(sample["image"], tf.float32) / 255.0 - 0.5
+    )  # [0, 255] -> [-0.5, 0.5] -> [-1, 1]
     train_ds = tfds.load("mnist", split="train").map(normalize).repeat()
     valid_ds = tfds.load("mnist", split="test").map(normalize)
     train_ds = train_ds.shuffle(buffer_size, seed=42, reshuffle_each_iteration=True)
