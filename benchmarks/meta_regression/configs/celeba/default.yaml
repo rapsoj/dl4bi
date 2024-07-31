@@ -4,7 +4,7 @@ defaults:
 seed: 42
 wandb: True
 train_num_steps: 100000
-valid_num_steps: # None = exhaust valid dataloader
+valid_num_steps: 5000
 valid_interval: 25000
 plot_interval: 25000
 lr_peak: 1.0e-3
