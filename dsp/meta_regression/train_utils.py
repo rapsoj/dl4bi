@@ -186,12 +186,17 @@ def cfg_to_run_name(cfg: DictConfig):
     if model == "SPTx":
         is_fast = "Fast" in cfg.model.kwargs.dec.kwargs.blk.kwargs.attn.cls
         model += " Fast" if is_fast else " Full"
-        embed_s = cfg.model.wkargs.embed_s
-        if "cls" in embed_s and embed_s.cls in [
-            "GaussianFourierEmbedding",
-            "NeRFEmbedding",
-            "FixedSinusoidalEmbedding",
-        ]:
+        kwargs = cfg.model.kwargs
+        if (
+            "embed_s" in kwargs
+            and "cls" in kwargs.embed_s
+            and kwargs.embed_s.cls
+            in [
+                "GaussianFourierEmbedding",
+                "NeRFEmbedding",
+                "FixedSinusoidalEmbedding",
+            ]
+        ):
             model += " - RFF"
     return model
 
