@@ -42,7 +42,10 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader, valid_dataloader, test_dataloader = build_dataloaders()
-    optimizer = optax.yogi(cfg.lr_peak)
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(cfg.clip_max_norm),
+        optax.yogi(cfg.lr_peak),
+    )
     model = instantiate(cfg.model)
     state = train(
         rng_train,
