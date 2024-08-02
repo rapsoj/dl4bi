@@ -1,0 +1,25 @@
+cls: SPTx
+kwargs:
+  embed_s:
+    cls: GaussianFourierEmbedding
+    kwargs:
+      embed_dim: 64
+      var: 4.0
+  embed_s_f:
+    cls: MLP
+    kwargs:
+      dims: [64, 64, 64]
+  dec:
+    cls: KRStack
+    kwargs:
+      num_blks: 4
+      num_reps: 2
+      blk:
+        cls: KRBlock
+        kwargs:
+          attn:
+            cls: MultiheadFastAttention
+  head:
+    cls: MLP
+    kwargs:
+      dims: [128, 2]

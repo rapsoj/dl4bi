@@ -12,8 +12,10 @@ class SPTx(nn.Module):
     """A Stochastic Process Transformer (SPTx).
 
     Args:
-        embed_s: A module that embeds positions prior to embedding with
+        embed_s: A module that embeds locations prior to embedding with
             function values.
+        embed_f: A module that embeds function values prior to embedding
+            with locations.
         embed_s_f: A module that embeds positions and function values.
         dec: A decoder module, e.g. a `KRStack`.
         head: A prediction head for decoded output.
@@ -24,6 +26,7 @@ class SPTx(nn.Module):
     """
 
     embed_s: Callable = lambda x: x
+    embed_f: Callable = lambda x: x
     embed_s_f: nn.Module = MLP([64] * 4)
     dec: nn.Module = KRStack()
     head: nn.Module = MLP([128, 2])
@@ -63,10 +66,10 @@ class SPTx(nn.Module):
         Returns:
             $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
-        f_test_zeros = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
-        s_ctx_embed, s_test_embed = self.embed_s(s_ctx), self.embed_s(s_test)
-        s_f_ctx = jnp.concatenate([s_ctx_embed, s_ctx, f_ctx], axis=-1)
-        s_f_test = jnp.concatenate([s_test_embed, s_test, f_test_zeros], axis=-1)
+        stack = lambda *args: jnp.concatenate(args, axis=-1)
+        f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
+        s_f_ctx = stack(s_ctx, self.embed_s(s_ctx), f_ctx, self.embed_f(f_ctx))
+        s_f_test = stack(s_test, self.embed_s(s_test), f_test, self.embed_f(f_test))
         s_f_test_enc, _ = self.dec(
             self.embed_s_f(s_f_test),
             self.embed_s_f(s_f_ctx),
