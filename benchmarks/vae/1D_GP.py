@@ -248,7 +248,7 @@ def load_ckpt(path: Path):
     rng_gp, rng_params, rng_extra = random.split(rng, 3)
     s = build_grid([{"start": 0, "stop": 1.0, "num": 128}])
     gp, model = instantiate(cfg.kernel), instantiate(cfg.model)
-    var, ls, z, f = gp.simulate(rng_gp, s, batch_size)
+    f, var, ls, period, z = gp.simulate(rng_gp, s, batch_size)
     x = f if isinstance(model, PriorCVAE) else z  # decoder-only, e.g. DeepChol
     rngs = {"params": rng_params, "extra": rng_extra}
     kwargs = model.init(rngs, x, var, ls)

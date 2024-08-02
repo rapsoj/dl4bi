@@ -55,7 +55,7 @@ def dataloader(key, gp, loc_dims, batch_size=1024, approx=True):
     f = []
     for i in range(batch_size):
         rng_gp_i, rng_gp = random.split(rng_gp)
-        _, _, _, _f = gp.simulate(rng_gp_i, s[i], 1, approx)
+        _f, *_ = gp.simulate(rng_gp_i, s[i], 1, approx)
         f += [_f.squeeze()]
     f = jnp.array(f)
     while True:

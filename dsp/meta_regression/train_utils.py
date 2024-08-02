@@ -237,7 +237,7 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
         rng_s_random, rng_valid_lens_ctx, rng_gp, rng_eps, rng = random.split(rng, 5)
         s_random = gen_s_random(rng_s_random)
         s = jnp.vstack([s_random, s_grid])
-        var, ls, _z, f = gp.simulate(rng_gp, s, batch_size)
+        f, var, ls, period, *_ = gp.simulate(rng_gp, s, batch_size)
         valid_lens_ctx = random.randint(
             rng_valid_lens_ctx,
             (batch_size,),
@@ -246,7 +246,7 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
         )
         s = jnp.repeat(s[None, ...], batch_size, axis=0)
         f_noisy = f + obs_noise * random.normal(rng_eps, f.shape)
-        return s, f_noisy, valid_lens_ctx, s, f, valid_lens_test, var, ls
+        return s, f_noisy, valid_lens_ctx, s, f, valid_lens_test, var, ls, period
 
     def dataloader(rng: jax.Array):
         while True:
@@ -572,7 +572,9 @@ def log_posterior_predictive_plots(
 ):
     """Logs `num_plots` from the given batch."""
     rng_dropout, rng_extra = random.split(rng_step)
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls = batch
+    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls, period = (
+        batch
+    )
     f_mu, f_std, *_ = state.apply_fn(
         {"params": state.params, **state.kwargs},
         s_ctx,
@@ -601,7 +603,10 @@ def log_posterior_predictive_plots(
             s = i * K
             f_mu_i = f_mu[s : s + K].squeeze()
             f_std_i = f_std[s : s + K].squeeze()
-        title = f"Sample {i} (var: {var[i]:0.2f}, ls: {ls[i]:0.2f})"
+        title = f"Sample {i} (var: {var[i]:0.2f}, ls: {ls[i]:0.2f}"
+        if jnp.isfinite(period):
+            title += f", period: {period:0.2f}"
+        title += ")"
         fig = plot_posterior_predictive(
             s_ctx_i, f_ctx_i, s_test_i, f_test_i, f_mu_i, f_std_i
         )
