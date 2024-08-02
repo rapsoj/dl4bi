@@ -101,7 +101,7 @@ def test_fast_softmax_attention_speed():
 
 
 def test_fast_softmax_attention_scale():
-    B, L, L_init, D = 1, 32768, 3, 16
+    B, L, L_init, D = 1, 45000, 3, 16
     key = random.key(42)
     rng_qkvs_init, rng_qkvs, rng_valid, rng_init = random.split(key, 4)
     data = random.normal(rng_qkvs, (3, B, L, D))
@@ -117,9 +117,13 @@ def test_fast_softmax_attention_scale():
     )
 
     jit_fast_attn = jax.jit(fast_attn.apply)
-    ctx_fast, _ = jit_fast_attn(p_fast, qs, ks, vs, valid_lens)
-
-    # NOTE: regular attention OOMs around L=20480
+    with jax.profiler.trace("/tmp/tensorboard"):
+        ctx_fast, _ = jit_fast_attn(p_fast, qs, ks, vs, valid_lens)
+        ctx_fast.block_until_ready()
 
     assert not jnp.isnan(ctx_fast_init).any(), "NaNs produced during initialization!"
     assert not jnp.isnan(ctx_fast).any(), "NaNs produced!"
+
+    # TODO(danj): add Heaton benchmark test
+    # tensorboard --logdir /tmp/tensorboard/
+    L_ctx_heaton, L_test_heaton = 105569, 44431  # Heaton et al benchmark
