@@ -101,6 +101,7 @@ def test_fast_softmax_attention_speed():
 
 
 def test_fast_softmax_attention_scale():
+    # L_ctx, L_test = 105569, 44431  # Case Study for Large Spatial Data, Heaton et al
     B, L_ctx, L_test, L_init, D = 1, 250000, 50000, 3, 64
     key = random.key(42)
     rng_init, rng_qs, rng_kvs = random.split(key, 3)
