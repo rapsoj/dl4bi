@@ -604,9 +604,7 @@ def log_posterior_predictive_plots(
             f_mu_i = f_mu[s : s + K].squeeze()
             f_std_i = f_std[s : s + K].squeeze()
         title = f"Sample {i} (var: {var[i]:0.2f}, ls: {ls[i]:0.2f}"
-        if jnp.isfinite(period):
-            title += f", period: {period:0.2f}"
-        title += ")"
+        title += f", period: {period[i]:0.2f})" if period is not None else ")"
         fig = plot_posterior_predictive(
             s_ctx_i, f_ctx_i, s_test_i, f_test_i, f_mu_i, f_std_i
         )
