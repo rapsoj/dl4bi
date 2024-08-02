@@ -182,23 +182,21 @@ def evaluate(
 
 
 def cfg_to_run_name(cfg: DictConfig):
-    model = cfg.model.cls
-    if model == "SPTx":
-        is_fast = "Fast" in cfg.model.kwargs.dec.kwargs.blk.kwargs.attn.cls
-        model += " Fast" if is_fast else " Full"
-        kwargs = cfg.model.kwargs
-        if (
-            "embed_s" in kwargs
-            and "cls" in kwargs.embed_s
-            and kwargs.embed_s.cls
-            in [
-                "GaussianFourierEmbedding",
-                "NeRFEmbedding",
-                "FixedSinusoidalEmbedding",
-            ]
-        ):
-            model += " - RFF"
-    return model
+    name = cfg.model.cls
+    if name == "SPTx":
+        attn_cls = OmegaConf.select(cfg, "model.kwargs.dec.kwargs.blk.kwargs.attn.cls")
+        name += " Fast" if attn_cls and "Fast" in attn_cls else " Full"
+        embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.cls")
+        if embed_cls == "ResidualEmbedding":
+            name += " Resid"
+            embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.kwargs.cls")
+        if embed_cls in [
+            "GaussianFourierEmbedding",
+            "NeRFEmbedding",
+            "FixedSinusoidalEmbedding",
+        ]:
+            name += " RFF"
+    return name
 
 
 def instantiate(d: Union[dict, DictConfig]):
