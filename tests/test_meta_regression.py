@@ -51,7 +51,7 @@ def test_models():
 
 
 def test_sptx_scale():
-    B, D_f, L_init, L_ctx, L_test = 1, 1, 3, 30000, 10000
+    B, D_f, L_init, L_ctx, L_test = 1, 1, 3, 1000000, 100000
     rng = random.key(42)
     rng_ctx, rng_init, rng_model = random.split(rng, 3)
     s_init = jnp.linspace(0, 1.0, L_init)[None, :, None]  # [1, L_init, 1]
