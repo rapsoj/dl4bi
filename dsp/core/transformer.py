@@ -9,6 +9,7 @@ import flax.linen as nn
 import jax
 
 from .attention import MultiheadAttention
+from .fast_attention import MultiheadFastAttention
 from .mlp import MLP
 
 
@@ -204,7 +205,7 @@ class KRBlock(nn.Module):
     """A Kernel Regression Block.
 
     Args:
-        attn: An attention module.
+        attn: An attention module (MultiheadFastAttention by default).
         add_norm: An add and norm module.
         ffn: A feedforward module.
 
@@ -212,7 +213,7 @@ class KRBlock(nn.Module):
         An instance of the `KRBlock` model.
     """
 
-    attn: nn.Module = MultiheadAttention()
+    attn: nn.Module = MultiheadFastAttention()
     add_norm: nn.Module = AddNorm(0.0)
     ffn: nn.Module = MLP([128, 64], nn.relu)
 

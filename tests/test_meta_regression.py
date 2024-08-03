@@ -55,7 +55,7 @@ def test_sptx_scale():
     s_test = jnp.linspace(0, 1.0, L_test)[None, :, None]  # [1, L_test, 1]
     f_init = random.normal(rng_init, (B, L_init, D_f))
     f_ctx = random.normal(rng_ctx, (B, L_ctx, D_f))
-    m = SPTx(dec=KRStack(blk=KRBlock(MultiheadFastAttention())))
+    m = SPTx()
     params = m.init(rng_init, s_init, f_init, s_init)
     jit_m = jit(lambda *args: m.apply(params, *args))
     jit_m(s_init, f_init, s_init)  # dummy run to compile
