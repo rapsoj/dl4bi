@@ -117,5 +117,5 @@ def test_fast_softmax_attention_scale():
         jit_fast_attn = jax.jit(fast_attn.apply)
         ctx_fast, _ = jit_fast_attn(p_fast, qs, kvs, kvs)
 
-    assert not jnp.isnan(ctx_fast_init).any(), "NaNs produced during initialization!"
-    assert not jnp.isnan(ctx_fast).any(), "NaNs produced!"
+    assert jnp.isfinite(ctx_fast_init).all(), "Non-finite values produced!"
+    assert jnp.isfinite(ctx_fast).all(), "Non-finite values produced!"

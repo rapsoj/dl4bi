@@ -1,7 +1,9 @@
+import jax
 import jax.numpy as jnp
 import optax
-from jax import random
+from jax import jit, random
 
+from dsp.core import KRBlock, KRStack, MultiheadFastAttention
 from dsp.meta_regression import (
     ANP,
     BANP,
@@ -42,6 +44,26 @@ def test_models():
         )
         K = f_mu.shape[0] // f.shape[0]
         assert f_mu.shape == (B * K, L, 1)
+
+
+def test_sptx_scale():
+    B, D_f, L_init, L_ctx, L_test = 1, 1, 3, 30000, 10000
+    rng = random.key(42)
+    rng_ctx, rng_init, rng_model = random.split(rng, 3)
+    s_init = jnp.linspace(0, 1.0, L_init)[None, :, None]  # [1, L_init, 1]
+    s_ctx = jnp.linspace(0, 1.0, L_ctx)[None, :, None]  # [1, L_ctx, 1]
+    s_test = jnp.linspace(0, 1.0, L_test)[None, :, None]  # [1, L_test, 1]
+    f_init = random.normal(rng_init, (B, L_init, D_f))
+    f_ctx = random.normal(rng_ctx, (B, L_ctx, D_f))
+    m = SPTx(dec=KRStack(blk=KRBlock(MultiheadFastAttention())))
+    params = m.init(rng_init, s_init, f_init, s_init)
+    jit_m = jit(lambda *args: m.apply(params, *args))
+    jit_m(s_init, f_init, s_init)  # dummy run to compile
+    # to view results: tensorboard --logdir /tmp/tensorboard/
+    with jax.profiler.trace("/tmp/tensorboard"):
+        f_mu, f_std, *_ = jit_m(s_ctx, f_ctx, s_test)
+    assert jnp.isfinite(f_mu).all(), "Non-finite values produced!"
+    assert jnp.isfinite(f_std).all(), "Non-finite values produced!"
 
 
 def test_context_data_leaks():
