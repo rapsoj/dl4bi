@@ -13,16 +13,24 @@ def main():
         for dir in path.parts[:-2]:
             d_tmp = d_tmp[dir]
         model = path.stem
-        if d_tmp[model] is None:
+        if not isinstance(d_tmp[model], np.ndarray):
             d_tmp[model] = np.array([])
         # stack regrets by seed for each model
         d_tmp[model] = np.hstack([d_tmp[model], np.load(path)[:, -1]])
-    with open("bayes_opt.pkl", "wb") as f:
-        pickle.dump(d, f)
+    with open("bayes_opt_summary.pkl", "wb") as f:
+        pickle.dump(summarize(d), f)
 
 
 def recursive_defaultdict():
     return defaultdict(recursive_defaultdict)
+
+
+def summarize(d):
+    if isinstance(d, defaultdict):
+        d = {k: summarize(v) for k, v in d.items()}
+    elif isinstance(d, np.ndarray):
+        return {"mean": d.mean(), "std": d.std()}
+    return d
 
 
 if __name__ == "__main__":
