@@ -9,4 +9,4 @@ valid_interval: 25000
 plot_interval: 100000
 lr_peak: 1.0e-3
 lr_pct_warmup: 0.3
-clip_max_norm: 1.0
+clip_max_norm: 2.0
