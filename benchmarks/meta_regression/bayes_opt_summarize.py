@@ -1,36 +1,37 @@
 #!/usr/bin/env python3
-import pickle
-from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 
 def main():
-    d = recursive_defaultdict()
+    dfs = []
     for path in Path("results/gp").rglob("*.npy"):
-        d_tmp = d
-        for dir in path.parts[:-2]:
-            d_tmp = d_tmp[dir]
-        model = path.stem
-        if not isinstance(d_tmp[model], np.ndarray):
-            d_tmp[model] = np.array([])
-        # stack regrets by seed for each model
-        d_tmp[model] = np.hstack([d_tmp[model], np.load(path)[:, -1]])
-    with open("bayes_opt_summary.pkl", "wb") as f:
-        pickle.dump(summarize(d), f)
-
-
-def recursive_defaultdict():
-    return defaultdict(recursive_defaultdict)
-
-
-def summarize(d):
-    if isinstance(d, defaultdict):
-        d = {k: summarize(v) for k, v in d.items()}
-    elif isinstance(d, np.ndarray):
-        return {"mean": d.mean(), "std": d.std()}
-    return d
+        record = list(path.parts)
+        record = record[record.index("gp") + 1 : -1] + [path.stem]
+        regret = np.load(path)[:, -1]  # final regret
+        df = pd.DataFrame([record] * len(regret))
+        df["regret"] = regret
+        dfs += [df]
+    df = pd.concat(dfs)
+    df.columns = ["gp", "kernel", "seed", "model", "regret"]
+    df = df.groupby(["gp", "kernel", "model"]).agg({"regret": ["mean", "std"]})
+    df.columns = ["mean", "std"]
+    df = df.apply(lambda r: f"${r['mean']:0.2f}\\pm{r['std']:.2f}$", axis=1)
+    df = df.reset_index()
+    colnames = list(df.columns)
+    colnames[-1] = "regret"
+    df.columns = colnames
+    df = df.pivot(index="model", columns=["gp", "kernel"], values="regret")
+    df = df.reset_index()
+    df_tex = df.to_latex(
+        index=False,
+        caption="1D Bayesian Optimization",
+        label="bo_1d",
+        column_format="l" + "r" * (len(df.columns) - 1),
+    )
+    print(df_tex)
 
 
 if __name__ == "__main__":
