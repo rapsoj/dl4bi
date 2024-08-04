@@ -7,6 +7,11 @@ import pandas as pd
 # NOTE: first download the results you care about from wandb,
 # e.g. name, kernel, seed, runtime, valid_loss, test_loss, etc
 # then run this script to generate latex tables summarizing it
+#
+# Examples:
+# ./wandb_csv_to_latex.py ~/scratch/gp_1d.csv -n "1D GP" -g kernel Name -p kernel
+# ./wandb_csv_to_latex.py ~/scratch/celeba.csv -n "CelebA"
+# ./wandb_csv_to_latex.py ~/scratch/mnist.csv -n "MNIST"
 
 
 def main(args):
