@@ -38,10 +38,10 @@ class PiVAE(nn.Module):
         r"""Run module forward.
 
         Args:
-            s: A location array of shape `(B,L,D)` where
+            s: A location array of shape `[B, L, D]` where
                 `B` is batch size, `L` is number of locations,
                 and `D` is the dimension of each location.
-            f: A function value array of shape `(B, L)`.
+            f: A function value array of shape `[B, L]`.
 
         Returns:
             $\hat{\mathbf{f}}_\beta=\beta^\intercal\phi(\mathbf{s})$, $\hat{f}
@@ -56,7 +56,7 @@ class PiVAE(nn.Module):
         # NOTE: When training the VAE, the betas should be fixed, i.e. you
         # do not want the input betas being updated via backprop because they
         # weren't close enough to the predicted beta_hats. To do this, you need
-        # to use the frozen beta parameters, not the traced jax arrays.
+        # to use the frozen beta parameters, not the JAX traced arrays.
         betas_fixed = self.variables["params"]["betas"]
         latents = self.encoder(betas_fixed)
         z_mu = nn.Dense(self.z_dim)(latents)

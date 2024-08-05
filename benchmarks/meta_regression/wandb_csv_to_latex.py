@@ -16,9 +16,9 @@ import pandas as pd
 
 def main(args):
     df = pd.read_csv(args.path)
-    if "loss" in args.col:
-        df["log_likelihood"] = -df[args.col]
-        args.col = "log_likelihood"
+    if "loss" in args.col:  # all losses in this project are NLL
+        df["NLL"] = df[args.col]
+        args.col = "NLL"
     funcs = ["mean", "std"]
     x = df[[*args.group_by, args.col]].groupby(args.group_by).agg(funcs)
     x.columns = funcs
