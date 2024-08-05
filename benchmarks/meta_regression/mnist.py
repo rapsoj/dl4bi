@@ -36,7 +36,7 @@ def main(cfg: DictConfig):
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
         name=cfg.get("name", run_name),
-        project="SPTx - MNIST",
+        project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
     )
     print(OmegaConf.to_yaml(cfg))

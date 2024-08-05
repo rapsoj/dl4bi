@@ -3,6 +3,7 @@ defaults:
   - model: sptx_fast
 seed: 42
 wandb: True
+project: MNIST
 train_num_steps: 100000
 valid_num_steps: # None = exhaust valid dataloader
 valid_interval: 25000

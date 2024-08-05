@@ -49,26 +49,96 @@ def sptx_paper(seeds: jax.Array, dry_run: bool = False):
     ]
     exclude_2d = ["bnp", "banp", "convcnp"]
     models_2d = [m for m in models if m not in exclude_2d]
-    gp_benchmark(seeds, 1, gp_kernels_1d, models, gp_main, overrides)
-    gp_benchmark(seeds, 1, gp_kernels_1d, models, bayes_opt_main, overrides)
-    gp_benchmark(seeds, 2, gp_kernels_2d, models_2d, gp_main, overrides)
-    img_benchmark(seeds, "configs/mnist", models_2d, mnist_main, overrides)
-    img_benchmark(seeds, "configs/celeba", models_2d, celeba_main, overrides)
+    gp_benchmark(
+        seeds,
+        1,
+        gp_kernels_1d,
+        models,
+        gp_main,
+        overrides,
+        "SPTx - Gaussian Processes",
+    )
+    gp_benchmark(
+        seeds,
+        1,
+        gp_kernels_1d,
+        models,
+        bayes_opt_main,
+        overrides,
+        "SPTx - Bayesian Optimization",
+    )
+    gp_benchmark(
+        seeds,
+        2,
+        gp_kernels_2d,
+        models_2d,
+        gp_main,
+        overrides,
+        "SPTx - Gaussian Processes",
+    )
+    img_benchmark(
+        seeds,
+        "configs/mnist",
+        models_2d,
+        mnist_main,
+        overrides,
+        "SPTx - MNIST",
+    )
+    img_benchmark(
+        seeds,
+        "configs/celeba",
+        models_2d,
+        celeba_main,
+        overrides,
+        "SPTx - CelebA",
+    )
     # TODO(danj): add MACE by Lengthscale plots
 
 
 def lore_paper(seeds: jax.Array, dry_run: bool = False):
     """Reproduces the LoRe: Local Refinement with Tranformers paper."""
+    if dry_run:
+        seeds = seeds[:2]  # no need for more than 2 runs each in dry run
     gp_kernels_1d = ["rbf", "periodic", "matern_3_2"]
     models = ["sptx_full"]
     overrides = []
     for num_blks, num_reps in [(6, 1), (3, 2), (2, 3), (1, 6)]:
         blk_str = f"model.kwargs.dec.kwargs.num_blks={num_blks}"
         rep_str = f"model.kwargs.dec.kwargs.num_reps={num_reps}"
-        overrides += [[blk_str, rep_str]]
-    gp_benchmark(seeds, 1, gp_kernels_1d, models, gp_main, overrides)
-    img_benchmark(seeds, "configs/mnist", models, mnist_main, overrides)
-    img_benchmark(seeds, "configs/celeba", models, celeba_main, overrides)
+        override = [blk_str, rep_str]
+        if dry_run:
+            override += [
+                "wandb=False",
+                "train_num_steps=100",
+                "valid_num_steps=50",
+                "plot_interval=50",
+            ]
+        overrides += [override]
+    gp_benchmark(
+        seeds,
+        1,
+        gp_kernels_1d,
+        models,
+        gp_main,
+        overrides,
+        "LoRe - Gaussian Processes",
+    )
+    img_benchmark(
+        seeds,
+        "configs/mnist",
+        models,
+        mnist_main,
+        overrides,
+        "LoRe - MNIST",
+    )
+    img_benchmark(
+        seeds,
+        "configs/celeba",
+        models,
+        celeba_main,
+        overrides,
+        "LoRe - CelebA",
+    )
     # TODO(danj): GPT-2 LLM benchmark: [(12, 1), (6, 2), (4, 3), (3, 4)]
 
 
@@ -79,6 +149,7 @@ def gp_benchmark(
     models: list[str] = ["sptx_fast"],
     main_fn: Callable = gp_main,
     overrides: list[list[str]] = [[]],
+    project: str = "",
 ):
     for kernel in kernels:
         for seed in seeds:
@@ -88,6 +159,7 @@ def gp_benchmark(
                         cfg = compose(
                             "default",
                             overrides=[
+                                f"project={project}",
                                 f"data={dim}d",
                                 f"model={model}",
                                 f"kernel={kernel}",
@@ -105,6 +177,7 @@ def img_benchmark(
     models: list[str] = ["sptx_fast"],
     main_fn: Callable = mnist_main,
     overrides: list[list[str]] = [[]],
+    project: str = "",
 ):
     for seed in seeds:
         for model in models:
@@ -113,6 +186,7 @@ def img_benchmark(
                     cfg = compose(
                         "default",
                         overrides=[
+                            f"project={project}",
                             f"model={model}",
                             f"seed={seed}",
                         ]
