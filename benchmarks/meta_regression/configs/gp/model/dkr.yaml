@@ -1,14 +1,1 @@
 cls: DKR
-kwargs:
-  num_layers: 3
-  num_repeats: 2
-  embed_s_f:
-    cls: MLP
-    kwargs:
-      dims: [256, 128, 64]
-  attn:
-    cls: MultiheadAttention
-  head:
-    cls: MLP
-    kwargs:
-      dims: [128, 2]
