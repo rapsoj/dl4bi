@@ -17,8 +17,8 @@ class DKR(nn.Module):
     """Deep Kernel Regression.
 
     Args:
-        num_layers: Number of attention layers.
-        num_repeats: Number of times to repeat each attention layer.
+        num_blks: Number of KRBlocks.
+        num_reps: Number of times to repeat each KRBlock.
         embed_s: A module that embeds the index set prior to embedding with
             function values.
         embed_f: A module that embeds function values prior to embedding with
@@ -33,8 +33,8 @@ class DKR(nn.Module):
         An instance of the `DKR` model.
     """
 
-    num_layers: int = 3
-    num_repeats: int = 2
+    num_blks: int = 4
+    num_reps: int = 2
     embed_s: Callable = lambda x: x
     embed_f: Callable = lambda x: x
     embed_s_f: nn.Module = MLP([64] * 4)
@@ -83,14 +83,13 @@ class DKR(nn.Module):
         s_f_test = stack(self.embed_s(s_test), self.embed_f(f_test))
         qvs = self.embed_s_f(s_f_test)
         kvs = self.embed_s_f(s_f_ctx)
-        for i in range(self.num_layers):
+        for i in range(self.num_blks):
             attn = self.attn.copy()
             _qvs, _kvs = qvs, kvs
-            for _ in range(self.num_repeats):
+            for j in range(self.num_reps):
                 qvs, _ = attn(qvs, kvs, kvs, valid_lens_ctx, training)
                 kvs, _ = attn(kvs, kvs, kvs, valid_lens_ctx, training)
-                qvs = add_norm(_qvs, qvs)
-                kvs = add_norm(_kvs, kvs)
+                qvs, kvs = add_norm(_qvs, qvs), add_norm(_kvs, kvs)
         f_dist = self.head(qvs, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
         f_std = jnp.exp(f_log_var / 2)
