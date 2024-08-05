@@ -1,5 +1,6 @@
 cls: NP
 kwargs:
+  min_std: 0.05
   enc_det:
     cls: MLP
     kwargs:
