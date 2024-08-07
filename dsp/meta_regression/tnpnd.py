@@ -82,6 +82,8 @@ class TNPND(nn.Module):
         f_std = self.dec_f_std(s_f_test_enc, valid_lens_test, training)
         f_std = self.proj_f_std(f_std, training).reshape(B, L_test * d_f, -1)
         f_L = jnp.tril(f_std @ f_std.transpose(0, 2, 1))
+        # WARNING: bounding here seems to cause instability when solving the
+        # system of equations in order to calculate the log pdf of the MVN
         if self.bound_std:
             # NOTE: tanh works since diag(f_std @ f_std.T) > 0
             d = jnp.arange(L_test * d_f)

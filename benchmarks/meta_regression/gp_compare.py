@@ -16,6 +16,8 @@ from dsp.core import mean_absolute_calibration_error as mace
 from dsp.core import mvn_logpdf
 from dsp.core.utils import mask_from_valid_lens
 
+# NOTE: First run gp_evaluate.py to save a *_eval.pkl file.
+
 
 def plot_diff(args):
     dir = Path(args.directory)
@@ -32,7 +34,7 @@ def plot_diff(args):
         "ls",
     ]
     for m in [m1, m2]:
-        with open(dir / f"{m}-seed-{args.seed}.pkl", "rb") as f:
+        with open(dir / f"{m}_eval.pkl", "rb") as f:
             for tpl in pickle.load(f):
                 batch, preds = tpl
                 d = dict(zip(keys, batch))
@@ -253,7 +255,7 @@ def parse_args(argv):
     parser.add_argument(
         "-d",
         "--directory",
-        default="results/1D_GP/rbf",
+        default="results/gp/1d/rbf/42",
         help="Directory with pkl files of results.",
     )
     parser.add_argument(
