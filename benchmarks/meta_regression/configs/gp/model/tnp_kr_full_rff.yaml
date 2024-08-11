@@ -1,4 +1,4 @@
-cls: SPTx
+cls: TNPKR
 kwargs:
   embed_s:
     cls: GaussianFourierEmbedding
