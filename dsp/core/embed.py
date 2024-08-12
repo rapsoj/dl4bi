@@ -106,7 +106,7 @@ class GaussianFourierEmbedding(nn.Module):
     """
 
     embed_dim: int = 256
-    std: float = 10.0
+    std: float = 4.0
 
     @nn.compact
     def __call__(self, s, training: bool = False):
