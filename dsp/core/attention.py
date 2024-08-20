@@ -190,7 +190,7 @@ def masked_softmax(scores: jax.Array, valid_lens: Optional[jax.Array] = None):
     def _sequence_mask(logits: jax.Array, valid_len: jax.Array):
         max_len = logits.shape[1]
         mask = jnp.arange(max_len)[None, :] < valid_len[:, None]
-        return jnp.where(mask, logits, -1e6)
+        return jnp.where(mask, logits, -jnp.inf)
 
     B, Q, K = scores.shape
     if valid_lens.ndim == 1:

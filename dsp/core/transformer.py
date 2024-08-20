@@ -204,9 +204,11 @@ class TransformerDecoder(nn.Module):
 class KRBlock(nn.Module):
     """A Kernel Regression Block.
 
+    This uses pre-normalization as specified in https://arxiv.org/pdf/2002.04745.
+
     Args:
         attn: An attention module (MultiheadFastAttention by default).
-        add_norm: An add and norm module.
+        norm: A normalization module (LayerNorm by default).
         ffn: A feedforward module.
 
     Returns:
@@ -214,7 +216,7 @@ class KRBlock(nn.Module):
     """
 
     attn: nn.Module = MultiheadFastAttention()
-    add_norm: nn.Module = AddNorm(0.0)
+    norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([128, 64], nn.relu)
 
     @nn.compact
@@ -225,11 +227,13 @@ class KRBlock(nn.Module):
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
-        qvs2, _ = self.attn(qvs, kvs, kvs, valid_lens)
-        kvs2, _ = self.attn(kvs, kvs, kvs, valid_lens)
-        qvs3, kvs3 = self.add_norm(qvs, qvs2), self.add_norm(kvs, kvs2)
-        qvs4, kvs4 = self.ffn(qvs3), self.ffn(kvs3)
-        return self.add_norm(qvs3, qvs4), self.add_norm(kvs3, kvs4)
+        qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
+        qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, valid_lens, training)
+        kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, valid_lens, training)
+        qvs_3, kvs_3 = qvs + qvs_2, kvs + kvs_2
+        qvs_4, kvs_4 = self.norm(qvs_3), self.norm(kvs_3)
+        qvs_5, kvs_5 = self.ffn(qvs_4, training), self.ffn(kvs_4, training)
+        return qvs_3 + qvs_5, kvs_3 + kvs_5
 
 
 class KRStack(nn.Module):
@@ -238,11 +242,7 @@ class KRStack(nn.Module):
     Args:
         num_blks: Number of blocks to use.
         num_reps: Number of times to repeat each block.
-        resid_blk: Add a residual connection between blocks.
-        resid_rep: Add a residual connection between block repeats. This
-            becomes more useful as fewer blocks are used.
         blk: An instance of the block module.
-        add_norm: An `AddNorm` module applied between blocks.
 
     Returns:
         An instance of a `KRStack`.
@@ -250,10 +250,7 @@ class KRStack(nn.Module):
 
     num_blks: int = 6
     num_reps: int = 1
-    resid_blk: bool = False
-    resid_rep: bool = False
     blk: nn.Module = KRBlock()
-    add_norm: nn.Module = AddNorm(0.0)
 
     @nn.compact
     def __call__(
@@ -263,18 +260,8 @@ class KRStack(nn.Module):
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
-        for i in range(self.num_blks):
+        for _ in range(self.num_blks):
             blk = self.blk.copy()
-            if self.resid_blk:
-                blk_qvs, blk_kvs = qvs, kvs
-            for j in range(self.num_reps):
-                if self.resid_rep:
-                    rep_qvs, rep_kvs = qvs, kvs
+            for _ in range(self.num_reps):
                 qvs, kvs = blk(qvs, kvs, valid_lens, training)
-                if self.resid_rep and (j + 1) != self.num_reps:
-                    qvs = self.add_norm(rep_qvs, qvs)
-                    kvs = self.add_norm(rep_kvs, kvs)
-            if self.resid_blk and i + 1 != self.num_blks:
-                qvs = self.add_norm(blk_qvs, qvs)
-                kvs = self.add_norm(blk_kvs, kvs)
         return qvs, kvs
