@@ -21,8 +21,8 @@ class TNPD(nn.Module):
     """
 
     embed_s_f: nn.Module = MLP([64] * 4)
-    enc: nn.Module = TransformerEncoder(num_blks=6, d_ffn=128)
-    head: nn.Module = MLP([128, 2])
+    enc: nn.Module = TransformerEncoder()
+    head: nn.Module = MLP([128, 2], nn.relu)
     min_std: float = 0.0
 
     @nn.compact

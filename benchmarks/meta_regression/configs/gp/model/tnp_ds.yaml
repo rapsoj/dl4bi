@@ -6,11 +6,6 @@ kwargs:
       dims: [64, 64, 64, 64]
   enc:
     cls: KRStack
-    kwargs:
-      attn:
-        cls: MultiheadAttention
-      num_blks: 6
-      d_ffn: 128
   head:
     cls: MLP
     kwargs:

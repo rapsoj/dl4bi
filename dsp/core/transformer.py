@@ -2,7 +2,6 @@
 Transformer architecture inspired by [d2l](https://d2l.ai/chapter_attention-mechanisms-and-transformers/transformer.html)'s version.
 """
 
-from collections.abc import Callable
 from typing import Optional
 
 import flax.linen as nn
@@ -13,41 +12,26 @@ from .fast_attention import MultiheadFastAttention
 from .mlp import MLP
 
 
-class AddNorm(nn.Module):
-    """Performs add and norm from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
-
-    Args:
-        p_dropout: Dropout rate for input `y`.
-
-    Returns:
-        Add-and-normed input.
-    """
-
-    p_dropout: float = 0.0
-
-    @nn.compact
-    def __call__(self, x: jax.Array, y: jax.Array, training: bool = False):
-        y = nn.Dropout(self.p_dropout, deterministic=not training)(y)
-        return nn.LayerNorm()(x + y)
-
-
 class TransformerEncoderBlock(nn.Module):
     """A single encoder block from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
+    .. note::
+        This formulation uses [pre-normalization](https://arxiv.org/pdf/2002.04745).
+
     Args:
-        attn: Attention module, defaults to `MultiheadAttention`.
-        p_dropout: Dropout rate `AddNorm`s.
-        d_ffn: Optional dim for feed forward, defaults to twice the last
-            dimension of input `x`.
+        attn: An attention module.
+        norm: A normalization module.
+        ffn: A feedforward network module.
+        p_dropout: Dropout rate for residual connections.
 
     Returns:
         Input transformed by a single self-attention encoder block.
     """
 
     attn: nn.Module = MultiheadAttention()
+    norm: nn.Module = nn.LayerNorm()
+    ffn: nn.Module = MLP([128, 64], nn.relu)
     p_dropout: float = 0.0
-    d_ffn: Optional[int] = None
-    act_fn: Callable = nn.relu
 
     @nn.compact
     def __call__(
@@ -57,33 +41,33 @@ class TransformerEncoderBlock(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        d = x.shape[-1]
-        d_ffn = self.d_ffn or 2 * d
-        ctx, attn = self.attn(x, x, x, valid_lens, training, **kwargs)
-        y = AddNorm(self.p_dropout)(x, ctx, training)
-        ctx = nn.Sequential([nn.Dense(d_ffn), self.act_fn, nn.Dense(d)])(y)
-        return AddNorm(self.p_dropout)(y, ctx, training), attn
+        drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        x_1 = self.norm(x)
+        x_2, attn = self.attn(x_1, x_1, x_1, valid_lens, training, **kwargs)
+        x_3 = x + drop(x_2)
+        x_4 = self.norm(x_3)
+        x_5 = self.ffn(x_4)
+        return x_3 + drop(x_5), attn
 
 
 class TransformerEncoder(nn.Module):
     """A transformer encoder inspired by ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
+    .. note::
+        This formulation uses [pre-normalization](https://arxiv.org/pdf/2002.04745).
+
     Args:
-        attn: Attention module to use.
-        num_blks: Number of encoder blocks.
-        p_dropout: Dropout rate `AddNorm`s.
-        d_ffn: Optional dim for feed forward, defaults to twice the last
-            dimension of input `x`.
+        num_blks: The number of blocks to use.
+        num_reps: Number of times to repeat each block.
+        blk: An encoder block.
 
     Returns:
         Input transformed by the encoder.
     """
 
-    attn: nn.Module = MultiheadAttention()
-    num_blks: int = 3
-    p_dropout: float = 0.0
-    d_ffn: Optional[int] = None
-    act_fn: Callable = nn.relu
+    num_blks: int = 6
+    num_reps: int = 1
+    blk: nn.Module = TransformerEncoderBlock()
 
     @nn.compact
     def __call__(
@@ -93,41 +77,38 @@ class TransformerEncoder(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        d_ffn = self.d_ffn or 2 * x.shape[-1]
-        x, _ = TransformerEncoderBlock(self.attn, self.p_dropout, d_ffn, self.act_fn)(
-            x, valid_lens, training, **kwargs
-        )
-        for i in range(1, self.num_blks):
-            x, _ = TransformerEncoderBlock(
-                self.attn.copy(name=f"attn_{i}"),
-                self.p_dropout,
-                d_ffn,
-                self.act_fn,
-            )(x, valid_lens, training, **kwargs)
-        return x
+        for _ in range(self.num_blks):
+            blk = self.blk.copy()
+            for _ in range(self.num_reps):
+                x, _ = blk(x, valid_lens, training, **kwargs)
+        return nn.LayerNorm()(x)
 
 
 class TransformerDecoderBlock(nn.Module):
     """A single decoder block from ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
+
+
+    .. note::
+        This formulation uses [pre-normalization](https://arxiv.org/pdf/2002.04745).
 
     .. note::
         This doesn't incorporate any logic for generative decoding one step at
         a time.
 
     Args:
-        attn: Attention module to use.
-        p_dropout: Dropout rate `AddNorm`s.
-        d_ffn: Optional dim for feed forward, defaults to twice the last
-            dimension of input `x_dec`.
+        attn: An attention module.
+        norm: A normalization module.
+        ffn: A feedforward network module.
+        p_dropout: Dropout rate for residual connections.
 
     Returns:
         Input transformed by a single decoder block.
     """
 
     attn: nn.Module = MultiheadAttention()
+    norm: nn.Module = nn.LayerNorm()
+    ffn: nn.Module = MLP([128, 64], nn.relu)
     p_dropout: float = 0.0
-    d_ffn: Optional[int] = None
-    act_fn: Callable = nn.relu
 
     @nn.compact
     def __call__(
@@ -139,42 +120,51 @@ class TransformerDecoderBlock(nn.Module):
         training=False,
         **kwargs,
     ):
-        d = x_dec.shape[-1]
-        d_ffn = self.d_ffn or 2 * d
-        x_dec_2, attn_dec = self.attn(
-            x_dec, x_dec, x_dec, valid_lens_dec, training, **kwargs
+        drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        x_dec_1 = self.norm(x_dec)
+        x_dec_2, self_attn = self.attn(
+            x_dec_1,
+            x_dec_1,
+            x_dec_1,
+            valid_lens_dec,
+            training,
+            **kwargs,
         )
-        y_dec = AddNorm(self.p_dropout)(x_dec, x_dec_2, training)
-        y_dec_enc, attn_enc = self.attn.copy(name="enc_attn")(
-            y_dec, x_enc, x_enc, valid_lens_enc, training, **kwargs
+        x_dec_3 = x_dec + drop(x_dec_2)
+        x_dec_4 = self.norm(x_dec_3)
+        x_dec_5, cross_attn = self.attn.copy(name="cross_attn")(
+            x_dec_4,
+            x_enc,
+            x_enc,
+            valid_lens_enc,
+            training,
+            **kwargs,
         )
-        z_dec_enc = AddNorm(self.p_dropout)(y_dec, y_dec_enc, training)
-        z_dec_enc_2 = nn.Sequential([nn.Dense(d_ffn), self.act_fn, nn.Dense(d)])(
-            z_dec_enc
-        )
-        out = AddNorm(self.p_dropout)(z_dec_enc, z_dec_enc_2, training)
-        return out, attn_dec, attn_enc
+        x_dec_6 = x_dec_3 + drop(x_dec_5)
+        x_dec_7 = self.ffn(x_dec_6)
+        x_dec_8 = x_dec_6 + drop(x_dec_7)
+        return x_dec_8, self_attn, cross_attn
 
 
 class TransformerDecoder(nn.Module):
     """A transformer decoder inspired by ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762).
 
+    .. note::
+        This formulation uses [pre-normalization](https://arxiv.org/pdf/2002.04745).
+
     Args:
-        attn: Attention module to use.
-        num_blks: Number of encoder blocks.
-        p_dropout: Dropout rate `AddNorm`s.
-        d_ffn: Optional dim for feed forward, defaults to twice the last
-            dimension of input `x_dec`.
+        num_blks: Number of decoder blocks.
+        num_reps: Number of times to repeat each block.
+        blk: A decoder block.
 
     Returns:
-        Input transformed by the encoder.
+        Input transformed by the decoder.
     """
 
-    attn: nn.Module = MultiheadAttention()
-    num_blks: int = 3
-    p_dropout: float = 0.0
-    d_ffn: Optional[int] = None
-    act_fn: Callable = nn.relu
+    num_blks: int = 6
+    num_reps: int = 1
+    blk: nn.Module = TransformerDecoderBlock()
+    ffn: nn.Module = MLP([128, 64], nn.relu)
 
     @nn.compact
     def __call__(
@@ -186,30 +176,31 @@ class TransformerDecoder(nn.Module):
         training=False,
         **kwargs,
     ):
-        d = x_dec.shape[-1]
-        d_ffn = self.d_ffn or 2 * d
-        x_dec, _, _ = TransformerDecoderBlock(
-            self.attn, self.p_dropout, d_ffn, self.act_fn
-        )(x_dec, x_enc, valid_lens_dec, valid_lens_enc, training, **kwargs)
-        for i in range(1, self.num_blks):
-            x_dec, _, _ = TransformerDecoderBlock(
-                self.attn.copy(name=f"attn_{i}"),
-                self.p_dropout,
-                d_ffn,
-                self.act_fn,
-            )(x_dec, x_enc, valid_lens_dec, valid_lens_enc, training, **kwargs)
-        return nn.Dense(d)(x_dec)
+        for _ in range(self.num_blks):
+            blk = self.blk.copy()
+            for _ in range(self.num_reps):
+                x_dec, _, _ = blk(
+                    x_dec,
+                    x_enc,
+                    valid_lens_dec,
+                    valid_lens_enc,
+                    training,
+                    **kwargs,
+                )
+        return nn.LayerNorm()(x_dec)
 
 
 class KRBlock(nn.Module):
     """A Kernel Regression Block.
 
-    This uses pre-normalization as specified in https://arxiv.org/pdf/2002.04745.
+    .. note::
+        This formulation uses [pre-normalization](https://arxiv.org/pdf/2002.04745).
 
     Args:
-        attn: An attention module (MultiheadFastAttention by default).
-        norm: A normalization module (LayerNorm by default).
+        attn: An attention module.
+        norm: A normalization module.
         ffn: A feedforward module.
+        p_dropout: Dropout rate for residual connections.
 
     Returns:
         An instance of the `KRBlock` model.
@@ -218,6 +209,7 @@ class KRBlock(nn.Module):
     attn: nn.Module = MultiheadFastAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([128, 64], nn.relu)
+    p_dropout: float = 0.0
 
     @nn.compact
     def __call__(
@@ -227,13 +219,14 @@ class KRBlock(nn.Module):
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
+        drop = nn.Dropout(self.p_dropout, deterministic=not training)
         qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
         qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, valid_lens, training)
         kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, valid_lens, training)
-        qvs_3, kvs_3 = qvs + qvs_2, kvs + kvs_2
+        qvs_3, kvs_3 = qvs + drop(qvs_2), kvs + drop(kvs_2)
         qvs_4, kvs_4 = self.norm(qvs_3), self.norm(kvs_3)
         qvs_5, kvs_5 = self.ffn(qvs_4, training), self.ffn(kvs_4, training)
-        return qvs_3 + qvs_5, kvs_3 + kvs_5
+        return qvs_3 + drop(qvs_5), kvs_3 + drop(kvs_5)
 
 
 class KRStack(nn.Module):

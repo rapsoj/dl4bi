@@ -9,8 +9,6 @@ kwargs:
     kwargs:
       attn:
         cls: MultiheadFastAttention
-      num_blks: 6
-      d_ffn: 128
   head:
     cls: MLP
     kwargs:

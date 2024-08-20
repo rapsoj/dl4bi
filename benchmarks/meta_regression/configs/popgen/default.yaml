@@ -10,5 +10,5 @@ valid_interval: 50000
 plot_interval: 100000
 batch_size: 16
 lr_peak: 1.0e-3
-lr_pct_warmup: 0.3
-clip_max_norm: 2.0
+lr_pct_warmup: 0.0
+clip_max_norm: 5.0

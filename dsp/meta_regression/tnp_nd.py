@@ -29,9 +29,9 @@ class TNPND(nn.Module):
     """
 
     embed_s_f: nn.Module = MLP([64] * 4)
-    enc: nn.Module = TransformerEncoder(num_blks=6, d_ffn=128)
+    enc: nn.Module = TransformerEncoder()
     dec_f_mu: nn.Module = MLP([128, 1])
-    dec_f_std: nn.Module = TransformerEncoder(num_blks=2, d_ffn=128)
+    dec_f_std: nn.Module = TransformerEncoder()
     proj_f_std: nn.Module = MLP([128] * 3 + [20])
     min_std: float = 0.0
 

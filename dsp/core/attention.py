@@ -108,7 +108,7 @@ class MultiheadAttention(nn.Module):
 
     Args:
         num_heads: Number of heads for attention module.
-        p_dropout: A dropout rate.
+        p_dropout: A dropout rate for attention.
 
     Returns:
         A `MultiheadAttention` module.

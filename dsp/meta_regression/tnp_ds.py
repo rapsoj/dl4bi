@@ -8,7 +8,7 @@ from ..core import MLP, KRStack
 
 
 class TNPDS(nn.Module):
-    """A Transformer Neural Process - Diagonal (TNP-D) Simplified.
+    """A Transformer Neural Process - Diagonal Simplified (TNP-DS).
 
     Args:
         embed_s_f: A module or combining embedded locations and function values.
@@ -20,7 +20,7 @@ class TNPDS(nn.Module):
     """
 
     embed_s_f: nn.Module = MLP([64] * 4)
-    enc: nn.Module = KRStack(num_blks=6)
+    enc: nn.Module = KRStack()
     head: nn.Module = MLP([128] * 2 + [2])
 
     @nn.compact

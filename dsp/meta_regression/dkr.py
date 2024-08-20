@@ -7,10 +7,7 @@ import jax.numpy as jnp
 
 from dsp.core.attention import MultiheadAttention
 
-from ..core import (
-    MLP,
-    AddNorm,
-)
+from ..core import MLP
 
 
 class DKR(nn.Module):
@@ -39,6 +36,7 @@ class DKR(nn.Module):
     embed_f: Callable = lambda x: x
     embed_s_f: nn.Module = MLP([64] * 4)
     attn: nn.Module = MultiheadAttention()
+    norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([128, 2])
     min_std: float = 0.0
 
@@ -76,7 +74,6 @@ class DKR(nn.Module):
         Returns:
             $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
-        add_norm = AddNorm(0.0)
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         s_f_ctx = stack(self.embed_s(s_ctx), self.embed_f(f_ctx))
@@ -89,7 +86,7 @@ class DKR(nn.Module):
             for j in range(self.num_reps):
                 qvs, _ = attn(qvs, kvs, kvs, valid_lens_ctx, training)
                 kvs, _ = attn(kvs, kvs, kvs, valid_lens_ctx, training)
-                qvs, kvs = add_norm(_qvs, qvs), add_norm(_kvs, kvs)
+                qvs, kvs = self.norm(_qvs + qvs), self.norm(_kvs + kvs)
         f_dist = self.head(qvs, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
         f_std = jnp.exp(f_log_var / 2)
