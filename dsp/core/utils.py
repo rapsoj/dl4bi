@@ -27,14 +27,6 @@ def mask(x: jax.Array, valid_lens: jax.Array, fill=-jnp.inf):
     return jnp.where(m, x, fill).reshape(B, Q, K)
 
 
-@jit
-def causal_mask(x: jax.Array):
-    """A simple causal mask."""
-    B, L, L = x.shape
-    m = jnp.tri(L)
-    return jnp.where(m, x, -jnp.inf)
-
-
 def mask_from_valid_lens(max_len: int, valid_lens: jax.Array):
     """Return a boolean mask using `valid_lens`.
 

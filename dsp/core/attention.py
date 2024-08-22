@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 
 from .mlp import MLP
-from .utils import causal_mask, mask
+from .utils import mask
 
 
 class DotScorer(nn.Module):
@@ -56,8 +56,6 @@ class Attention(nn.Module):
     Args:
         scorer: A module used to provide similarity scores between queries and keys.
         p_dropout: A dropout rate.
-        is_causal: A boolean indicating whether attention is causal. If true,
-            `valid_lens` is ignored and a causal mask is applied.
 
     Returns:
         An `Attention` module.
@@ -74,7 +72,6 @@ class Attention(nn.Module):
 
     scorer: nn.Module = DotScorer()
     p_dropout: float = 0.0
-    is_causal: bool = False
 
     @nn.compact
     def __call__(
@@ -101,9 +98,7 @@ class Attention(nn.Module):
         """
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         scores = self.scorer(qs, ks)
-        if self.is_causal:
-            scores = causal_mask(scores)
-        elif valid_lens is not None:
+        if valid_lens is not None:
             scores = mask(scores, valid_lens)
         attn = nn.softmax(scores, axis=-1)
         ctx = drop(attn) @ vs
@@ -116,8 +111,6 @@ class MultiheadAttention(nn.Module):
     Args:
         num_heads: Number of heads for attention module.
         p_dropout: A dropout rate for attention.
-        is_causal: A boolean indicating whether attention is causal. If true,
-            `valid_lens` is ignored and a causal mask is applied.
 
     Returns:
         A `MultiheadAttention` module.
@@ -139,7 +132,6 @@ class MultiheadAttention(nn.Module):
     scorer: nn.Module = DotScorer()
     num_heads: int = 4
     p_dropout: float = 0.0
-    is_causal: bool = False
 
     @nn.compact
     def __call__(
@@ -148,7 +140,7 @@ class MultiheadAttention(nn.Module):
         ks: jax.Array,  # [B, K, D_QK]
         vs: jax.Array,  # [B, V, D_V]
         valid_lens: Optional[jax.Array] = None,  # [B] or [B, K]
-        training=False,
+        training: bool = False,
         **kwargs,
     ):
         r"""Performs forward pass of network.
@@ -174,7 +166,7 @@ class MultiheadAttention(nn.Module):
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
         # [B * H, Q, D_V_H], [B * H, Q, K]
-        ctx, attn = Attention(self.scorer, self.p_dropout, self.is_causal)(
+        ctx, attn = Attention(self.scorer, self.p_dropout)(
             qs, ks, vs, valid_lens, training
         )
         # [B * H, Q, D_V_H] -> [B, Q, D_V]

@@ -58,7 +58,6 @@ class TransformerEncoder(nn.Module):
 
     Args:
         num_blks: The number of blocks to use.
-        num_reps: Number of times to repeat each block.
         blk: An encoder block.
 
     Returns:
@@ -66,7 +65,6 @@ class TransformerEncoder(nn.Module):
     """
 
     num_blks: int = 6
-    num_reps: int = 1
     blk: nn.Module = TransformerEncoderBlock()
 
     @nn.compact
@@ -78,9 +76,7 @@ class TransformerEncoder(nn.Module):
         **kwargs,
     ):
         for _ in range(self.num_blks):
-            blk = self.blk.copy()
-            for _ in range(self.num_reps):
-                x, _ = blk(x, valid_lens, training, **kwargs)
+            x, _ = self.blk.copy()(x, valid_lens, training, **kwargs)
         return nn.LayerNorm()(x)
 
 
@@ -154,7 +150,6 @@ class TransformerDecoder(nn.Module):
 
     Args:
         num_blks: Number of decoder blocks.
-        num_reps: Number of times to repeat each block.
         blk: A decoder block.
 
     Returns:
@@ -162,7 +157,6 @@ class TransformerDecoder(nn.Module):
     """
 
     num_blks: int = 6
-    num_reps: int = 1
     blk: nn.Module = TransformerDecoderBlock()
     ffn: nn.Module = MLP([128, 64], nn.relu)
 
@@ -177,16 +171,14 @@ class TransformerDecoder(nn.Module):
         **kwargs,
     ):
         for _ in range(self.num_blks):
-            blk = self.blk.copy()
-            for _ in range(self.num_reps):
-                x_dec, _, _ = blk(
-                    x_dec,
-                    x_enc,
-                    valid_lens_dec,
-                    valid_lens_enc,
-                    training,
-                    **kwargs,
-                )
+            x_dec, _, _ = self.blk.copy()(
+                x_dec,
+                x_enc,
+                valid_lens_dec,
+                valid_lens_enc,
+                training,
+                **kwargs,
+            )
         return nn.LayerNorm()(x_dec)
 
 
