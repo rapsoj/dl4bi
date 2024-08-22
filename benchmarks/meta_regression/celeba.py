@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import os
 import shutil
 from functools import partial
 from pathlib import Path
@@ -28,9 +27,6 @@ from dsp.meta_regression.train_utils import (
     save_ckpt,
     train,
 )
-
-# https://jax.readthedocs.io/en/latest/gpu_performance_tips.html#code-generation-flags
-os.environ["XLA_FLAGS"] = "--xla_gpu_triton_gemm_any=True"
 
 
 @hydra.main("configs/celeba", config_name="default", version_base=None)
