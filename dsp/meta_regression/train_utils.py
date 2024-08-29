@@ -2,6 +2,7 @@ import pickle
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Optional, Union
 
@@ -312,7 +313,7 @@ def custom_cosine_annealing_lr(num_steps: int, peak_lr: float):
     return optax.join_schedules([q_sched, q_sched, h_sched], boundaries)
 
 
-@jit
+@partial(jit, donate_argnames=("state"))
 def vanilla_train_step(
     rng: jax.Array,
     state: TrainState,
@@ -353,7 +354,7 @@ def vanilla_train_step(
     return state.apply_gradients(grads=grads), nll
 
 
-@jit
+@partial(jit, donate_argnames=("state"))
 def bootstrap_train_step(
     rng: jax.Array,
     state: TrainState,
@@ -402,7 +403,7 @@ def bootstrap_train_step(
     return state.apply_gradients(grads=grads), nll
 
 
-@jit
+@partial(jit, donate_argnames=("state"))
 def tril_cov_train_step(
     rng: jax.Array,
     state: TrainState,
@@ -439,7 +440,7 @@ def tril_cov_train_step(
             valid_lens_ctx,
             valid_lens_test,
             training=True,
-            rngs={"dropout": rng_dropout, "extra": rng_dropout},
+            rngs={"dropout": rng_dropout, "extra": rng_extra},
         )
         B = f_test.shape[0]
         f_test_flat, f_mu_flat = f_test.reshape(B, -1), f_mu.reshape(B, -1)
@@ -451,12 +452,12 @@ def tril_cov_train_step(
     return state.apply_gradients(grads=grads), nll
 
 
-@jit
+@partial(jit, donate_argnames=("state"))
 def fast_attention_train_step(
     rng: jax.Array,
     state: TrainState,
     batch: tuple,
-    rng_redraw_random_features: Optional[jax.Array] = None,
+    redraw_random_features: bool = False,
     **kwargs,
 ):
     """Training step for meta regression with diagonal covariances.
@@ -487,7 +488,7 @@ def fast_attention_train_step(
             valid_lens_ctx,
             valid_lens_test,
             training=True,
-            rng_redraw_random_features=rng_redraw_random_features,
+            redraw_random_features=redraw_random_features,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
             mutable=["projections"],
         )
@@ -499,7 +500,7 @@ def fast_attention_train_step(
     return state.apply_gradients(grads=grads, kwargs=updated_state), nll
 
 
-@jit
+@partial(jit, donate_argnames=("state"))
 def npf_elbo_train_step(
     rng: jax.Array,
     state: TrainState,
