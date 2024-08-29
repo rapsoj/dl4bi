@@ -7,8 +7,15 @@ kwargs:
   enc:
     cls: KRStack
     kwargs:
-      attn:
-        cls: MultiheadFastAttention
+      num_blks: 6
+      num_reps: 1
+      blk:
+        cls: KRBlock
+        kwargs:
+          attn:
+            cls: MultiheadAttention
+            kwargs:
+              cls: FastAttention
   head:
     cls: MLP
     kwargs:

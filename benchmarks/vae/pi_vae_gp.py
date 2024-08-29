@@ -5,12 +5,13 @@ import sys
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
+from flax.training.train_state import TrainState
 from jax import jit, random, value_and_grad
 from sps import kernels
 from sps.gp import GP
 from tqdm import tqdm
 
-from dsp.core import MLP, TrainState
+from dsp.core import MLP
 from dsp.vae import Phi, PiVAE
 
 
@@ -18,7 +19,7 @@ def main(kernel_name: str, num_batches: int):
     rbf_dim, hidden_dim, beta_dim = 32, 128, 128
     z_dim, loc_dims = 32, (32, 1)
     key = random.key(42)
-    rng_data, rng_params, rng_extra, rng_train, rng_sample = random.split(key, 5)
+    rng_data, rng_params, rng_extra, rng_train = random.split(key, 4)
     kernel = getattr(kernels, kernel_name)
     loader = dataloader(rng_data, GP(kernel), loc_dims)
     s, f = next(loader)

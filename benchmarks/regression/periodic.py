@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
+from flax.training.train_state import TrainState
 from jax import jit, random
 from tqdm import tqdm
 
@@ -15,7 +16,6 @@ from dsp.core import (
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
     NeRFEmbedding,
-    TrainState,
 )
 from dsp.regression import KernelRegressor
 

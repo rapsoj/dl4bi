@@ -19,7 +19,9 @@ kwargs:
         cls: KRBlock
         kwargs:
           attn:
-            cls: MultiheadFastAttention
+            cls: MultiheadAttention
+            kwargs:
+              cls: FastAttention
   head:
     cls: MLP
     kwargs:
