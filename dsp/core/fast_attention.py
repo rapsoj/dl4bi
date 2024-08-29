@@ -192,7 +192,7 @@ class FastAttention(nn.Module):
             `ctx` and `attn`, the updated values and None, respectively,
             since the attention matrix is never materialized in FAVOR+.
         """
-        B, K, D_QK = ks.shape
+        D_QK = ks.shape[2]
         gen_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_QK)
         init_proj = lambda: gen_proj(self.make_rng("params"))
         proj = self.variable("projections", "random", init_proj)
@@ -251,30 +251,28 @@ class MultiheadFastAttention(nn.Module):
     r"""Multihead implementation of [FAVOR+](https://arxiv.org/abs/2009.14794).
 
     Args:
+        proj_qs: A module for projecting queries.
+        proj_ks: A module for projecting keys.
+        proj_vs: A module for projecting values.
+        proj_out: A module for projecting output.
+        build_phi: A function for buliding attention kernel.
         num_heads: Number of heads for attention module.
-        p_dropout: A dropout rate.
+        num_ortho_feautres: Number of orthogonal features to use for
+            fast Performer attention.
+        p_dropout: A dropout rate for attention.
 
     Returns:
         A `MultiheadFastSoftmaxAttention` module.
-
-    .. note:: This assumes all queries, keys, and values are already embedded, i.e.
-        $$
-        \begin{aligned}
-            \mathbf{Q}&=\mathbf{W}^Q\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
-            \mathbf{K}&=\mathbf{W}^K\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
-            \mathbf{V}&=\mathbf{W}^V\mathbf{Y}\in\mathbb{R}^{N\times D_V} \\\\
-        \end{aligned}
-        $$
     """
 
     proj_qs: nn.Module = MLP([64])
     proj_ks: nn.Module = MLP([64])
     proj_vs: nn.Module = MLP([64])
     proj_out: nn.Module = MLP([64])
-    p_dropout: float = 0.0
     build_phi: Callable = build_stable_positive_softmax_phi
     num_heads: int = 4
     num_ortho_features: int = 64
+    p_dropout: float = 0.0
 
     @nn.compact
     def __call__(

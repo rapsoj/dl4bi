@@ -33,6 +33,7 @@ from .fast_attention import (
     build_simple_positive_softmax_phi,
     build_stable_positive_softmax_phi,
 )
+from .fused_attention import MultiheadFusedAttention
 from .metrics import (
     l2_dist_sq,
     mean_absolute_calibration_error,

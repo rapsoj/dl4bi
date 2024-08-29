@@ -109,20 +109,16 @@ class MultiheadAttention(nn.Module):
     r"""Performs multihead (masked) query-key-value attention with dropout.
 
     Args:
+        proj_qs: A module for projecting queries.
+        proj_ks: A module for projecting keys.
+        proj_vs: A module for projecting values.
+        proj_out: A module for projecting output.
+        scorer: A module used for scoring attention.
         num_heads: Number of heads for attention module.
         p_dropout: A dropout rate for attention.
 
     Returns:
         A `MultiheadAttention` module.
-
-    .. note:: This assumes all queries, keys, and values are already embedded, i.e.
-        $$
-        \begin{aligned}
-            \mathbf{Q}&=\mathbf{W}^Q\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
-            \mathbf{K}&=\mathbf{W}^K\mathbf{X}\in\mathbb{R}^{N\times D_{Q,K}} \\\\
-            \mathbf{V}&=\mathbf{W}^V\mathbf{Y}\in\mathbb{R}^{N\times D_V} \\\\
-        \end{aligned}
-        $$
     """
 
     proj_qs: nn.Module = MLP([64])
