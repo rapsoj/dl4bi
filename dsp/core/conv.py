@@ -265,7 +265,7 @@ class ConvCNPNet(nn.Module):
         training: bool = False,
     ):
         for _ in range(self.num_blks):
-            x = ConvCNPBlock(self.dim, self.kernel, dtype=self.dtype)(x, training)
+            x = ConvCNPBlock(self.r_dim, self.kernel, dtype=self.dtype)(x, training)
         return x
 
 
