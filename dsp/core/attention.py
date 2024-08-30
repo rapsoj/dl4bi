@@ -359,7 +359,7 @@ class FusedAttention(nn.Module):
 
     .. warning::
         As of 2024-08-29, this doesn't seem to respect the `valid_lens`
-        argument.
+        argument. See issue: https://github.com/google/jax/issues/23349.
 
     .. note::
         As of 2024-08-29, this requires `jax-nightly` and an NVIDIA GPU of
