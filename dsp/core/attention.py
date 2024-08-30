@@ -173,7 +173,7 @@ class FastAttention(nn.Module):
         qs: jax.Array,  # [B, Q, D_QK]
         ks: jax.Array,  # [B, K, D_QK]
         vs: jax.Array,  # [B, K, D_V]
-        valid_lens: Optional[jax.Array] = None,  # [B] or [B, Q]
+        valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         redraw_random_features: bool = False,
     ):
@@ -317,7 +317,7 @@ class Attention(nn.Module):
         qs: jax.Array,  # [B, Q, D_Q]
         ks: jax.Array,  # [B, K, D_K]
         vs: jax.Array,  # [B, V, D_V]
-        valid_lens: Optional[jax.Array] = None,  # [B] or [B, Q]
+        valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         **kwargs,
     ):
@@ -371,10 +371,10 @@ class FusedAttention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,
-        ks: jax.Array,
-        vs: jax.Array,
-        valid_lens: jax.Array,
+        qs: jax.Array,  # [B, Q, D_QK]
+        ks: jax.Array,  # [B, K, D_QK]
+        vs: jax.Array,  # [B, K, D_V]
+        valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         **kwargs,
     ):

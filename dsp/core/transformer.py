@@ -7,7 +7,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 
-from .attention import FastAttention, MultiheadAttention
+from .attention import FastAttention, FusedAttention, MultiheadAttention
 from .mlp import MLP
 
 
@@ -254,3 +254,13 @@ class KRStack(nn.Module):
             for _ in range(self.num_reps):
                 qvs, kvs = blk(qvs, kvs, valid_lens, training)
         return self.norm(qvs), self.norm(kvs)
+
+    @classmethod
+    def build_fast(cls, num_blks: int = 6, num_reps: int = 1):
+        blk = KRBlock(MultiheadAttention(FastAttention()))
+        return cls(blk, nn.LayerNorm(), num_blks, num_reps)
+
+    @classmethod
+    def build_fused(cls, num_blks: int = 6, num_reps: int = 1):
+        blk = KRBlock(MultiheadAttention(FusedAttention()))
+        return cls(blk, nn.LayerNorm(), num_blks, num_reps)

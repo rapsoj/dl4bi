@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import optax
 from jax import jit, random
 
+from dsp.core import KRStack
 from dsp.meta_regression import (
     ANP,
     BANP,
@@ -71,13 +72,27 @@ def test_context_data_leaks():
     rng_data, rng_params, rng_dropout, rng_extra = random.split(key, 4)
     s = jnp.linspace(0, 1.0, L)
     s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, S, D_s=1]
-    valid_lens_ctx = jnp.array([N] * B)
-    valid_lens_test = jnp.array([L] * B)
+    valid_lens_ctx = jnp.array([N] * B, dtype=jnp.int32)
+    valid_lens_test = jnp.array([L] * B, dtype=jnp.int32)
     f = 10 * random.normal(rng_data, s.shape)
     # set second half to 0s (different from using half the array because of attn)
     s2 = s.at[:, N:, :].set(jnp.zeros((B, L - N, 1)))
     f2 = f.at[:, N:, :].set(jnp.zeros((B, L - N, 1)))
-    for np in [NP, CNP, BNP, ANP, CANP, BANP, DKR, TNPD, TNPDS, TNPND, TNPKR, ConvCNP]:
+    for np in [
+        NP,
+        CNP,
+        BNP,
+        ANP,
+        CANP,
+        BANP,
+        DKR,
+        TNPD,
+        TNPDS,
+        TNPND,
+        TNPKR,
+        lambda: TNPKR(dec=KRStack.build_fused()),
+        ConvCNP,
+    ]:
         print(np)
         m = np()
         (f_mu, f_std, *_), params = m.init_with_output(
