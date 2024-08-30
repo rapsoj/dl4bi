@@ -2,7 +2,6 @@ import pickle
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import Optional, Union
 
@@ -313,7 +312,7 @@ def custom_cosine_annealing_lr(num_steps: int, peak_lr: float):
     return optax.join_schedules([q_sched, q_sched, h_sched], boundaries)
 
 
-@partial(jit, donate_argnames=("state"))
+@jit
 def vanilla_train_step(
     rng: jax.Array,
     state: TrainState,
@@ -354,7 +353,7 @@ def vanilla_train_step(
     return state.apply_gradients(grads=grads), nll
 
 
-@partial(jit, donate_argnames=("state"))
+@jit
 def bootstrap_train_step(
     rng: jax.Array,
     state: TrainState,
@@ -403,7 +402,7 @@ def bootstrap_train_step(
     return state.apply_gradients(grads=grads), nll
 
 
-@partial(jit, donate_argnames=("state"))
+@jit
 def tril_cov_train_step(
     rng: jax.Array,
     state: TrainState,
@@ -452,7 +451,7 @@ def tril_cov_train_step(
     return state.apply_gradients(grads=grads), nll
 
 
-@partial(jit, donate_argnames=("state"))
+@jit
 def fast_attention_train_step(
     rng: jax.Array,
     state: TrainState,
@@ -500,7 +499,7 @@ def fast_attention_train_step(
     return state.apply_gradients(grads=grads, kwargs=updated_state), nll
 
 
-@partial(jit, donate_argnames=("state"))
+@jit
 def npf_elbo_train_step(
     rng: jax.Array,
     state: TrainState,
