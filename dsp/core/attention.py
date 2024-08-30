@@ -170,9 +170,9 @@ class FastAttention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,  # [B, Q, D_QK]
-        ks: jax.Array,  # [B, K, D_QK]
-        vs: jax.Array,  # [B, K, D_V]
+        qs: jax.Array,  # [B, Q, H, D_QK_H]
+        ks: jax.Array,  # [B, K, H D_QK_H]
+        vs: jax.Array,  # [B, K, H, D_H]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         redraw_random_features: bool = False,
@@ -180,9 +180,9 @@ class FastAttention(nn.Module):
         r"""Performs forward pass of network.
 
         Args:
-            qs: Queries of dimension $\mathbb{R}^{B\times Q\times D_{Q,K}}$
-            ks: Keys of dimension $\mathbb{R}^{B\times K\times D_{Q,K}}$
-            vs: Values of dimension $\mathbb{R}^{B\times K\tiems D_V}$
+            qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_{Q,K}_H}$
+            ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_{Q,K}_H}$
+            vs: Values of dimension $\mathbb{R}^{B\times K\times H\times D_V_H}$
             valid_lens: Mask consisting of valid length per sequence of dimension
                 $\mathbb{R}^B$.
             training: Boolean indicating whether currently training.
@@ -314,9 +314,9 @@ class Attention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,  # [B, Q, D_Q]
-        ks: jax.Array,  # [B, K, D_K]
-        vs: jax.Array,  # [B, V, D_V]
+        qs: jax.Array,  # [B, Q, H, D_QK_H]
+        ks: jax.Array,  # [B, K, H D_QK_H]
+        vs: jax.Array,  # [B, K, H, D_H]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         **kwargs,
@@ -357,6 +357,10 @@ class FusedAttention(nn.Module):
     Returns:
         A `FusedAttention` module.
 
+    .. warning::
+        As of 2024-08-29, this doesn't seem to respect the `valid_lens`
+        argument.
+
     .. note::
         As of 2024-08-29, this requires `jax-nightly` and an NVIDIA GPU of
         Ampere architecture or above.
@@ -371,9 +375,9 @@ class FusedAttention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,  # [B, Q, D_QK]
-        ks: jax.Array,  # [B, K, D_QK]
-        vs: jax.Array,  # [B, K, D_V]
+        qs: jax.Array,  # [B, Q, H, D_QK_H]
+        ks: jax.Array,  # [B, K, H D_QK_H]
+        vs: jax.Array,  # [B, K, H, D_H]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         **kwargs,
