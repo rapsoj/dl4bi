@@ -1,6 +1,5 @@
 cls: TNPKR
 kwargs:
-  min_std: 0.05
   embed_s_f:
     cls: MLP
     kwargs:
@@ -17,7 +16,7 @@ kwargs:
             cls: MultiheadAttention
             kwargs:
               attn:
-                cls: Attention
+                cls: FusedAttention
   head:
     cls: MLP
     kwargs:

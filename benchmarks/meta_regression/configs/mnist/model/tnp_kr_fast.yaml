@@ -16,7 +16,9 @@ kwargs:
           attn:
             cls: MultiheadAttention
             kwargs:
-              cls: FastAttention
+              attn:
+                cls: FastAttention
+
   head:
     cls: MLP
     kwargs:
