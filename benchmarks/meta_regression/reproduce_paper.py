@@ -7,6 +7,7 @@ so an account is necessary to log and collect the results from these runs.
 """
 
 import argparse
+import itertools as it
 import sys
 from collections.abc import Callable
 
@@ -105,7 +106,8 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
     gp_kernels_1d = ["rbf", "periodic", "matern_3_2"]
     models = ["tnp_kr_full"]
     overrides = []
-    for num_blks, num_reps in [(6, 1), (3, 2), (3, 1), (2, 3), (2, 1), (1, 6), (1, 1)]:
+    nums = [1, 2, 3, 6]
+    for num_blks, num_reps in it.product(nums, nums):
         blk_str = f"model.kwargs.dec.kwargs.num_blks={num_blks}"
         rep_str = f"model.kwargs.dec.kwargs.num_reps={num_reps}"
         override = [blk_str, rep_str]
