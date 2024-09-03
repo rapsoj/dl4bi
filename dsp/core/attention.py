@@ -357,10 +357,6 @@ class FusedAttention(nn.Module):
     Returns:
         A `FusedAttention` module.
 
-    .. warning::
-        As of 2024-08-29, this doesn't seem to respect the `valid_lens`
-        argument. See issue: https://github.com/google/jax/issues/23349.
-
     .. note::
         As of 2024-08-29, this requires `jax-nightly` and an NVIDIA GPU of
         Ampere architecture or above.
@@ -397,11 +393,14 @@ class FusedAttention(nn.Module):
             `None` for this implementation.
         """
         B, L, _ = qs.shape
+        if valid_lens is None:
+            valid_lens = jnp.repeat(L, B)
         # As of 2024-08-29, the CUDA kernel requires bfloat16
         return dot_product_attention(
             jnp.bfloat16(qs),
             jnp.bfloat16(ks),
             jnp.bfloat16(vs),
+            # TODO(danj): remove when PR lands https://github.com/google/jax/issues/23349
             query_seq_lengths=jnp.repeat(L, B),
             key_value_seq_lengths=valid_lens,
             implementation="cudnn",
