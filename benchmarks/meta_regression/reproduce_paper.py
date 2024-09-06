@@ -128,6 +128,15 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
         overrides,
         "LoRe - Gaussian Processes",
     )
+    gp_benchmark(
+        seeds,
+        2,
+        gp_kernels_1d,
+        models,
+        gp_main,
+        overrides,
+        "LoRe - Gaussian Processes",
+    )
     img_benchmark(
         seeds,
         "configs/mnist",
