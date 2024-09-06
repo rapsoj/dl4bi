@@ -104,6 +104,7 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
     if dry_run:
         seeds = seeds[:2]  # no need for more than 2 runs each in dry run
     gp_kernels_1d = ["rbf", "periodic", "matern_3_2"]
+    gp_kernels_2d = ["rbf"]
     models = ["tnp_kr_full"]
     overrides = []
     nums = [1, 2, 3, 6]
@@ -131,7 +132,7 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
     gp_benchmark(
         seeds,
         2,
-        gp_kernels_1d,
+        gp_kernels_2d,
         models,
         gp_main,
         overrides,
