@@ -606,7 +606,7 @@ def sample_gif(
     state: TrainState,
     batch: tuple,
     num_plots: int = 1,
-    num_samples_per_plot: int = 16,
+    num_samples_per_plot: int = 1,
 ):
     @jit
     def apply(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra):
@@ -616,12 +616,11 @@ def sample_gif(
             f_ctx,
             s_test,
             valid_lens_ctx,
-            training=False,
             rngs={"extra": rng_extra},
         )
 
     plot_paths = {}
-    for i in range(num_plots):
+    for i in tqdm(range(num_plots), desc="plot"):
         sample_batch = _sample_batch(batch, i, num_samples_per_plot)
         (
             s_ctx,
@@ -634,9 +633,9 @@ def sample_gif(
             ls,
             period,
         ) = sample_batch
-        L_ctx, L_test = s_ctx.shape[0], s_test.shape[0]
+        L_test, (B, _, D_F) = s_test.shape[1], f_ctx.shape
         plot_paths[i] = defaultdict(list)
-        for _ in range(L_test):
+        for step in tqdm(range(L_test), desc="step", leave=False):
             rng_extra, rng_eps, rng = random.split(rng, 3)
             f_mu, f_std, *_ = apply(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
             paths = plot_posterior_predictives(
@@ -653,11 +652,11 @@ def sample_gif(
                 f_std,
                 num_samples_per_plot,
             )
-            for j, path in enumerate(paths):
-                plot_paths[i][j].append(path)
-            f_mu_i, f_std_i = f_mu[:, i, :], f_std[:, i, :]
-            f_test_i = f_mu_i + f_std_i * random.normal(rng_eps, f_std_i.shape)
-            f_ctx = f_ctx.at[:, L_ctx + i, :].set(f_test_i)
+            for k, path in enumerate(paths):
+                plot_paths[i][k].append(path)
+            f_mu_step, f_std_step = f_mu[:, step, :], f_std[:, step, :]
+            f_test_step = f_mu_step + f_std_step * random.normal(rng_eps, (B, D_F))
+            f_ctx = f_ctx.at[:, valid_lens_ctx, :].set(f_test_step)
             valid_lens_ctx += 1
     return plot_paths
 
@@ -790,7 +789,6 @@ def log_posterior_predictive_plots(
         s_test,
         valid_lens_ctx,
         valid_lens_test,
-        training=False,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
     paths = plot_posterior_predictives(
