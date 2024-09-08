@@ -564,6 +564,42 @@ def npf_elbo_train_step(
     return state.apply_gradients(grads=grads), elbo
 
 
+def sample(
+    rng: jax.Array,
+    state: TrainState,
+    s_ctx: jax.Array,  # [L_ctx, D_S]
+    f_ctx: jax.Array,  # [L_ctx, D_F]
+    s_test: jax.Array,  # [L_test, D_S]
+    batch_size: int = 32,
+):
+    B, L_ctx, L_test = batch_size, s_ctx.shape[0], s_test.shape[0]
+    s_ctx = jnp.repeat(jnp.vstack([s_ctx, s_test])[None, ...], B, axis=0)
+    f_ctx = jnp.repeat(jnp.pad(f_ctx, ((0, L_test), (0, 0)))[None, ...], B, axis=0)
+    s_test = jnp.repeat(s_test[None, ...], B, axis=0)
+    valid_lens_ctx = jnp.repeat(L_ctx, B)
+
+    @jit
+    def apply(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra):
+        return state.apply_fn(
+            {"params": state.params, **state.kwargs},
+            s_ctx,
+            f_ctx,
+            s_test,
+            valid_lens_ctx,
+            training=False,
+            rngs={"extra": rng_extra},
+        )
+
+    for i in range(L_test):
+        rng_extra, rng_eps, rng = random.split(rng, 3)
+        f_mu, f_std, *_ = apply(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
+        f_mu_i, f_std_i = f_mu[:, i, :], f_std[:, i, :]
+        f_test_i = f_mu_i + f_std_i * random.normal(rng_eps, f_std_i.shape)
+        f_ctx = f_ctx.at[:, L_ctx + i, :].set(f_test_i)
+        valid_lens_ctx += 1
+    return s_ctx, f_ctx
+
+
 def log_posterior_predictive_plots(
     step: int,
     rng_step: int,
