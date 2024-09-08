@@ -606,7 +606,7 @@ def sample_gif(
     state: TrainState,
     batch: tuple,
     num_plots: int = 1,
-    num_samples_per_plot: int = 1,
+    num_samples_per_plot: int = 16,
 ):
     @jit
     def apply(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra):
@@ -656,7 +656,7 @@ def sample_gif(
                 plot_paths[i][k].append(path)
             f_mu_step, f_std_step = f_mu[:, step, :], f_std[:, step, :]
             f_test_step = f_mu_step + f_std_step * random.normal(rng_eps, (B, D_F))
-            f_ctx = f_ctx.at[:, valid_lens_ctx, :].set(f_test_step)
+            f_ctx = f_ctx.at[:, valid_lens_ctx[0], :].set(f_test_step)
             valid_lens_ctx += 1
     return plot_paths
 
