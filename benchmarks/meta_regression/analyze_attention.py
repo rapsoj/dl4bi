@@ -11,6 +11,12 @@ import jax.tree_util as jtu
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import ImageGrid
 
+# TODO(danj):
+# custom data set with 128 test points, 16 context points
+# run model over dataset, storing intermediates
+# visualize all query tensors at each layer (sort by s_test)
+# plot sample query location with lines to context points, with width determined by strength
+
 
 def main(args):
     d = jnp.load(args.intermediates_path, allow_pickle=True).item()
