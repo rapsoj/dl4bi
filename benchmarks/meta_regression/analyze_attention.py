@@ -192,7 +192,7 @@ def parse_args(argv):
     )
     parser.add_argument(
         "ckpt_path",
-        help="Path to a 1D GP model checkpoint.",
+        help="Path to a 1D GP RBF model checkpoint.",
     )
     parser.add_argument(
         "-s",
