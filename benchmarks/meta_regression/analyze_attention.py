@@ -5,36 +5,77 @@ This file analyzes attention stored Flax module intermediates variables.
 
 import argparse
 import sys
+from pathlib import Path
 
+import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import matplotlib.pyplot as plt
+from jax import random
 from mpl_toolkits.axes_grid1 import ImageGrid
+from sps.gp import GP
+from sps.kernels import rbf
+from sps.priors import Prior
+
+import dsp.meta_regression.train_utils as tu
 
 # TODO(danj):
-# custom data set with 128 test points, 16 context points
 # run model over dataset, storing intermediates
 # visualize all query tensors at each layer (sort by s_test)
 # plot sample query location with lines to context points, with width determined by strength
 
+# Final plots:
+# Attention by layer for 6x1 and 1x6
+# Tensors by layer for 6x1 and 1x6
+# Plot of sample with sample query pointing to context points
+
 
 def main(args):
-    d = jnp.load(args.intermediates_path, allow_pickle=True).item()
-    # batch, preds = jnp.load(args.predictions_path, allow_pickle=True).item()
-    batch = jnp.load(args.predictions_path, allow_pickle=True).item()
-    # s_ctx, _, valid_lens_ctx, *_ = batch
-    s_ctx, valid_lens_ctx = batch["s_ctx"], batch["valid_lens_ctx"]
-    attns = [
-        attn
-        for path, attn in jtu.tree_leaves_with_path(d)
-        if args.attn_key in jtu.keystr(path)
-    ]
-    v = batch["valid_lens_ctx"][0]
-    # v = valid_lens_ctx[0]
-    s_ctx = s_ctx[0, :v, 0]  # [B=1, L_ctx, D_S=1]
-    idx = jnp.argsort(s_ctx)
-    s_ctx = s_ctx[idx]  # sort s_ctx
-    num_layers, num_heads = len(attns), attns[0].shape[1]  # [B, H, L_ctx, L_ctx]
+    rng = random.key(args.seed)
+    rng_gp, rng_extra = random.split(rng)
+    s_min, s_max, num_ctx, num_test, ls = -2, 2, 16, 128, 0.2
+    s_ctx = jnp.linspace(s_min, s_max, num_ctx)[:, None]  # [L_ctx, 1]
+    s_test = jnp.linspace(s_min, s_max, num_test)[:, None]  # [L_test, 1]
+    gp = GP(rbf, ls=Prior("fixed", {"value": ls}))
+    f_test, *_ = gp.simulate(rng_gp, s_test, batch_size=1)
+    f_test = f_test[0]  # [B, L_test, 1] -> [L_test, 1]
+    f_ctx = f_test[:: num_test // num_ctx, :]  # [L_ctx, 1]
+    state, _ = tu.load_ckpt(Path(args.ckpt_path))
+    (f_mu, f_std, *_), vars = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        s_ctx[None, ...],  # add batch dim
+        f_ctx[None, ...],
+        s_test[None, ...],
+        mutable="intermediates",
+        rngs={"extra": rng_extra},
+    )
+    fig = tu.plot_posterior_predictive(
+        s_ctx.squeeze(),  # squeeze out first and last dims in [B=1, L, D_S=1]
+        f_ctx.squeeze(),
+        s_test.squeeze(),
+        f_test.squeeze(),
+        f_mu.squeeze(),
+        f_std.squeeze(),
+    )
+    fig.suptitle(f"RBF GP sample with (var: 1.0, ls: {ls}), seed {args.seed}")
+    save(fig, "sample.png")
+    path_leaf_tpls = jtu.tree_leaves_with_path(vars["intermediates"])
+    cross_attns = [x for path, x in path_leaf_tpls if "cross_attn" in jtu.keystr(path)]
+    self_attns = [x for path, x in path_leaf_tpls if "self_attn" in jtu.keystr(path)]
+    fig = plot_attn(cross_attns)
+    save(fig, "cross_attn.png")
+    fig = plot_attn(self_attns)
+    save(fig, "self_attn.png")
+
+
+def save(fig, name: str):
+    fig.savefig(name, dpi=150)
+    plt.clf()
+    plt.close(fig)
+
+
+def plot_attn(attns: list[jax.Array]):
+    num_layers, num_heads = len(attns), attns[0].shape[1]  # [B, H, L_test, L_ctx]
     fig = plt.figure(figsize=(num_heads * 2, num_layers * 2))
     grid = ImageGrid(
         fig,
@@ -50,18 +91,13 @@ def main(args):
     for i in range(num_layers):
         for h in range(num_heads):
             k = i * num_heads + h
-            attn_head = attns[i][0, h, :, :v]
-            # valid_lens apply to queries and keys in self_attn
-            if args.attn_key == "self_attn":
-                attn_head = attn_head[:v, :]
-            attn_head = attn_head[:, idx][idx, :]
+            attn_head = attns[i][0, h]
             im = grid[k].imshow(attn_head, cmap="inferno")
             grid[k].set_ylabel(f"Layer {i+1}")
             grid[k].set_xlabel(f"Head {h+1}")
     grid[0].cax.colorbar(im)
     plt.tight_layout()
-    plt.suptitle(args.title)
-    plt.savefig("test_attn.pdf", dpi=150)
+    return fig
 
 
 def parse_args(argv):
@@ -70,25 +106,14 @@ def parse_args(argv):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "intermediates_path",
-        default="intermediates.npy",
-        help="Path to intermediates numpy file.",
+        "ckpt_path",
+        help="Path to a 1D GP model checkpoint.",
     )
     parser.add_argument(
-        "predictions_path",
-        default="predictions.npy",
-        help="Path to numpy file with (batch, preds).",
-    )
-    parser.add_argument(
-        "-k",
-        "--attn_key",
-        default="self_attn",
-        help="Intermediate attention key name.",
-    )
-    parser.add_argument(
-        "-t",
-        "--title",
-        default="Attention",
+        "-s",
+        "--seed",
+        default=7,
+        help="Root seed for all random operations.",
     )
     return parser.parse_args(argv[1:])
 
