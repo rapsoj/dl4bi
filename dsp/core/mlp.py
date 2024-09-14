@@ -21,47 +21,35 @@ class MLP(nn.Module):
 
 
 class MLPMixerBlock(nn.Module):
-    ffn_dims: list[int]
-    mix_dims: list[int]
+    token_dims: list[int] = [512, 128]
+    channel_dims: list[int] = [512, 128]
 
     @nn.compact
     def __call__(self, x):
         y = nn.LayerNorm()(x)
         y = jnp.swapaxes(x, 1, 2)
-        y = MLP(self.ffn_dims, nn.gelu, name="token_mixing")(x)
+        y = MLP(self.token_dims, nn.gelu, name="token_mixing")(x)
         y = jnp.swapaxes(x, 1, 2)
         x = x + y
         y = nn.LayerNorm()(x)
-        return x + MLP(self.mix_dims, nn.gelu, name="channel_mixing")(y)
+        return x + MLP(self.channel_dims, nn.gelu, name="channel_mixing")(y)
 
 
 class MLPMixer(nn.Module):
     num_cls: int
-    num_blks: int
-    blk: nn.Module = MLPMixerBlock([128, 128], [128, 128])
-    conv: nn.Module = nn.Conv(128, (16, 16), strides=(16, 16))
+    num_blks: int = 2
+    token_dims: list[int] = [256, 128]
+    channel_dims: list[int] = [512, 128]
+    patch_size: int = 1
+    conv_dim: int = 128
 
     @nn.compact
     def __call__(self, x):
-        x = self.conv(x)
+        s = self.patch_size
+        x = nn.Conv(self.conv_dim, (s, s), strides=(s, s))(x)
         x = einops.rearrange(x, "B H W C -> B (H W) C")
         for _ in range(self.num_blks):
-            x = self.blk.copy()(x)
+            x = MLPMixerBlock(self.token_dims, self.channel_dims)(x)
         x = nn.LayerNorm()(x)
         x = jnp.mean(x, axis=1)
         return nn.Dense(self.num_cls, kernel_init=nn.initializers.zeros)(x)
-
-    @classmethod
-    def build(
-        cls,
-        patch_size: int,
-        conv_dim: int,
-        ffn_dim: int,
-        mix_dim: int,
-        num_blks: int,
-        num_cls: int,
-    ):
-        s = patch_size
-        conv = nn.Conv(conv_dim, (s, s), strides=(s, s))
-        blk = MLPMixerBlock([ffn_dim] * 2, [mix_dim] * 2)
-        return cls(num_cls, num_blks, blk, conv)
