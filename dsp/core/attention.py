@@ -514,9 +514,9 @@ class KernelAttention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs: jax.Array,
-        ks: jax.Array,
-        vs: jax.Array,
+        qs: jax.Array,  # [B, Q, D_QK]
+        ks: jax.Array,  # [B, K, D_QK]
+        vs: jax.Array,  # [B, K, D_V]
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
         **kwargs,
@@ -539,6 +539,7 @@ class KernelAttention(nn.Module):
         attn = self.kernel(qs.astype(self.dtype), ks.astype(self.dtype))
         if valid_lens is not None:
             attn = mask_attn(attn, valid_lens, fill=0.0)
+        attn = attn / attn.sum(axis=-1)[..., None]  # [B, Q, K]
         ctx = attn @ vs  # [B, Q, D_V]
         return self.proj_out(ctx), attn
 
@@ -563,9 +564,9 @@ class MultikernelAttention(nn.Module):
     @nn.compact
     def __call__(
         self,
-        qs,
-        ks,
-        vs,
+        qs: jax.Array,  # [B, Q, D_QK]
+        ks: jax.Array,  # [B, K, D_QK]
+        vs: jax.Array,  # [B, K, D_V]
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
         **kwargs,
