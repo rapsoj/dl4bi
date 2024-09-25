@@ -5,7 +5,7 @@ defaults:
 seed: 42
 wandb: True
 project: Heaton
-train_num_steps: 100000
+train_num_steps: 250000
 valid_num_steps: 5000
 valid_interval: 25000
 plot_interval: 25000

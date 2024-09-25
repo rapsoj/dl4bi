@@ -5,6 +5,7 @@ from pathlib import Path
 import hydra
 import jax
 import jax.numpy as jnp
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import optax
 import pandas as pd
@@ -26,13 +27,13 @@ from dl4bi.meta_regression.train_utils import (
 
 # NOTE: uncomment to speed up on NVIDIA GPUs
 # https://jax.readthedocs.io/en/latest/gpu_performance_tips.html#code-generation-flags
-os.environ["XLA_FLAGS"] = (
-    "--xla_gpu_enable_triton_softmax_fusion=true "
-    "--xla_gpu_triton_gemm_any=True "
-    "--xla_gpu_enable_async_collectives=true "
-    "--xla_gpu_enable_latency_hiding_scheduler=true "
-    "--xla_gpu_enable_highest_priority_async_stream=true "
-)
+# os.environ["XLA_FLAGS"] = (
+# "--xla_gpu_enable_triton_softmax_fusion=true "
+# "--xla_gpu_triton_gemm_any=True "
+# "--xla_gpu_enable_async_collectives=true "
+# "--xla_gpu_enable_latency_hiding_scheduler=true "
+# "--xla_gpu_enable_highest_priority_async_stream=true "
+# )
 
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
@@ -165,7 +166,7 @@ def log_plot(step: int, rng_step: jax.Array, state: TrainState, batch: tuple):
     s = jnp.vstack([s_ctx, s_test])
     f_pred = jnp.vstack([f_ctx, f_mu])
     # TODO(danj): do we want f_task to be zeros, which implies the mean?
-    f_task = jnp.vstack([f_ctx, jnp.zeros(f_mu.shape)])
+    f_task = jnp.vstack([f_ctx, jnp.full(f_mu.shape, jnp.nan)])
     data = jnp.hstack([s, f_task, f_pred])
     df = pd.DataFrame(data, columns=["Lon", "Lat", "Task", "Pred"])
     df = df.sort_values(["Lat", "Lon"], ascending=[False, True])
@@ -185,7 +186,9 @@ def plot(df: pd.DataFrame, col="Temp", ax: Axes | None = None):
     if not isinstance(ax, Axes):
         ax = plt.gca()
     df = df.sort_values(["Lat", "Lon"], ascending=[False, True])
-    ax.imshow(df[col].values.reshape(300, 500), cmap="inferno", interpolation="none")
+    cmap = mpl.colormaps.get_cmap("Spectral_r")
+    cmap.set_bad("grey")
+    ax.imshow(df[col].values.reshape(300, 500), cmap=cmap, interpolation="none")
     ax.set_title(col)
     return plt.gcf()
 
