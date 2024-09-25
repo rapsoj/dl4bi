@@ -20,7 +20,6 @@ from dl4bi.meta_regression.train_utils import (
     cosine_annealing_lr,
     evaluate,
     instantiate,
-    log_img_plots,
     save_ckpt,
     train,
 )
@@ -75,9 +74,7 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        callbacks=[
-            Callback(partial(log_img_plots, shape=(300, 500, 1)), cfg.plot_interval)
-        ],
+        callbacks=[Callback(log_plot, cfg.plot_interval)],
     )
     loss = evaluate(rng_test, state, dataloader, cfg.valid_num_steps)
     wandb.log({"test_loss": loss})
@@ -151,19 +148,20 @@ def ctx_test_split(df: pd.DataFrame):
     return s_ctx, f_ctx, s_test
 
 
-def log_plot(step: int, rng_step: int, state: TrainState, batch: tuple):
+def log_plot(step: int, rng_step: jax.Array, state: TrainState, batch: tuple):
     """Logs a plot of the entire image to wandb."""
     *_, s_ctx, f_ctx, s_test = batch
     rng_dropout, rng_extra = random.split(rng_step)
     f_mu, f_std, *_ = state.apply_fn(
         {"params": state.params, **state.kwargs},
-        s_ctx,
-        f_ctx,
-        s_test,
+        s_ctx[None, ...],  # add dummy batch dimension
+        f_ctx[None, ...],
+        s_test[None, ...],
         valid_lens_ctx=None,
         valid_lens_test=None,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
+    f_mu = f_mu[0, ...]
     s = jnp.vstack([s_ctx, s_test])
     f_pred = jnp.vstack([f_ctx, f_mu])
     # TODO(danj): do we want f_task to be zeros, which implies the mean?
@@ -171,7 +169,7 @@ def log_plot(step: int, rng_step: int, state: TrainState, batch: tuple):
     data = jnp.hstack([s, f_task, f_pred])
     df = pd.DataFrame(data, columns=["Lon", "Lat", "Task", "Pred"])
     df = df.sort_values(["Lat", "Lon"], ascending=[False, True])
-    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+    _, axs = plt.subplots(1, 2, figsize=(10, 5))
     plot(df, "Task", axs[0])
     plot(df, "Pred", axs[1])
     # TODO(danj): add plot(df, 'GroundTruth', axs[2])
