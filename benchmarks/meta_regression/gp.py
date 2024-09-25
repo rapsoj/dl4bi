@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
+import os
 from pathlib import Path
 
 import hydra
 import optax
-import wandb
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 
+import wandb
 from dl4bi.meta_regression.train_utils import (
     Callback,
     build_gp_dataloader,
