@@ -38,6 +38,7 @@ from dl4bi.meta_regression.train_utils import (
 # )
 
 
+# TODO(danj): implement "interval score", and CRPS
 @hydra.main("configs/heaton", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
@@ -210,33 +211,6 @@ def plot(df: pd.DataFrame, col="Temp", ax: Axes | None = None):
     ax.imshow(df[col].values.reshape(300, 500), cmap=cmap, interpolation="none")
     ax.set_title(col)
     return plt.gcf()
-
-
-# TODO(danj): implement "interval score", and CRPS
-def log_metrics(step: int, rng_step: jax.Array, state: TrainState, batch: tuple):
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, *_ = batch
-    rng_dropout, rng_extra = random.split(rng_step)
-    f_mu, f_std, *_ = state.apply_fn(
-        {"params": state.params, **state.kwargs},
-        s_ctx,
-        f_ctx,
-        s_test,
-        valid_lens_ctx,
-        valid_lens_test=None,
-        rngs={"dropout": rng_dropout, "extra": rng_extra},
-    )
-    hdi_prob = 0.95
-    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
-    f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
-    # by construction (see dataloader above), s_test contains all
-    # context points and then some extra non-context test locations;
-    # here we want to ignore the context points in the test set and
-    # calculate metrics for non-context test locations.
-    mask_test = ~mask_from_valid_lens(s_test.shape[1], valid_lens_ctx)
-    rmse = jnp.sqrt(jnp.square(f_test - f_mu).mean(where=mask_test))
-    mae = jnp.abs(f_test - f_mu).mean(where=mask_test)
-    cvg = ((f_test >= f_lower) & (f_test <= f_upper)).mean(where=mask_test)
-    wandb.log({"RMSE": rmse, "MAE": mae, "Coverage": cvg})
 
 
 if __name__ == "__main__":
