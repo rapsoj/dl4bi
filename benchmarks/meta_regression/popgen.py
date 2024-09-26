@@ -8,11 +8,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-import wandb
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
+import wandb
 from dl4bi.meta_regression.train_utils import (
     Callback,
     cfg_to_run_name,
@@ -72,8 +72,8 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         callbacks=[img_cbk, save_cbk],
     )
-    loss = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
-    wandb.log({"test_loss": loss})
+    metrics = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
+    wandb.log({f"Test {m}": v for m, v in metrics.items()})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 

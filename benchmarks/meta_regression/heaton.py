@@ -79,10 +79,7 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        callbacks=[
-            Callback(log_plot, cfg.plot_interval),
-            Callback(log_metrics, cfg.metrics_interval),
-        ],
+        callbacks=[Callback(log_plot, cfg.plot_interval)],
     )
     loss = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
     wandb.log({"test_loss": loss})

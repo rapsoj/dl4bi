@@ -15,7 +15,7 @@ import numpy as np
 import optax
 from flax.core import FrozenDict
 from flax.training import orbax_utils, train_state
-from jax import jit, random
+from jax import jit, random, vmap
 from jax.scipy.special import logsumexp
 from jax.scipy.stats import norm
 from omegaconf import DictConfig, OmegaConf
@@ -96,7 +96,7 @@ def train(
     elif isinstance(model, (TNPND,)):
         train_step = tril_cov_train_step
     losses = []
-    train_loss, valid_loss = float("inf"), float("inf")
+    train_nll, valid_nll = float("inf"), float("inf")
     pbar = tqdm(range(1, train_num_steps + 1), unit=" batches", dynamic_ncols=True)
     for i in pbar:
         batch = next(batches)
@@ -104,17 +104,18 @@ def train(
         state, loss = train_step(rng_step, state, batch)
         losses += [loss]
         if i % log_loss_interval == 0:
-            train_loss = np.mean(losses[i - log_loss_interval : i])
-            wandb.log({"train_loss": train_loss})
+            train_nll = np.mean(losses[i - log_loss_interval : i])
+            wandb.log({"Train NLL": train_nll})
         if i % valid_interval == 0:
             rng_valid, rng_train = random.split(rng_train)
             metrics = evaluate(rng_valid, state, valid_dataloader, valid_num_steps)
-            wandb.log(metrics)
+            valid_nll = metrics["NLL"]
+            wandb.log({f"Valid {m}": v for m, v in metrics.items()})
         for cbk in callbacks:
             if i % cbk.interval == 0:
                 cbk.fn(i, rng_step, state, batch)
         pbar.set_postfix(
-            {"train_loss": f"{train_loss:.3f}", "valid_loss": f"{valid_loss:.3f}"}
+            {"Train NLL": f"{train_nll:.3f}", "Valid NLL": f"{valid_nll:.3f}"}
         )
     return state
 
@@ -153,10 +154,10 @@ def evaluate(
             valid_lens_test,
             rngs={"extra": rng_extra},
         )
+        mask_test = mask_from_valid_lens(s_test.shape[1], valid_lens_test)
         if f_mu.shape == f_std.shape:  # f_std is independent/diagonal
-            mask_test = mask_from_valid_lens(s_test.shape[1], valid_lens_test)
             if f_mu.shape == f_ctx.shape:
-                nll = [-norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)]
+                nll = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
                 rmse = jnp.sqrt(jnp.square(f_test - f_mu).mean(where=mask_test))
                 mae = jnp.abs(f_test - f_mu).mean(where=mask_test)
                 f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
@@ -167,10 +168,11 @@ def evaluate(
                 f_test_boot = jnp.repeat(f_test, K, axis=0)
                 ll_boot = norm.logpdf(f_test_boot, f_mu, f_std)
                 # log of likelihood averaged over K bootstrapped samples
+                # NOTE: this is how BNP averages log-likelihood
                 ll_boot = logsumexp(
                     ll_boot.reshape(B, K, L_test, -1), axis=1
                 ) - jnp.log(K)
-                nll = [-ll_boot.mean(where=mask_test)]
+                nll = -ll_boot.mean(where=mask_test)
                 rmse = jnp.sqrt(
                     jnp.square(f_test_boot - f_mu)
                     .reshape(B, K, L_test, -1)
@@ -194,7 +196,12 @@ def evaluate(
             f_test_flat, f_mu_flat = f_test.reshape(B, -1), f_mu.reshape(B, -1)
             nlls = -mvn_logpdf(f_test_flat, f_mu_flat, f_std, is_tril=True)
             # average over valid lens to create average pointwise log-likelihood
-            nll = [(nlls / valid_lens_test).mean()]
+            nll = (nlls / valid_lens_test).mean()
+            rmse = jnp.sqrt(jnp.square(f_test - f_mu).mean(where=mask_test))
+            mae = jnp.abs(f_test - f_mu).mean(where=mask_test)
+            f_std_diag = vmap(jnp.diag)(f_std)  # get marginal f_std
+            f_lower, f_upper = f_mu - z_score * f_std_diag, f_mu + z_score * f_std_diag
+            cvg = ((f_test >= f_lower) & (f_test <= f_upper)).mean(where=mask_test)
         loss["NLL"] += [nll]
         loss["RMSE"] += [rmse]
         loss["MAE"] += [mae]
@@ -723,6 +730,8 @@ def log_posterior_predictive_plots(
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls, period = (
         batch
     )
+    if s_ctx.shape[-1] > 1:  # TODO(danj): support 2D
+        return
     f_mu, f_std, *_ = state.apply_fn(
         {"params": state.params, **state.kwargs},
         s_ctx,

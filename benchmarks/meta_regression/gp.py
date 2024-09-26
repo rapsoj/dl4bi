@@ -66,8 +66,8 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         callbacks=[Callback(log_posterior_predictive_plots, cfg.plot_interval)],
     )
-    loss = evaluate(rng_test, state, dataloader, cfg.valid_num_steps)
-    wandb.log({"test_loss": loss})
+    metrics = evaluate(rng_test, state, dataloader, cfg.valid_num_steps)
+    wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = f"results/gp/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
