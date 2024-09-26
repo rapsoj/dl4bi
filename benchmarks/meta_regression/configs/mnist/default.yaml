@@ -5,7 +5,7 @@ seed: 42
 wandb: True
 project: MNIST
 train_num_steps: 100000
-valid_num_steps: # None = exhaust valid dataloader
+valid_num_steps: null # exhaust valid dataloader
 valid_interval: 25000
 plot_interval: 100000
 lr_peak: 1.0e-3
