@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import optax
 import pandas as pd
 from jax import random
-from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
 
@@ -20,9 +19,7 @@ from dl4bi.meta_regression.train_utils import (
     TrainState,
     cfg_to_run_name,
     cosine_annealing_lr,
-    evaluate,
     instantiate,
-    mask_from_valid_lens,
     save_ckpt,
     train,
 )
@@ -51,7 +48,7 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    rng_train, rng_data, rng_test = random.split(rng, 3)
+    rng_train, rng_data = random.split(rng)
     train_dataloader, valid_dataloader = build_dataloaders(
         rng_data,
         cfg.data.path,
@@ -82,8 +79,6 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         callbacks=[Callback(log_plot, cfg.plot_interval)],
     )
-    metrics = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
-    wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
