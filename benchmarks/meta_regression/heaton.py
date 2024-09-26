@@ -149,7 +149,7 @@ def build_dataloaders(
             jnp.array([L_train]),  # use all train locations
             s_valid[None, ...],
             f_valid[None, ...],
-            None,  # no valid_lens_test
+            jnp.array([s_valid.shape[0]]),  # use all valid locations
         )
 
     return train_dataloader, valid_dataloader

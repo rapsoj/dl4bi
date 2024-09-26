@@ -108,8 +108,8 @@ def train(
             wandb.log({"train_loss": train_loss})
         if i % valid_interval == 0:
             rng_valid, rng_train = random.split(rng_train)
-            valid_loss = evaluate(rng_valid, state, valid_dataloader, valid_num_steps)
-            wandb.log({"valid_loss": valid_loss})
+            metrics = evaluate(rng_valid, state, valid_dataloader, valid_num_steps)
+            wandb.log(metrics)
         for cbk in callbacks:
             if i % cbk.interval == 0:
                 cbk.fn(i, rng_step, state, batch)
@@ -125,9 +125,11 @@ def evaluate(
     dataloader: Callable,
     num_steps: Optional[float] = None,
     results_path: Optional[Path] = None,
+    hdi_prob: float = 0.95,
 ):
     rng_data, rng_extra, rng_plots = random.split(rng, 3)
-    losses, results = [], []
+    results = []
+    loss = {"NLL": [], "RMSE": [], "MAE": [], "Coverage": []}
     num_steps = num_steps or float("inf")
     pbar = tqdm(
         dataloader(rng_data),
@@ -136,6 +138,7 @@ def evaluate(
         leave=False,
         dynamic_ncols=True,
     )
+    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
     for i, batch in enumerate(pbar):
         # early stopping for infinite dataloaders
         if i >= num_steps:
@@ -153,7 +156,11 @@ def evaluate(
         if f_mu.shape == f_std.shape:  # f_std is independent/diagonal
             mask_test = mask_from_valid_lens(s_test.shape[1], valid_lens_test)
             if f_mu.shape == f_ctx.shape:
-                losses += [-norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)]
+                nll = [-norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)]
+                rmse = jnp.sqrt(jnp.square(f_test - f_mu).mean(where=mask_test))
+                mae = jnp.abs(f_test - f_mu).mean(where=mask_test)
+                f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
+                cvg = ((f_test >= f_lower) & (f_test <= f_upper)).mean(where=mask_test)
             else:  # bootstrapped
                 B, L_test, _ = s_test.shape
                 K = f_mu.shape[0] // f_ctx.shape[0]
@@ -163,7 +170,23 @@ def evaluate(
                 ll_boot = logsumexp(
                     ll_boot.reshape(B, K, L_test, -1), axis=1
                 ) - jnp.log(K)
-                losses += [-ll_boot.mean(where=mask_test)]
+                nll = [-ll_boot.mean(where=mask_test)]
+                rmse = jnp.sqrt(
+                    jnp.square(f_test_boot - f_mu)
+                    .reshape(B, K, L_test, -1)
+                    .mean(axis=2, where=mask_test[:, None, ...])
+                ).mean()  # average over [B, K]
+                mae = (
+                    jnp.abs(f_test_boot - f_mu)
+                    .reshape(B, K, L_test, -1)
+                    .mean(axis=2, where=mask_test[:, None, ...])
+                ).mean()  # average over [B, K]
+                f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
+                cvg = (
+                    ((f_test >= f_lower) & (f_test <= f_upper))
+                    .reshape(B, K, L_test, -1)
+                    .mean(axis=2, where=mask_test[:, None, ...])
+                ).mean()  # average over [B, K]
         else:  # f_std is a lower triangular covariance matrix, e.g. TNPND
             # WARNING: This ignores `valid_lens_test` because
             # mvn_logpdf does yet support masks with `where`.
@@ -171,12 +194,16 @@ def evaluate(
             f_test_flat, f_mu_flat = f_test.reshape(B, -1), f_mu.reshape(B, -1)
             nlls = -mvn_logpdf(f_test_flat, f_mu_flat, f_std, is_tril=True)
             # average over valid lens to create average pointwise log-likelihood
-            losses += [(nlls / valid_lens_test).mean()]
+            nll = [(nlls / valid_lens_test).mean()]
+        loss["NLL"] += [nll]
+        loss["RMSE"] += [rmse]
+        loss["MAE"] += [mae]
+        loss["Coverage"] += [cvg]
         if results_path:
             b = [np.array(v) for v in batch]
             p = [np.array(v) for v in [f_mu, f_std]]
             results += [(b, p)]
-    loss = np.mean(losses)
+    loss = {m: np.mean(vs) for m, vs in loss.items()}  # average over batches
     if results_path:
         with open(results_path, "wb") as f:
             pickle.dump(results, f)
