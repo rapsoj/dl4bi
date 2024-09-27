@@ -49,7 +49,7 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     state = None
-    for train_num_steps in range(cfg.train_num_steps):
+    for train_num_steps in cfg.train_num_steps:
         rng_data, rng_train, rng_test, rng = random.split(rng, 4)
         train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(
             rng_data,
