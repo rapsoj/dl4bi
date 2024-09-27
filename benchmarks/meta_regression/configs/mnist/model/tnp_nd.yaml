@@ -21,7 +21,6 @@ kwargs:
             cls: MLP
             kwargs:
               dims: [128, 64]
-          p_dropout: 0.0
   dec_f_mu:
     cls: MLP
     kwargs:

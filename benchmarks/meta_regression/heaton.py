@@ -53,7 +53,6 @@ def main(cfg: DictConfig):
         rng_data,
         cfg.data.path,
         cfg.data.valid_pct,
-        cfg.data.batch_size,
         cfg.data.num_ctx.min,
         cfg.data.num_ctx.max,
         cfg.data.num_test.max,
@@ -78,7 +77,7 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
         cfg.valid_interval,
     )
-    # log_test_results(rng_test, state, test_dataloader)
+    log_test_results(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -88,7 +87,6 @@ def build_dataloaders(
     rng: jax.Array,
     path: Path,
     valid_pct: float = 0.10,
-    batch_size: int = 16,
     num_ctx_min: int = 200,
     num_ctx_max: int = 500,
     num_test_max: int = 1000,
@@ -96,15 +94,13 @@ def build_dataloaders(
     """
     The image consists of ~105k observed locations and ~45k unobserved
     locations. For training, we partition the 105k observed locations into train
-    and validation datasets. We also standardize the target, `MaskedTemp` ->
-    `MaskedTempStd`, because predicting a standarized value is easier for the
-    network. This means that at test time, the predictions must be rescaled in
-    order to be comparable to `TrueTemp`.
+    and validation datasets.
     """
     df = pd.read_csv(path)
-    df, mu, std = preprocess(df)
+    df.Lat -= df.Lat.mean()
+    df.Lon -= df.Lon.mean()
     s_obs, f_obs, s_unobs, f_unobs = split_observed(df)
-    B, L, L_train = batch_size, s_obs.shape[0], int((1 - valid_pct) * s_obs.shape[0])
+    B, L, L_train = 4, s_obs.shape[0], int((1 - valid_pct) * s_obs.shape[0])
     permute_idx = random.choice(rng, L, (L,), replace=False)
     s_obs, f_obs = s_obs[permute_idx, :], f_obs[permute_idx, :]
     s_train, f_train = s_obs[:L_train, :], f_obs[:L_train, :]
@@ -112,13 +108,15 @@ def build_dataloaders(
     valid_lens_test = jnp.repeat(num_test_max, B)
 
     def train_dataloader(rng: jax.Array):
+        reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [1, -1]])
         while True:
             rng_permute, rng_valid, rng = random.split(rng, 3)
             s_ctxs, f_ctxs, s_tests, f_tests = [], [], [], []
-            for _ in range(B):  # TODO(danj): speed up?
+            for reflection in reflections:
                 rng_i, rng_permute = random.split(rng_permute)
                 permute_idx = random.choice(rng_i, L_train, (L_train,), replace=False)
                 s_perm, f_perm = s_train[permute_idx, :], f_train[permute_idx, :]
+                s_perm *= reflection
                 s_ctxs += [s_perm[:num_ctx_max, :]]
                 f_ctxs += [f_perm[:num_ctx_max, :]]
                 # NOTE: (s,f)_test are superset of (s,f)_ctx
@@ -152,34 +150,15 @@ def build_dataloaders(
             s_unobs[None, ...],
             f_unobs[None, ...],
             jnp.array([s_unobs.shape[0]]),  # all test points are valid
-            mu,  # used to rescale predictions
-            std,
         )
 
     return train_dataloader, valid_dataloader, test_dataloader
 
 
-def preprocess(df: pd.DataFrame):
-    """De-mean locations and standardize masked temperature."""
-    df.Lon -= df.Lon.mean()
-    df.Lat -= df.Lat.mean()
-    # mu, std = df.MaskTemp.mean(), df.MaskTemp.std()
-    # df["MaskTempStd"] = (df.MaskTemp - mu) / std
-    df["MaskTempStd"], mu, std = df.MaskTemp, 0, 1
-    return df, mu, std
-
-
 def split_observed(df: pd.DataFrame):
-    """Splits `col` into observed and unobserved locations.
-
-    .. warning::
-        `f_obs` is a standardized value, while `f_unobs`
-        is in its original scale. This means that before
-        comparing predictions based on `f_obs` to `f_unobs`,
-        the predictions must be rescaled.
-    """
-    obs_idx = df.MaskTempStd.notna().values
-    obs = df[obs_idx][["Lon", "Lat", "MaskTempStd"]].values
+    """Splits `col` into observed and unobserved locations."""
+    obs_idx = df.MaskTemp.notna().values
+    obs = df[obs_idx][["Lon", "Lat", "MaskTemp"]].values
     unobs = df[~obs_idx][["Lon", "Lat", "TrueTemp"]].values
     s_obs, f_obs = obs[:, :-1], obs[:, [-1]]
     s_unobs, f_unobs = unobs[:, :-1], unobs[:, [-1]]
@@ -190,7 +169,7 @@ def log_test_results(rng: jax.Array, state: TrainState, test_dataloader: Callabl
     """Logs a plot of the entire image to wandb."""
     rng_data, rng = random.split(rng)
     batch = next(test_dataloader(rng_data))
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, mu, sigma = batch
+    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test = batch
     rng_dropout, rng_extra = random.split(rng)
     f_mu, f_std, *_ = state.apply_fn(
         {"params": state.params, **state.kwargs},
@@ -205,7 +184,6 @@ def log_test_results(rng: jax.Array, state: TrainState, test_dataloader: Callabl
     s_ctx, f_ctx, s_test, f_test = (s_ctx[0], f_ctx[0], s_test[0], f_test[0])
     f_mu, f_std = f_mu[0], f_std[0]
     # rescale to original
-    f_ctx, f_mu, f_std = f_ctx * sigma + mu, f_mu * sigma + mu, f_std * sigma
     log_metrics(f_test, f_mu, f_std)
     s = jnp.vstack([s_ctx, s_test])
     f_task = jnp.vstack([f_ctx, jnp.full(f_mu.shape, jnp.nan)])
