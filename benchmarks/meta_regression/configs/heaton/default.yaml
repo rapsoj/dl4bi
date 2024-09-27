@@ -5,8 +5,12 @@ defaults:
 seed: 42
 wandb: True
 project: Heaton
-num_cycles: 3
-train_num_steps: 3000
+train_num_steps:
+ - 3000
+ - 3000
+ - 3000
+ - 1000
+ - 500
 valid_num_steps: null # exhaust valid_dataloader
 valid_interval: 100
 lr_peak: 2.0e-3

@@ -49,7 +49,7 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     state = None
-    for _ in range(cfg.num_cycles):
+    for train_num_steps in range(cfg.train_num_steps):
         rng_data, rng_train, rng_test, rng = random.split(rng, 4)
         train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(
             rng_data,
@@ -60,7 +60,7 @@ def main(cfg: DictConfig):
             cfg.data.num_test.max,
         )
         lr_schedule = cosine_annealing_lr(
-            cfg.train_num_steps,
+            train_num_steps,
             cfg.lr_peak,
             cfg.lr_pct_warmup,
         )
@@ -75,7 +75,7 @@ def main(cfg: DictConfig):
             optimizer,
             train_dataloader,
             valid_dataloader,
-            cfg.train_num_steps,
+            train_num_steps,
             cfg.valid_num_steps,
             cfg.valid_interval,
             state=state,
