@@ -108,7 +108,7 @@ def build_dataloaders(
     valid_lens_test = jnp.repeat(num_test_max, B)
 
     def train_dataloader(rng: jax.Array):
-        reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [1, -1]])
+        reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [-1, -1]])
         while True:
             rng_permute, rng_valid, rng = random.split(rng, 3)
             s_ctxs, f_ctxs, s_tests, f_tests = [], [], [], []
