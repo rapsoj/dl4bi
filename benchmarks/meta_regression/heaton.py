@@ -183,7 +183,6 @@ def log_test_results(rng: jax.Array, state: TrainState, test_dataloader: Callabl
     # remove dummy batch dimension
     s_ctx, f_ctx, s_test, f_test = s_ctx[0], f_ctx[0], s_test[0], f_test[0]
     f_mu, f_std = f_mu[0], f_std[0]
-    # rescale to original
     log_metrics(f_test, f_mu, f_std)
     s = jnp.vstack([s_ctx, s_test])
     f_task = jnp.vstack([f_ctx, jnp.full(f_mu.shape, jnp.nan)])
