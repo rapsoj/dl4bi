@@ -42,6 +42,7 @@ from .metrics import (
     mvn_logpdf,
     prepare_dims,
 )
+from .mle import find_gp_mle
 from .mlp import MLP, MLPMixer, MLPMixerBlock
 from .transformer import (
     KRBlock,
