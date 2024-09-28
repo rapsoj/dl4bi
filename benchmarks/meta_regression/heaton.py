@@ -35,6 +35,11 @@ from dl4bi.meta_regression.train_utils import (
 # "--xla_gpu_enable_highest_priority_async_stream=true "
 # )
 
+# TODO(danj):
+# 1. Standardize Temps
+# 2. Use SGD find optimal lengthscale
+# 3. Pre-train on 90x150 images
+
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
 def main(cfg: DictConfig):
