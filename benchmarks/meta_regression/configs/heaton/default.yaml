@@ -10,7 +10,7 @@ project: Heaton
 train_num_steps: 100000
 valid_num_steps: null # exhaust valid_dataloader
 valid_interval: 1000
-plot_interval: 1000
+plot_interval: 25000
 log_loss_interval: 1000
 lr_peak: 2.0e-3
 lr_pct_warmup: 0.0
