@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import os
 from functools import partial
 from pathlib import Path
 
@@ -24,16 +23,6 @@ from dl4bi.meta_regression.train_utils import (
     save_ckpt,
     train,
 )
-
-# NOTE: uncomment to speed up on NVIDIA GPUs
-# https://jax.readthedocs.io/en/latest/gpu_performance_tips.html#code-generation-flags
-# os.environ['XLA_FLAGS'] = (
-#     '--xla_gpu_enable_triton_softmax_fusion=true '
-#     '--xla_gpu_triton_gemm_any=True '
-#     '--xla_gpu_enable_async_collectives=true '
-#     '--xla_gpu_enable_latency_hiding_scheduler=true '
-#     '--xla_gpu_enable_highest_priority_async_stream=true '
-# )
 
 
 @hydra.main("configs/mnist", config_name="default", version_base=None)

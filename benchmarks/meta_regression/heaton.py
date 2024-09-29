@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from jax import random
 from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
+from sps.utils import random_subgrid
 
 import wandb
 from dl4bi.meta_regression.train_utils import (
@@ -25,20 +25,9 @@ from dl4bi.meta_regression.train_utils import (
     train,
 )
 
-# NOTE: uncomment to speed up on NVIDIA GPUs
-# https://jax.readthedocs.io/en/latest/gpu_performance_tips.html#code-generation-flags
-# os.environ["XLA_FLAGS"] = (
-# "--xla_gpu_enable_triton_softmax_fusion=true "
-# "--xla_gpu_triton_gemm_any=True "
-# "--xla_gpu_enable_async_collectives=true "
-# "--xla_gpu_enable_latency_hiding_scheduler=true "
-# "--xla_gpu_enable_highest_priority_async_stream=true "
-# )
-
 # TODO(danj):
-# 1. Standardize Temps
+# 1. log 2D training plots
 # 2. Use SGD find optimal lengthscale
-# 3. Pre-train on 90x150 images at different resolutions
 
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
@@ -53,39 +42,31 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    state = None
-    for train_num_steps in cfg.train_num_steps:
-        rng_data, rng_train, rng_test, rng = random.split(rng, 4)
-        train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(
-            rng_data,
-            cfg.data.path,
-            cfg.data.valid_pct,
-            cfg.data.num_ctx.min,
-            cfg.data.num_ctx.max,
-            cfg.data.num_test.max,
-        )
-        lr_schedule = cosine_annealing_lr(
-            train_num_steps,
-            cfg.lr_peak,
-            cfg.lr_pct_warmup,
-        )
-        optimizer = optax.chain(
-            optax.clip_by_global_norm(cfg.clip_max_norm),
-            optax.yogi(lr_schedule),
-        )
-        model = instantiate(cfg.model)
-        state = train(
-            rng_train,
-            model,
-            optimizer,
-            train_dataloader,
-            valid_dataloader,
-            train_num_steps,
-            cfg.valid_num_steps,
-            cfg.valid_interval,
-            state=state,
-        )
-        log_test_results(rng_test, state, test_dataloader)
+    rng_data, rng_train, rng_test, rng = random.split(rng, 4)
+    dataloaders = build_dataloaders(rng_data, cfg.data, cfg.kernel, cfg.test)
+    train_dataloader, valid_dataloader, test_dataloader = dataloaders
+    lr_schedule = cosine_annealing_lr(
+        cfg.train_num_steps,
+        cfg.lr_peak,
+        cfg.lr_pct_warmup,
+    )
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(cfg.clip_max_norm),
+        optax.yogi(lr_schedule),
+    )
+    model = instantiate(cfg.model)
+    state = train(
+        rng_train,
+        model,
+        optimizer,
+        train_dataloader,
+        valid_dataloader,
+        cfg.train_num_steps,
+        cfg.valid_num_steps,
+        cfg.valid_interval,
+        # TODO(danj): log training img plots
+    )
+    log_test_results(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -93,71 +74,71 @@ def main(cfg: DictConfig):
 
 def build_dataloaders(
     rng: jax.Array,
-    path: Path,
-    valid_pct: float = 0.10,
-    num_ctx_min: int = 200,
-    num_ctx_max: int = 500,
-    num_test_max: int = 1000,
+    data: DictConfig,
+    kernel: DictConfig,
+    test: DictConfig,
 ):
     """
     The image consists of ~105k observed locations and ~45k unobserved
     locations. For training, we partition the 105k observed locations into train
     and validation datasets.
     """
-    df = pd.read_csv(path)
+    df = pd.read_csv(test.path)
     df.Lat -= df.Lat.mean()
     df.Lon -= df.Lon.mean()
+    mean, std = df.MaskTemp.mean(), df.MaskTemp.std()
+    df.MaskedTemp = (df.MaskTemp - mean) / std
+    df.TrueTemp = (df.TrueTemp - mean) / std
     s_obs, f_obs, s_unobs, f_unobs = split_observed(df)
-    B, L, L_train = 4, s_obs.shape[0], int((1 - valid_pct) * s_obs.shape[0])
-    permute_idx = random.choice(rng, L, (L,), replace=False)
-    s_obs, f_obs = s_obs[permute_idx, :], f_obs[permute_idx, :]
-    s_train, f_train = s_obs[:L_train, :], f_obs[:L_train, :]
-    s_valid, f_valid = s_obs[L_train:, :], f_obs[L_train:, :]
-    valid_lens_test = jnp.repeat(num_test_max, B)
+    L_obs, L_valid_ctx = s_obs.shape[0], int((1 - test.valid_pct) * s_obs.shape[0])
+    L_unobs, L_valid_test = s_unobs.shape[0], L_obs - L_valid_ctx
+    valid_permute_idx = random.choice(rng, L_obs, (L_obs,), replace=False)
+    s_obs, f_obs = s_obs[valid_permute_idx, :], f_obs[valid_permute_idx, :]
+    s_valid_ctx, f_valid_ctx = s_obs[:L_valid_ctx, :], f_obs[:L_valid_ctx, :]
+    s_valid_test, f_valid_test = s_obs[L_valid_ctx:, :], f_obs[L_valid_ctx:, :]
 
     def train_dataloader(rng: jax.Array):
+        """Generates batches of random subgrids."""
+        B, D = data.batch_size, len(data.s)
+        L = jnp.prod(jnp.array([dim.num for dim in data.s]))
+        gp = instantiate(kernel)
+        # NOTE: these reflections assume the data is centered on the origin (0,)*D
         reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [-1, -1]])
+        gp_batch_size = data.batch_size // 4  # account for reflections
+        valid_lens_test = jnp.repeat(L, B)  # all positions in test set
         while True:
-            rng_permute, rng_valid, rng = random.split(rng, 3)
-            s_ctxs, f_ctxs, s_tests, f_tests = [], [], [], []
-            for reflection in reflections:
-                rng_i, rng_permute = random.split(rng_permute)
-                permute_idx = random.choice(rng_i, L_train, (L_train,), replace=False)
-                s_perm, f_perm = s_train[permute_idx, :], f_train[permute_idx, :]
-                s_perm *= reflection
-                s_ctxs += [s_perm[:num_ctx_max, :]]
-                f_ctxs += [f_perm[:num_ctx_max, :]]
-                # NOTE: (s,f)_test are superset of (s,f)_ctx
-                s_tests += [s_perm[:num_test_max, :]]
-                f_tests += [f_perm[:num_test_max, :]]
-            valid_lens_ctx = random.randint(rng_valid, (B,), num_ctx_min, num_ctx_max)
-            yield (
-                jnp.stack(s_ctxs),
-                jnp.stack(f_ctxs),
-                valid_lens_ctx,
-                jnp.stack(s_tests),
-                jnp.stack(f_tests),
-                valid_lens_test,
+            rng_s, rng_f, rng_valid, rng_permute, rng_eps, rng = random.split(rng, 6)
+            s = random_subgrid(rng_s, data.s, data.min_axes_pct).reshape(-1, D)
+            permute_idx = random.choice(rng_permute, L, (L,), replace=False)
+            s = s[permute_idx, :]  # permute so valid lens mask different locations
+            f, *_ = gp.simulate(rng_f, s, gp_batch_size)
+            f = jnp.repeat(f, 4, axis=0)  # [B = MiniB * 4, L, 1]
+            s = jnp.stack([s] * 4) * reflections[:, None, :]
+            s = jnp.vstack([s] * gp_batch_size)
+            valid_lens_ctx = random.randint(
+                rng_valid, (B,), data.num_ctx.min, data.num_ctx.max
             )
+            f_noisy = f + data.obs_noise * random.normal(rng_eps, f.shape)
+            yield s, f_noisy, valid_lens_ctx, s, f, valid_lens_test
 
     def valid_dataloader(rng: jax.Array):
         yield (
-            s_train[None, ...],  # add dummy batch dim
-            f_train[None, ...],
-            jnp.array([L_train]),  # use all train locations
-            s_valid[None, ...],
-            f_valid[None, ...],
-            jnp.array([s_valid.shape[0]]),  # all test points are valid
+            s_valid_ctx[None, ...],  # add dummy batch dim
+            f_valid_ctx[None, ...],
+            jnp.array([L_valid_ctx]),
+            s_valid_test[None, ...],
+            f_valid_test[None, ...],
+            jnp.array([L_valid_test]),
         )
 
     def test_dataloader(rng: jax.Array):
         yield (
-            s_obs[None, ...],  # add a dummy batch dim
+            s_obs[None, ...],
             f_obs[None, ...],
-            jnp.array([L]),  # use all observed locations
+            jnp.array([L_obs]),
             s_unobs[None, ...],
             f_unobs[None, ...],
-            jnp.array([s_unobs.shape[0]]),  # all test points are valid
+            jnp.array([L_unobs]),
         )
 
     return train_dataloader, valid_dataloader, test_dataloader
@@ -188,7 +169,7 @@ def log_test_results(rng: jax.Array, state: TrainState, test_dataloader: Callabl
         valid_lens_test,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
-    # remove dummy batch dimension
+    # remove batch dimension
     s_ctx, f_ctx, s_test, f_test = s_ctx[0], f_ctx[0], s_test[0], f_test[0]
     f_mu, f_std = f_mu[0], f_std[0]
     log_metrics(f_test, f_mu, f_std)
