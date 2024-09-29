@@ -10,7 +10,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import optax
 import pandas as pd
-from jax import random
+from jax import jit, random
 from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
@@ -29,8 +29,7 @@ from dl4bi.meta_regression.train_utils import (
 )
 
 # TODO(danj):
-# 1. log 2D training plots
-# 2. Use SGD find optimal lengthscale
+# 1. Use SGD find optimal lengthscale
 
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
@@ -71,7 +70,7 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         callbacks=[callback],
     )
-    # log_test_results(rng_test, state, test_dataloader)
+    log_test_results(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -102,7 +101,7 @@ def build_dataloaders(
     s_valid_ctx, f_valid_ctx = s_obs[:L_valid_ctx, :], f_obs[:L_valid_ctx, :]
     s_valid_test, f_valid_test = s_obs[L_valid_ctx:, :], f_obs[L_valid_ctx:, :]
 
-    def train_dataloader(rng: jax.Array):
+    def build_train_dataloader():
         """Generates batches of random subgrids."""
         B, D = data.batch_size, len(data.s)
         L = jnp.prod(jnp.array([dim.num for dim in data.s]))
@@ -111,8 +110,9 @@ def build_dataloaders(
         reflections = jnp.array([[1, 1], [-1, 1], [1, -1], [-1, -1]])
         gp_batch_size = data.batch_size // 4  # account for reflections
         valid_lens_test = jnp.repeat(L, B)  # all positions in test set
-        while True:
-            rng_s, rng_f, rng_valid, rng_permute, rng_eps, rng = random.split(rng, 6)
+
+        def gen_batch(rng: jax.Array):
+            rng_s, rng_f, rng_valid, rng_permute, rng_eps = random.split(rng, 5)
             s = random_subgrid(rng_s, data.s, data.min_axes_pct).reshape(-1, D)
             f, *_ = gp.simulate(rng_f, s, gp_batch_size)
             f = jnp.repeat(f, 4, axis=0)  # [B, L, D]
@@ -127,7 +127,7 @@ def build_dataloaders(
             )
             eps = random.normal(rng_eps, f_perm.shape)
             f_perm_noisy = f_perm + data.obs_noise * eps
-            yield (
+            return (
                 s_perm,
                 f_perm_noisy,
                 valid_lens_ctx,
@@ -138,6 +138,13 @@ def build_dataloaders(
                 f,
                 inv_permute_idx,
             )
+
+        def dataloader(rng: jax.Array):
+            while True:
+                rng_batch, rng = random.split(rng)
+                yield gen_batch(rng_batch)
+
+        return dataloader
 
     def valid_dataloader(rng: jax.Array):
         yield (
@@ -159,7 +166,7 @@ def build_dataloaders(
             jnp.array([L_unobs]),
         )
 
-    return train_dataloader, valid_dataloader, test_dataloader
+    return build_train_dataloader(), valid_dataloader, test_dataloader
 
 
 def split_observed(df: pd.DataFrame):
