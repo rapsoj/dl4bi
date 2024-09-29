@@ -82,7 +82,7 @@ def main(cfg: DictConfig):
         cfg.finetune_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        # state=state,
+        state=state,
     )
     log_test_results(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
