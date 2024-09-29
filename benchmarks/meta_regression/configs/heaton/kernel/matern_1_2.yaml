@@ -8,11 +8,11 @@ kwargs:
       dist: normal
       kwargs:
         mu: 1.0
-        sigma: 0.2
+        sigma: 0.1
   ls:
     cls: Prior
     kwargs:
       dist: normal
       kwargs:
         mu: 1.0
-        sigma: 0.25
+        sigma: 0.2

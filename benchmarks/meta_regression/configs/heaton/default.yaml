@@ -1,13 +1,13 @@
 defaults:
   - _self_ # use default global values below
-  - model: tnp_kr_fast
+  - model: tnp_kr_fast_big
   - kernel: matern_1_2
   - data: 30x50
   - test: sim
 seed: 42
 wandb: True
 project: Heaton
-train_num_steps: 10000
+train_num_steps: 15000
 finetune_num_steps: 5000
 valid_num_steps: 100
 valid_interval: 1000
