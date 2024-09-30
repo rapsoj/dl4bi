@@ -99,7 +99,7 @@ def train(
         train_step = tril_cov_train_step
     losses = []
     train_nll, valid_nll, best_valid_nll = float("inf"), float("inf"), float("inf")
-    best_state = None
+    best_state = state
     pbar = tqdm(range(1, train_num_steps + 1), unit=" batches", dynamic_ncols=True)
     for i in pbar:
         batch = next(batches)

@@ -30,7 +30,7 @@ from dl4bi.meta_regression.train_utils import (
 )
 
 # TODO(danj):
-# implement use previous sample as mask for next sample
+# create realistic masks for validation testing
 # implement localized attention
 
 
@@ -85,7 +85,7 @@ def main(cfg: DictConfig):
     #     cfg.valid_interval,
     #     state=state,
     # )
-    log_test_results(rng_test, state, test_dataloader)
+    # log_test_results(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -131,7 +131,7 @@ def build_dataloaders(
         def gen_batch(rng: jax.Array):
             rng_s, rng_f, rng_eps = random.split(rng, 3)
             s = random_subgrid(rng_s, data.s, data.min_axes_pct).reshape(-1, D)
-            f, *_ = gp.simulate(rng_f, s, mB)
+            f, *_ = gp.simulate(rng_f, s, mB)  # f: [mB, L_train, 1]
             # use the next image in the batch to mask the previous
             rot_idx = jnp.arange(1, mB + 1).at[-1].set(0)
             f_mask = f[rot_idx] > 0.5  # P(X > 0.5) ~= 30% for N(0, 1)
@@ -154,9 +154,9 @@ def build_dataloaders(
                 f_ord,
                 valid_lens_test,
                 # also pass full, unmodified originals for plotting
-                jnp.vstack([jnp.array([jnp.stack([s] * N_r) * reflections]) * mB]),
+                jnp.vstack([jnp.stack([s] * N_r) * reflections] * mB),
                 jnp.repeat(f, N_r, axis=0),
-                inv_sort_idx,
+                jnp.repeat(inv_sort_idx, N_r, axis=0),
             )
 
         def dataloader(rng: jax.Array):
