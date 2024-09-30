@@ -18,8 +18,6 @@ kwargs:
             kwargs:
               attn:
                 cls: FusedAttention
-                kwargs:
-                  num_ortho_features: 512
               proj_qs:
                 cls: MLP
                 kwargs:
