@@ -70,17 +70,17 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         callbacks=[callback],
     )
-    state = train(
-        rng_finetune,
-        model,
-        optax.yogi(1e-5),
-        finetune_dataloader,
-        valid_dataloader,
-        cfg.finetune_num_steps,
-        cfg.valid_num_steps,
-        cfg.valid_interval,
-        state=state,
-    )
+    # state = train(
+    #     rng_finetune,
+    #     model,
+    #     optax.yogi(1e-5),
+    #     finetune_dataloader,
+    #     valid_dataloader,
+    #     cfg.finetune_num_steps,
+    #     cfg.valid_num_steps,
+    #     cfg.valid_interval,
+    #     state=state,
+    # )
     log_test_results(rng_test, state, test_dataloader)
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
