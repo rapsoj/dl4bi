@@ -74,6 +74,7 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
         cfg.valid_interval,
         callbacks=[callback],
+        early_stop_patience=cfg.early_stop_patience,
     )
     # NOTE: uncomment to finetune
     # state = train(
