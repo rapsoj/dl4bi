@@ -15,6 +15,7 @@ from jax import jit, random, vmap
 from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
+from optax.schedules import cosine_decay_schedule
 from sps.utils import random_subgrid
 
 import wandb
@@ -22,7 +23,6 @@ from dl4bi.meta_regression.train_utils import (
     Callback,
     TrainState,
     cfg_to_run_name,
-    cosine_annealing_lr,
     evaluate,
     instantiate,
     load_ckpt,
@@ -50,11 +50,8 @@ def main(cfg: DictConfig):
     rng_data, rng_train, rng_test, rng = random.split(rng, 4)
     dataloaders = build_dataloaders(rng_data, cfg.data, cfg.kernel, cfg.test)
     train_dataloader, valid_dataloader, test_dataloader = dataloaders
-    lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps,
-        cfg.lr_peak,
-        cfg.lr_pct_warmup,
-    )
+    num_decay_steps = int(cfg.lr_pct_decay * cfg.num_train_steps)
+    lr_schedule = cosine_decay_schedule(cfg.lr_peak, num_decay_steps, cfg.lr_alpha)
     optimizer = optax.chain(
         optax.clip_by_global_norm(cfg.clip_max_norm),
         optax.yogi(lr_schedule),
@@ -64,16 +61,19 @@ def main(cfg: DictConfig):
     callback = Callback(partial(log_img_plots, shape=(H, W, 1)), cfg.plot_interval)
     state = None
     finetune_path = cfg.get("finetune", None)
+    train_num_steps = cfg.train_num_steps
     if finetune_path:
         state, _ = load_ckpt(Path(finetune_path))
         optimizer = optax.yogi(cfg.lr_finetune)
+        train_dataloader = valid_dataloader
+        train_num_steps = cfg.finetune_num_steps
     state = train(
         rng_train,
         model,
         optimizer,
         train_dataloader,
         valid_dataloader,
-        cfg.train_num_steps,
+        train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
         callbacks=[callback],
