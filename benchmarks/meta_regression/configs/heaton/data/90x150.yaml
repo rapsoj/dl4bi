@@ -6,6 +6,9 @@ s: # each image i s ~1% the size of the original 300x500
   - start: -2.5 # x = Lon
     stop: 2.5
     num: 150
+num_ctx:
+  min: 6750 # ~50%
+  max: 10125 # ~75%
 mask_threshold: 1.0 # P(X > 1.0) =~ 15% for N(0, 1)
 min_pct_valid: 0.5
 batch_size: 16
