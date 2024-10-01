@@ -11,6 +11,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import optax
 import pandas as pd
+from jax import jit
 from jax import random, vmap
 from jax.scipy.stats import norm
 from matplotlib.axes import Axes
@@ -114,18 +115,23 @@ def build_dataloaders(
         """Generates batches of random subgrids."""
         gp = instantiate(kernel)
         valid_lens_test = jnp.repeat(L_train, B)
+        pct_valid = jit(lambda f: (f < data.mask_threshold).sum(axis=(1, 2)) / L_train)
 
         def gen_batch(rng: jax.Array):
             rng_s, rng_f, rng_eps = random.split(rng, 3)
             s = random_subgrid(rng_s, data.s, data.min_axes_pct).reshape(-1, D)
             f, *_ = gp.simulate(rng_f, s, mB)  # f: [mB, L_train, 1]
+            # resample any sample in batch has than min_pct_valid locations
+            while (pct_valid(f) < data.min_pct_valid).any():
+                rng_re, rng_f = random.split(rng_f)
+                f, *_ = gp.simulate(rng_re, s, mB)  # f: [mB, L_train, 1]
             # use the next image in the batch to mask the previous
             rot_idx = jnp.arange(1, mB + 1).at[-1].set(0)
-            f_mask = f[rot_idx] > 1.0  # P(X > 1.0) ~= 15% for N(0, 1)
+            f_mask = f[rot_idx] > data.mask_threshold
+            valid_lens_ctx = L_train - jnp.repeat(f_mask.sum(axis=(1, 2)), N_r)
             f_masked = f.at[f_mask].set(jnp.nan)
             sort_idx = vmap(jnp.argsort)(f_masked.squeeze())  # nans to end
             inv_sort_idx = vmap(jnp.argsort)(sort_idx)
-            valid_lens_ctx = L_train - jnp.repeat(f_mask.sum(axis=(1, 2)), N_r)
             # use reflections to convert minibatch to full batch
             ss, fs = [], []
             for i in range(mB):

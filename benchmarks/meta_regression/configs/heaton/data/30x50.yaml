@@ -6,9 +6,8 @@ s: # each image i s ~1% the size of the original 300x500
   - start: -2.5 # x = Lon
     stop: 2.5
     num: 50
-num_ctx:
-  min: 375 # 25%
-  max: 1125 # 75%
+mask_threshold: 1.0 # P(X > 1.0) =~ 15% for N(0, 1)
+min_pct_valid: 0.5
 batch_size: 16
 obs_noise: 0.05
 min_axes_pct: 0.05 # used for subsampling grid
