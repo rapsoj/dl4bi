@@ -82,7 +82,7 @@ def main(cfg: DictConfig):
         state=state,
     )
     # NOTE: uncomment to run actual test
-    # log_test_results(rng_test, state, test_dataloader)
+    log_test_results(rng_test, state, test_dataloader)
     metrics = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/heaton/{cfg.seed}/{run_name}")
@@ -255,10 +255,10 @@ def log_metrics(
     cvg = ((f_test >= f_lower) & (f_test <= f_upper)).mean()
     wandb.log(
         {
-            "Test NLL": nll,
-            "Test RSME": rmse,
-            "Test MAE": mae,
-            "Test Coverage": cvg,
+            "Heaton Test NLL": nll,
+            "Heaton Test RSME": rmse,
+            "Heaton Test MAE": mae,
+            "Heaton Test Coverage": cvg,
         }
     )
 
