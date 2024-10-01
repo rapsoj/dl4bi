@@ -122,9 +122,9 @@ def build_dataloaders(
             s = random_subgrid(rng_s, data.s, data.min_axes_pct).reshape(-1, D)
             f, *_ = gp.simulate(rng_f, s, mB)  # f: [mB, L_train, 1]
             # resample any sample in batch has than min_pct_valid locations
-            while (pct_valid(f) < data.min_pct_valid).any():
-                rng_re, rng_f = random.split(rng_f)
-                f, *_ = gp.simulate(rng_re, s, mB)  # f: [mB, L_train, 1]
+            # while (pct_valid(f) < data.min_pct_valid).any():
+            #     rng_re, rng_f = random.split(rng_f)
+            #     f, *_ = gp.simulate(rng_re, s, mB)  # f: [mB, L_train, 1]
             # use the next image in the batch to mask the previous
             rot_idx = jnp.arange(1, mB + 1).at[-1].set(0)
             f_mask = f[rot_idx] > data.mask_threshold
