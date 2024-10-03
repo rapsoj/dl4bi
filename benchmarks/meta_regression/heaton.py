@@ -11,6 +11,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import optax
 import pandas as pd
+import wandb
 from jax import jit, random, vmap
 from jax.scipy.stats import norm
 from matplotlib.axes import Axes
@@ -18,7 +19,6 @@ from omegaconf import DictConfig, OmegaConf
 from optax.schedules import cosine_decay_schedule
 from sps.utils import random_subgrid
 
-import wandb
 from dl4bi.meta_regression.train_utils import (
     Callback,
     TrainState,
@@ -126,7 +126,8 @@ def build_dataloaders(
 
         def gen_batch(rng: jax.Array):
             rng_s, rng_f, rng_eps = random.split(rng, 3)
-            s = random_subgrid(rng_s, data.s, data.min_axes_pct).reshape(-1, D)
+            s = random_subgrid(rng_s, data.s, data.min_axes_pct, data.max_axes_pct)
+            s = s.reshape(-1, D)
             f, *_ = gp.simulate(rng_f, s, mB)  # f: [mB, L_train, 1]
             # resample any sample in batch has than min_pct_valid locations
             # while (pct_valid(f) < data.min_pct_valid).any():
