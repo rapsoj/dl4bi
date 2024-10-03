@@ -14,4 +14,4 @@ min_pct_valid: 0.5
 batch_size: 16
 obs_noise: 0.05
 min_axes_pct: 0.05 # used for subsampling grid
-max_axes_pct: 0.50
+max_axes_pct: 1.0
