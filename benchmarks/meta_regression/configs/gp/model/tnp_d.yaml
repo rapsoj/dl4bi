@@ -9,8 +9,9 @@ kwargs:
     kwargs:
       num_blks: 6
       blk:
-        cls: PostNormTransformerEncoderBlock
+        cls: TransformerEncoderBlock
         kwargs:
+          pre_norm: False
           attn:
             cls: MultiHeadAttention
             kwargs:
