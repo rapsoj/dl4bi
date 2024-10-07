@@ -13,8 +13,6 @@ kwargs:
   dec:
     cls: KRStack
     kwargs:
-      num_blks: 6
-      num_reps: 1
       blk:
         cls: KRBlock
         kwargs:

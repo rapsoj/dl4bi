@@ -3,12 +3,10 @@ kwargs:
   embed_s_f:
     cls: MLP
     kwargs:
-      dims: [256, 64]
+      dims: [64, 64, 64, 64]
   dec:
     cls: KRStack
     kwargs:
-      num_blks: 6
-      num_reps: 1
       blk:
         cls: KRBlock
         kwargs:
@@ -20,4 +18,4 @@ kwargs:
   head:
     cls: MLP
     kwargs:
-      dims: [128, 64, 2]
+      dims: [128, 2]

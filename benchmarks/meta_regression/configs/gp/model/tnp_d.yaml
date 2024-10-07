@@ -7,20 +7,10 @@ kwargs:
   enc:
     cls: TransformerEncoder
     kwargs:
-      num_blks: 6
       blk:
         cls: TransformerEncoderBlock
         kwargs:
           pre_norm: False
-          attn:
-            cls: MultiHeadAttention
-            kwargs:
-              num_heads: 4
-          ffn:
-            cls: MLP
-            kwargs:
-              dims: [128, 64]
-          p_dropout: 0.0
   head:
     cls: MLP
     kwargs:
