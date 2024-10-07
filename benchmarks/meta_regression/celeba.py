@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import shutil
+import sys
 from functools import partial
 from pathlib import Path
 from urllib import request
@@ -10,13 +11,13 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import pandas as pd
+import wandb
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 from sps.utils import build_grid
 from tqdm import tqdm
 
-import wandb
 from dl4bi.meta_regression.train_utils import (
     Callback,
     cfg_to_run_name,
@@ -160,7 +161,7 @@ def prepare_data():
         try:
             shutil.unpack_archive(imgs_zip_path, cache_path)
         except shutil.ReadError:
-            msg = "Failed to unpack imgs_align_celeba.zip."
+            msg = "\n\nFailed to unpack imgs_align_celeba.zip."
             msg += " This likely means the download failed."
             msg += " Please see the README for instructions"
             msg += " on downloading the dataset manually."
