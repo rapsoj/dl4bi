@@ -223,7 +223,7 @@ def parse_args(argv):
         "-s",
         "--seed",
         type=int,
-        default=7,
+        default=8,
         help="One seed to rule (seed) them all.",
     )
     parser.add_argument(
