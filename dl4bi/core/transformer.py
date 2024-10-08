@@ -22,6 +22,7 @@ class TransformerEncoderBlock(nn.Module):
         norm: A normalization module.
         ffn: A feedforward network module.
         p_dropout: Dropout rate for residual connections.
+        pre_norm: Boolean indicating whether to use-prenormalization.
 
     Returns:
         Input transformed by a single self-attention encoder block.
