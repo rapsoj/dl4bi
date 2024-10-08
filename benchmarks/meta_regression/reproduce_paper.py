@@ -94,9 +94,6 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         overrides,
         "TNP-KR - CelebA",
     )
-    # TODO(danj): add MACE by Lengthscale plots
-    # TODO(danj): add 2D ConvCNP if it isn't terrible
-    # TODO(danj): Manua Loa CO2 extrapolation
 
 
 def lore_paper(seeds: jax.Array, dry_run: bool = False):
