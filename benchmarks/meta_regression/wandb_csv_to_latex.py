@@ -21,8 +21,7 @@ def main(args):
     x = df[[*args.group_by, *args.metrics]].groupby(args.group_by).agg(func)
     x = x.reset_index()
     if args.pivot:
-        index = args.group_by
-        index.remove(args.pivot)
+        index = [c for c in args.group_by if c != args.pivot]
         x = x.pivot(index=index, columns=args.pivot, values=args.metrics)
         x = x.reset_index()
     x_tex = x.to_latex(
@@ -52,14 +51,13 @@ def parse_args(argv):
         "-g",
         "--group_by",
         nargs="+",
-        default=["Name", "kernel.kwargs.kernel.func"],
+        default=["Name"],
         help="Columns to group by.",
     )
     parser.add_argument(
         "-p",
         "--pivot",
         nargs="?",
-        default="kernel.kwargs.kernel.func",
         help="Pivot to column headers.",
     )
     parser.add_argument(
