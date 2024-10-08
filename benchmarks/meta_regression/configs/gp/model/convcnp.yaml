@@ -1,8 +1,9 @@
+# https://github.com/YannDubs/Neural-Process-Family/blob/master/jupyter/reproducibility/ConvCNP.ipynb
 cls: ConvCNP
 kwargs:
   s_min: -2.5 # add 0.5 padding on each size as in ConvCNP impl
   s_max: 2.5
-  points_per_unit: 128 # default in ConvCNP impl
+  points_per_unit: 64
   enc:
     cls: ConvDeepSet
     kwargs:
