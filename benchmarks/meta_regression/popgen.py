@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import os
 from functools import partial
 from pathlib import Path
 
@@ -8,11 +7,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+import wandb
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
-import wandb
 from dl4bi.meta_regression.train_utils import (
     Callback,
     cfg_to_run_name,
@@ -33,7 +32,7 @@ def main(cfg: DictConfig):
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
-        name=cfg.get("name", run_name),
+        name=run_name,
         project=cfg.project,
     )
     print(OmegaConf.to_yaml(cfg))
