@@ -8,9 +8,9 @@ import jax.numpy as jnp
 from jax import jit, random
 from jaxlib.xla_client import XlaRuntimeError
 from omegaconf import DictConfig
+from tqdm import tqdm
 
 from dl4bi.meta_regression.train_utils import (
-    build_gp_dataloader,
     cfg_to_run_name,
     load_ckpt,
 )
@@ -18,11 +18,9 @@ from dl4bi.meta_regression.train_utils import (
 
 @hydra.main("configs/gp", config_name="default", version_base=None)
 def main(cfg: DictConfig):
-    num_exp = 6  # TODO(danj): change back to 6
+    num_exp = 6
     num_trials = 100
-    cfg.data.batch_size = 1
-    cfg.data.num_ctx.min = 100
-    cfg.data.num_ctx.max = 100
+    num_fixed = 100
     rng = random.key(cfg.seed)
     s_dim = len(cfg.data.s)
     min_s = jnp.array([axis["start"] for axis in cfg.data.s])
@@ -31,47 +29,61 @@ def main(cfg: DictConfig):
     path = f"results/gp/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
     path = Path(path)
     state, _ = load_ckpt(path.with_suffix(".ckpt"))
-    dataloader = build_gp_dataloader(cfg.data, cfg.kernel)
-    s_ctx, f_ctx, valid_lens_ctx, *_ = next(dataloader(rng))
+    s = random.uniform(rng, (10**num_exp, s_dim), minval=min_s, maxval=max_s)[None, ...]
+    f = random.normal(rng, (10**num_exp, 1))[None, ...]
 
     @jit
-    def apply(s_test):
+    def apply(s_ctx, f_ctx, s_test):
         return state.apply_fn(
             {"params": state.params, **state.kwargs},
             s_ctx,
             f_ctx,
             s_test,
-            valid_lens_ctx,
+            valid_lens_ctx=None,
             valid_lens_test=None,
             rngs={"extra": rng},
         )
 
-    results = {}
+    results = {"ctx": {}, "test": {}}
+    # == vary number of test points
+    s_ctx = s[:, :num_fixed, :]
+    f_ctx = s[:, :num_fixed, :]
+    for exp in tqdm(range(num_exp + 1), desc="exp"):  # 10^0 -> 10^num_exp
+        num_points = 10**exp
+        s_test = s[:, :num_points, :]
+        # run once to JIT and if it OOMs, skip to varying context points
+        try:
+            apply(s_ctx, f_ctx, s_test)
+        except XlaRuntimeError:  # OOM
+            break
+        start = time()
+        for i in tqdm(range(num_trials), desc="trial", leave=False):
+            apply(s_ctx, f_ctx, s_test)
+        stop = time()
+        results["test"][num_points] = (stop - start) / num_trials
+    # == vary number of context points
+    s_test = s[:, :num_fixed, :]
     for exp in range(num_exp + 1):  # 10^0 -> 10^num_exp
         num_points = 10**exp
-        s_test = random.uniform(
-            rng,
-            (cfg.data.num_ctx.max, s_dim),
-            minval=min_s,
-            maxval=max_s,
-        )[None, ...]  # add batch dim
+        s_ctx = s[:, :num_points, :]
+        f_ctx = s[:, :num_points, :]
         # run once to JIT and if it OOMs, skip this and remaining tests
         try:
-            apply(s_test)
+            apply(s_ctx, f_ctx, s_test)
         except XlaRuntimeError:  # OOM
-            print(results)
-            with open(path.with_suffix("_runtimes.json"), "w") as f:
+            with open(path.with_stem(path.stem + "_runtimes.json"), "w") as f:
                 json.dump(results, f, indent=2, sort_keys=True)
-            return
+            return results
         start = time()
         for i in range(num_trials):
-            apply(s_test)
+            apply(s_ctx, f_ctx, s_test)
         stop = time()
-        results[num_points] = (stop - start) / num_trials
-    print(results)
-    with open(path.with_suffix("_runtimes.json"), "w") as f:
+        results["ctx"][num_points] = (stop - start) / num_trials
+    with open(path.with_stem(path.stem + "_runtimes.json"), "w") as f:
         json.dump(results, f, indent=2, sort_keys=True)
+    return results
 
 
 if __name__ == "__main__":
-    main()
+    results = main()
+    print(results)
