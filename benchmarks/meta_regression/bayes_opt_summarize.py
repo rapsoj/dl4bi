@@ -18,7 +18,7 @@ def main():
     df.columns = ["gp", "kernel", "seed", "model", "regret"]
     df = df.groupby(["gp", "kernel", "model"]).agg({"regret": ["mean", "std"]})
     df.columns = ["mean", "std"]
-    df = df.apply(lambda r: f"${r['mean']:0.2f}\\pm{r['std']:.2f}$", axis=1)
+    df = df.apply(lambda r: f"${r['mean']:0.3f}\\pm{r['std']:.3f}$", axis=1)
     df = df.reset_index()
     colnames = list(df.columns)
     colnames[-1] = "regret"
