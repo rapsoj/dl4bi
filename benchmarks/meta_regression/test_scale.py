@@ -7,7 +7,6 @@ from time import time
 import hydra
 import jax.numpy as jnp
 from jax import jit, random
-from jaxlib.xla_client import XlaRuntimeError
 from omegaconf import DictConfig
 from tqdm import tqdm
 
