@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import os
 from pathlib import Path
 from time import time
 
@@ -14,6 +15,8 @@ from dl4bi.meta_regression.train_utils import (
     cfg_to_run_name,
     load_ckpt,
 )
+
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
 @hydra.main("configs/gp", config_name="default", version_base=None)
@@ -48,13 +51,13 @@ def main(cfg: DictConfig):
     # == vary number of test points
     s_ctx = s[:, :num_fixed, :]
     f_ctx = s[:, :num_fixed, :]
-    for exp in tqdm(range(num_exp + 1), desc="exp"):  # 10^0 -> 10^num_exp
+    for exp in tqdm(range(num_exp + 1), desc="test"):  # 10^0 -> 10^num_exp
         num_points = 10**exp
         s_test = s[:, :num_points, :]
         # run once to JIT and if it OOMs, skip to varying context points
         try:
             apply(s_ctx, f_ctx, s_test)
-        except XlaRuntimeError:  # OOM
+        except Exception:  # OOM
             break
         start = time()
         for i in tqdm(range(num_trials), desc="trial", leave=False):
@@ -63,7 +66,7 @@ def main(cfg: DictConfig):
         results["test"][num_points] = (stop - start) / num_trials
     # == vary number of context points
     s_test = s[:, :num_fixed, :]
-    for exp in range(num_exp + 1):  # 10^0 -> 10^num_exp
+    for exp in tqdm(range(num_exp + 1), desc="ctx"):  # 10^0 -> 10^num_exp
         num_points = 10**exp
         s_ctx = s[:, :num_points, :]
         f_ctx = s[:, :num_points, :]
