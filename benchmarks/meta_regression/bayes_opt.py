@@ -7,12 +7,12 @@ import hydra
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import wandb
 from jax import jit, random
 from jax.scipy import stats
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-import wandb
 from dl4bi.core import mask_from_valid_lens
 from dl4bi.meta_regression.train_utils import (
     TrainState,
@@ -33,7 +33,7 @@ def main(cfg: DictConfig):
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
-        name=cfg.get("name", run_name),
+        name=run_name,
         project=cfg.get("project", "Bayesian Optimization"),
         reinit=True,  # allows reinitialization for multiple runs
     )
