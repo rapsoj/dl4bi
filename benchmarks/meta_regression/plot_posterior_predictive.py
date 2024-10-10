@@ -20,16 +20,6 @@ def kernel_fn_to_plot_name(kernel_fn):
     return plot_name
 
 
-def kernel_name_to_fn(kernel_names: list[str]):
-    kernel_fns = []
-    valid_kernels = {k.__name__: k for k in [rbf, matern_3_2, periodic]}
-    for kernel_name in kernel_names:
-        if kernel_name not in valid_kernels:
-            raise ValueError(f"Unidentified kernel name used: {kernel_name}")
-        kernel_fns.append(valid_kernels[kernel_name])
-    return kernel_fns
-
-
 def get_models(ckpt_base_dir: str, model_seed: int, model_name: str, kernels: list):
     return {
         kernel_fn.__name__: tu.load_ckpt(
@@ -199,7 +189,7 @@ def get_args():
         help="List of kernels to use",
     )
     args = parser.parse_args()
-    args.kernels = kernel_name_to_fn(args.kernels)
+    args.kernels = [globals()[k] for k in args.kernels]
     return args
 
 
