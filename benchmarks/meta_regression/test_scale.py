@@ -73,7 +73,7 @@ def main(cfg: DictConfig):
         # run once to JIT and if it OOMs, skip this and remaining tests
         try:
             apply(s_ctx, f_ctx, s_test)
-        except XlaRuntimeError:  # OOM
+        except Exception:  # OOM
             with open(path.with_stem(path.stem + "_runtimes.json"), "w") as f:
                 json.dump(results, f, indent=2, sort_keys=True)
             return results
