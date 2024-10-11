@@ -16,7 +16,7 @@ def main():
         dfs += [df]
     df = pd.concat(dfs)
     df.columns = ["gp", "kernel", "seed", "model", "regret"]
-    df = df.groupby(["gp", "kernel", "model"]).agg({"regret": ["mean", "std"]})
+    df = df.groupby(["gp", "kernel", "model"]).agg({"regret": ["mean", "sem"]})
     df.columns = ["mean", "std"]
     df = df.apply(lambda r: f"${r['mean']:0.3f}\\pm{r['std']:.3f}$", axis=1)
     df = df.reset_index()
