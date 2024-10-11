@@ -37,8 +37,6 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     gp_kernels_2d = ["rbf"]
     models = [
         "tnp_d",
-        "tnp_kr_full_rff",
-        "tnp_kr_fast_rff",
         "tnp_kr_full",
         "tnp_kr_fast",
         "np",
@@ -49,12 +47,17 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         "banp",
         "convcnp",
     ]
+    models_1d_long = [
+        "tnp_d",
+        "tnp_kr_full",
+        "tnp_kr_fast",
+        "convcnp",
+    ]
     exclude_2d = ["bnp", "banp", "convcnp"]
     models_2d = [m for m in models if m not in exclude_2d]
-    gp_models_2d = [m.replace("rff", "rff_2d") for m in models_2d]
     gp_benchmark(
         seeds,
-        1,
+        "1d",
         gp_kernels_1d,
         models,
         gp_main,
@@ -63,7 +66,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     )
     gp_benchmark(
         seeds,
-        1,
+        "1d",
         gp_kernels_1d,
         models,
         bayes_opt_main,
@@ -72,9 +75,27 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     )
     gp_benchmark(
         seeds,
-        2,
+        "1d_long",
+        gp_kernels_1d,
+        models_1d_long,
+        gp_main,
+        overrides,
+        "TNP-KR - Gaussian Processes",
+    )
+    gp_benchmark(
+        seeds,
+        "1d_long",
+        gp_kernels_1d,
+        models_1d_long,
+        bayes_opt_main,
+        overrides,
+        "TNP-KR - Bayesian Optimization",
+    )
+    gp_benchmark(
+        seeds,
+        "2d",
         gp_kernels_2d,
-        gp_models_2d,
+        models_2d,
         gp_main,
         overrides,
         "TNP-KR - Gaussian Processes",
@@ -94,6 +115,14 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         celeba_main,
         overrides,
         "TNP-KR - CelebA",
+    )
+    img_benchmark(
+        seeds,
+        "configs/cifar_10",
+        models_2d,
+        cifar_10_main,
+        overrides,
+        "TNP-KR - Cifar 10",
     )
 
     img_benchmark(
@@ -129,7 +158,7 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
         overrides += [override]
     gp_benchmark(
         seeds,
-        1,
+        "1d",
         gp_kernels_1d,
         models,
         gp_main,
@@ -138,7 +167,7 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
     )
     gp_benchmark(
         seeds,
-        2,
+        "2d",
         gp_kernels_2d,
         models,
         gp_main,
@@ -166,7 +195,7 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
 
 def gp_benchmark(
     seeds: jax.Array,
-    dim: int = 1,
+    data: str = "1d",
     kernels: list[str] = ["rbf", "periodic", "tnp_kr"],
     models: list[str] = ["tnp_kr_fast"],
     main_fn: Callable = gp_main,
@@ -182,7 +211,7 @@ def gp_benchmark(
                             "default",
                             overrides=[
                                 f"project={project}",
-                                f"data={dim}d",
+                                f"data={data}",
                                 f"model={model}",
                                 f"kernel={kernel}",
                                 f"seed={seed}",
