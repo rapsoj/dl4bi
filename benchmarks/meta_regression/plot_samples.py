@@ -1,198 +1,99 @@
-import argparse
-from pathlib import Path
+import re
+from glob import glob
 
-import jax.numpy as jnp
+import hydra
 import matplotlib.pyplot as plt
 from jax import random
-from sps.gp import GP
-from sps.kernels import matern_3_2, periodic, rbf
-from sps.priors import Prior
+from omegaconf import DictConfig
 
-import dl4bi.meta_regression.train_utils as tu
-
-
-def kernel_fn_to_plot_name(kernel_fn):
-    plot_name = {rbf: "RBF", matern_3_2: "Matern 3/2", periodic: "Periodic"}.get(
-        kernel_fn, None
-    )
-    if plot_name is None:
-        raise ValueError(f"Unidentified kernel function used: {kernel_fn.__name__}")
-    return plot_name
+from dl4bi.meta_regression.train_utils import (
+    build_gp_dataloader,
+    cfg_to_run_name,
+    load_ckpt,
+    plot_posterior_predictive,
+)
 
 
-def get_models(ckpt_base_dir: str, model_seed: int, model_name: str, kernels: list):
-    return {
-        kernel_fn.__name__: tu.load_ckpt(
-            Path(ckpt_base_dir) / f"{kernel_fn.__name__}/{model_seed}/{model_name}.ckpt"
-        )[0]
-        for kernel_fn in kernels
-    }
+@hydra.main(config_name="default", version_base=None)
+def main(cfg: DictConfig):
+    gp_tasks = re.compile("Gaussian Processes", re.IGNORECASE)
+    img_tasks = re.compile("MNIST|CelebA|Cifar", re.IGNORECASE)
+    only_regex = re.compile(cfg.get("only", ".*"), re.IGNORECASE)
+    exclude_regex = re.compile(cfg.get("exclude", ""), re.IGNORECASE)
+    if gp_tasks.match(cfg.project):
+        if "1d" in cfg.data.name:
+            return plot_1d_gp_samples(cfg, only_regex, exclude_regex)
+        return plot_2d_gp_samples(cfg, only_regex, exclude_regex)
+    elif img_tasks.match(cfg.project):
+        return plot_2d_img_samples(cfg, only_regex, exclude_regex)
 
 
-def sample(
-    num_ctx,
-    rng_sample,
-    kernel_fn,
-    ls,
-    rng_gp,
-    rng_noise,
-    obs_noise=0.1,
-    period=1.5,
+def plot_1d_gp_samples(
+    cfg,
+    only_regex,
+    exclude_regex,
+    num_ctx=10,
+    lengthscales=[0.1, 0.3, 0.5],
+    num_samples=16,
 ):
-    s_min, s_max, num_test = -2, 2, 128
-    s_test = jnp.linspace(s_min, s_max, num_test)[:, None]
-    s_ctx = random.uniform(rng_sample, minval=s_min, maxval=s_max, shape=(num_ctx, 1))
-    if kernel_fn == periodic:
-        gp = GP(
-            kernel_fn,
-            ls=Prior("fixed", {"value": ls}),
-            period=Prior("fixed", {"value": period}),
-        )
-    else:
-        gp = GP(kernel_fn, ls=Prior("fixed", {"value": ls}))
-    f, *_ = gp.simulate(rng_gp, jnp.vstack([s_ctx, s_test]), batch_size=1)
-    f_ctx, f_test = f[0, :num_ctx, :], f[0, num_ctx:, :]
-    f_ctx = f_ctx + obs_noise * random.normal(rng_noise, f_ctx.shape)
-    return s_ctx, f_ctx, s_test, f_test
-
-
-def plot_kernel_lengthscale_posterior(
-    ckpt_base_dir: str,
-    output_dir_base: str,
-    model_seed: int = 20,
-    model_name: str = "TNPKR Fast",
-    kernels: list = [rbf, matern_3_2, periodic],
-    lengthscales: list[float] = [0.1, 0.3, 0.5],
-    num_ctx: int = 10,
-    num_repeats: int = 1,
-):
-    output_dir = (Path(output_dir_base) / model_name) / str(num_ctx)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    models = get_models(ckpt_base_dir, model_seed, model_name, kernels)
-
-    for example in range(num_repeats):
-        rng = random.key(example)
-        plt.clf()
-        fig, axs = plt.subplots(
-            len(kernels),
-            len(lengthscales),
-            figsize=(6 * len(lengthscales), 4 * len(kernels)),
-        )
-        rng_gp, rng_extra, rng_sample, rng_noise = random.split(rng, 4)
-        for i, kernel_fn in enumerate(kernels):
-            state = models[kernel_fn.__name__]
-            for j, ls in enumerate(lengthscales):
-                s_ctx, f_ctx, s_test, f_test = sample(
-                    num_ctx,
-                    rng_sample,
-                    kernel_fn,
-                    ls,
-                    rng_gp,
-                    rng_noise,
-                )
+    rng = random.key(cfg.seed)
+    rng_data, rng_dropout, rng_extra = random.split(rng, 3)
+    cfg.data.batch_size = 1
+    cfg.data.num_ctx.min = num_ctx
+    cfg.data.num_ctx.max = num_ctx
+    cfg.kernel.kwargs.ls.kwargs.dist = "fixed"
+    dir = f"results/gp/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/"
+    ckpt = {}
+    for p in glob(dir + "*.ckpt"):
+        if only_regex.match(str(p)) and not exclude_regex.match(str(p)):
+            state, tmp_cfg = load_ckpt(p)
+            ckpt[cfg_to_run_name(tmp_cfg)] = state
+    num_rows, num_cols = len(ckpt), len(lengthscales)
+    fig_size = (6 * num_cols, 4 * num_rows)
+    for i in range(num_samples):
+        fig, axs = plt.subplots(num_rows, num_cols, figsize=fig_size)
+        rng_i, rng_data = random.split(rng_data)
+        for col, ls in enumerate(lengthscales):
+            cfg.kernel.kwargs.ls.kwargs.kwargs = {"value": ls}
+            dataloader = build_gp_dataloader(cfg.data, cfg.kernel)
+            s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, *_ = next(dataloader(rng_i))
+            for row, run_name in enumerate(ckpt):
+                state = ckpt[run_name]
                 f_mu, f_std, *_ = state.apply_fn(
                     {"params": state.params, **state.kwargs},
-                    s_ctx[None, ...],
-                    f_ctx[None, ...],
-                    s_test[None, ...],
-                    rngs={"extra": rng_extra},
+                    s_ctx,
+                    f_ctx,
+                    s_test,
+                    valid_lens_ctx,
+                    rngs={"dropout": rng_dropout, "extra": rng_extra},
                 )
-
-                plt.sca(axs[j, i])
-                tu.plot_posterior_predictive(
-                    s_ctx.squeeze(),
-                    f_ctx.squeeze(),
-                    s_test.squeeze(),
-                    f_test.squeeze(),
-                    f_mu.squeeze(),
-                    f_std.squeeze(),
+                plt.sca(axs[row, col])
+                plot_posterior_predictive(
+                    s_ctx[0, :num_ctx, 0],
+                    f_ctx[0, :num_ctx, 0],
+                    s_test[0, :, 0],
+                    f_test[0, :, 0],
+                    f_mu[..., 0],
+                    f_std[..., 0],
                 )
-                axs[j, i].set_title(
-                    f"{kernel_fn_to_plot_name(kernel_fn)}" if j == 0 else ""
-                )
-                axs[j, i].set_ylabel(f"LS={ls}" if i == 0 else "")
-                axs[j, i].set_xlabel("s" if j == len(lengthscales) - 1 else "")
-
-        plot_path = output_dir / f"plot_{num_ctx}_{example}.png"
+                if row == 0:
+                    axs[row, col].set_title(f"ls={ls:0.1f}")
+                if col == 0:
+                    axs[row, col].set_ylabel(run_name)
+                if row == num_rows - 1:
+                    axs[row, col].set_xlabel("s")
         fig.tight_layout()
-        fig.savefig(plot_path, dpi=150)
+        fig.savefig(dir + f"comparison_sample_{i+1}.png", dpi=150)
+        plt.clf()
 
 
-def reproduce_posterior_predictive_plots(args):
-    for model_name in args.models:
-        for num_ctx in args.num_ctx:
-            plot_kernel_lengthscale_posterior(
-                ckpt_base_dir=args.ckpt_base_dir,
-                output_dir_base=args.output_base_dir,
-                num_ctx=num_ctx,
-                model_name=model_name,
-                model_seed=args.model_seed,
-                kernels=args.kernels,
-                num_repeats=args.num_repeats,
-            )
+def plot_2d_gp_samples(rng, cfg, **kwargs):
+    pass
 
 
-def get_args():
-    parser = argparse.ArgumentParser(description="Posterior Predictive Plot Generation")
-    parser.add_argument(
-        "-c",
-        "--ckpt_base_dir",
-        type=str,
-        required=True,
-        help="Base directory containing model checkpoints"
-        " The script expects the models to be saved as <base>/<kernel>/<model_seed>/<model_name>.ckpt",
-    )
-    parser.add_argument(
-        "-o",
-        "--output_base_dir",
-        type=str,
-        required=True,
-        help="Base directory for saving generated plots."
-        " The script will save the plots by <out_base>/<model_name>/<num_ctx>/plot_<num_ctx>_<num_repeat>.png",
-    )
-    parser.add_argument(
-        "-m",
-        "--models",
-        type=str,
-        nargs="+",
-        default=["TNPKR Fast"],
-        help="List of model names to plot",
-    )
-    parser.add_argument(
-        "-n",
-        "--num_ctx",
-        type=int,
-        nargs="+",
-        default=[15],
-        help="List of num_ctx values to process",
-    )
-    parser.add_argument(
-        "-r",
-        "--num_repeats",
-        type=int,
-        default=100,
-        help="Number of times to repeat each plot generation",
-    )
-    parser.add_argument(
-        "-s",
-        "--model_seed",
-        type=int,
-        default=20,
-        help="The seed of the model used to plot",
-    )
-    parser.add_argument(
-        "-k",
-        "--kernels",
-        type=str,
-        nargs="+",
-        default=["rbf", "matern_3_2", "periodic"],
-        help="List of kernels to use",
-    )
-    args = parser.parse_args()
-    args.kernels = [globals()[k] for k in args.kernels]
-    return args
+def plot_2d_img_samples(rng, cfg, **kwargs):
+    pass
 
 
 if __name__ == "__main__":
-    args = get_args()
-    reproduce_posterior_predictive_plots(args)
+    main()

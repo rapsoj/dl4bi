@@ -234,13 +234,14 @@ def evaluate(
 def cfg_to_run_name(cfg: DictConfig):
     name = cfg.model.cls
     if name == "TNPKR":
+        name = "TNP-KR"
         attn_cls = OmegaConf.select(
             cfg, "model.kwargs.dec.kwargs.blk.kwargs.attn.kwargs.attn.cls"
         )
         if attn_cls == "Attention":
-            name += " Full"
+            name += "-Full"
         else:
-            name += " " + attn_cls.replace("Attention", "")  # i.e. Fused, Fast
+            name += "-" + attn_cls.replace("Attention", "")  # i.e. Fused, Fast
         embed_cls = OmegaConf.select(cfg, "model.kwargs.embed_s.cls")
         if embed_cls == "ResidualEmbedding":
             name += " Resid"
@@ -251,6 +252,10 @@ def cfg_to_run_name(cfg: DictConfig):
             "FixedSinusoidalEmbedding",
         ]:
             name += " RFF"
+    if name == "TNPD":
+        name = "TNP-D"
+    if name == "TNPND":
+        name = "TNP-ND"
     return name
 
 
