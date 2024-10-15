@@ -59,7 +59,9 @@ class TNPD(nn.Module):
         Returns:
             $\mu_f,\log(\sigma_f^2\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
-        (B, L_test, _) = s_test.shape
+        (B, L_test, _), L_ctx = s_test.shape, s_ctx.shape[1]
+        if valid_lens_ctx is None:
+            valid_lens_ctx = jnp.repeat(L_ctx, B)
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         s_f_test = jnp.concatenate([s_test, f_test], axis=-1)
