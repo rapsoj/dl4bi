@@ -30,3 +30,18 @@ path <- "~/dl4bi/benchmarks/meta_regression/cache/heaton/"
 all.sim.data %>% write_csv(str_c(path, "sim.csv"))
 all.sat.temps %>% write_csv(str_c(path, "sat.csv"))
 ```
+
+# Plotting Samples
+To compare all models for a project and a given seed:
+`python plot_samples.py --config-path=configs/gp data=1d seed=20`
+`python plot_samples.py --config-path=configs/gp data=1d_long seed=20`
+`python plot_samples.py --config-path=configs/gp data=2d seed=20`
+`python plot_samples.py --config-path=configs/celeba seed=20`
+`python plot_samples.py --config-path=configs/mnist seed=20`
+`python plot_samples.py --config-path=configs/cifar_10 seed=20`
+
+Examples with options:
+`python plot_samples.py --config-path=configs/gp seed=20 +exclude='.*RFF.*' +num_samples=3`
+`python plot_samples.py --config-path=configs/gp data=2d kernel=periodic seed=20 +only='.*TNP.*' +num_samples=3`
+`python plot_samples.py --config-path=configs/gp data=1d_long kernel=periodic seed=20 +exclude='.*B.NP.*' +num_samples=3`
+`python plot_samples.py --config-path=configs/mnist seed=20 +exclude='.*B.NP.*' +num_samples=3`
