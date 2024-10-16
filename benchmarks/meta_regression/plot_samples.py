@@ -1,8 +1,11 @@
+#!/usr/bin/env python3
 import re
+from functools import partial
 from math import prod
 from pathlib import Path
 
 import hydra
+import jax
 import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -11,9 +14,12 @@ from cifar_10 import build_dataloaders as build_dataloaders_cifar_10
 from jax import random
 from mnist import build_dataloaders as build_dataloaders_mnist
 from omegaconf import DictConfig
+from sps.kernels import rbf
+from sps.utils import build_grid
 
 from dl4bi.meta_regression.train_utils import (
     build_gp_dataloader,
+    instantiate,
     load_ckpts,
     plot_img,
     plot_posterior_predictive,
@@ -33,7 +39,7 @@ def main(cfg: DictConfig):
         ckpts = load_ckpts(results_dir, only_regex, exclude_regex)
         if "1d" in cfg.data.name:
             return plot_1d_gp_samples(cfg, ckpts, num_samples, results_dir)
-        return plot_2d_gp_samples(cfg, ckpts, num_samples, results_dir)
+        return plot_2d_img_samples(cfg, ckpts, num_samples, results_dir)
     elif img_tasks.match(cfg.project):
         results_dir /= f"{cfg.seed}"
         ckpts = load_ckpts(results_dir, only_regex, exclude_regex)
@@ -94,51 +100,6 @@ def plot_1d_gp_samples(
         plt.clf()
 
 
-def plot_2d_gp_samples(
-    cfg: DictConfig,
-    ckpts: dict,
-    num_samples: int = 16,
-    results_dir: Path = Path("."),
-    num_ctx: int = 128,
-):
-    rng = random.key(cfg.seed)
-    cfg.data.batch_size = 1
-    cfg.data.num_ctx.min = 0  # use only grid points in dataloader
-    cfg.data.num_ctx.max = 0
-    cfg.kernel.kwargs.ls.kwargs.dist = "fixed"
-    num_rows, num_cols = len(ckpts), 4
-    fig_size = (6 * num_cols, 4 * num_rows)
-    L = prod([axis.num for axis in cfg.data.s])
-    for i in range(num_samples):
-        fig, axs = plt.subplots(num_rows, num_cols, figsize=fig_size)
-        rng_data, rng_permute, rng_dropout, rng_extra, rng = random.split(rng, 5)
-        for col in range(num_cols):
-            dataloader = build_gp_dataloader(cfg.data, cfg.kernel)
-            _, _, _, s, f, *_ = next(dataloader(rng_data))
-            permute_idx = random.choice(rng_permute, L, (L,), replace=False)
-            inv_permute_idx = jnp.argsort(permute_idx)
-            # permute the order and select the first valid_lens_ctx for context
-            s_permuted = s[:, permute_idx, :]
-            f_permuted = f[:, permute_idx, :]
-            valid_lens_ctx = jnp.array([num_ctx])
-            for row, run_name in enumerate(sorted(ckpts)):
-                state = ckpts[run_name]["state"]
-                f_mu, f_std, *_ = state.apply_fn(
-                    {"params": state.params, **state.kwargs},
-                    s_permuted,
-                    f_permuted,
-                    s_permuted,
-                    valid_lens_ctx,
-                    rngs={"dropout": rng_dropout, "extra": rng_extra},
-                )
-                plt.sca(axs[row, col])
-                plt.clf()
-                # TODO(danj): PLOT
-        fig.tight_layout()
-        fig.savefig(results_dir / f"comparison_sample_{i+1}.png", dpi=150)
-        plt.clf()
-
-
 def plot_2d_img_samples(
     cfg: DictConfig,
     ckpts: dict,
@@ -146,24 +107,8 @@ def plot_2d_img_samples(
     results_dir: Path = Path("."),
     num_ctx: int = 50,
 ):
-    matches = lambda pattern: re.match(pattern, cfg.project, re.IGNORECASE)
-    # example project names include "TNP-KR - MNIST", "MNIST", etc, so match
-    cmap = mpl.colormaps.get_cmap("Spectral_r")
-    cmap.set_bad("grey")
-    match cfg.project:
-        case _ if matches("MNIST"):
-            H, W, C = (28, 28, 1)
-            build_dataloaders = build_dataloaders_mnist
-            cmap = mpl.colormaps.get_cmap("grey")
-            cmap.set_bad("blue")
-        case _ if matches("CelebA"):
-            H, W, C = (32, 32, 3)
-            build_dataloaders = build_dataloaders_celeba
-        case _ if matches("Cifar"):
-            H, W, C = (32, 32, 3)
-            build_dataloaders = build_dataloaders_cifar_10
-        case _:
-            raise Exception(f"No dataloader defined for {cfg.project}!")
+    build_dataloaders, shape, cmap, cmap_std = project_parameters(cfg)
+    H, W, C = shape
     train_dataloader, *_ = build_dataloaders(
         batch_size=1,
         num_ctx_min=num_ctx,
@@ -204,7 +149,7 @@ def plot_2d_img_samples(
             )
             plot_img(
                 i,
-                (H, W, C),
+                shape,
                 f_ctx[0, :num_ctx],
                 f_mu[0],
                 f_std[0],
@@ -212,6 +157,7 @@ def plot_2d_img_samples(
                 inv_permute_idx,
                 axs[row_idx],
                 cmap=cmap,
+                cmap_std=cmap_std,
             )
             # NOTE: unset titles by row, unless its the first row
             for col_idx in range(num_cols):
@@ -226,6 +172,95 @@ def plot_2d_img_samples(
         fig.tight_layout()
         fig.savefig(results_dir / f"comparison_sample_{i+1}.png", dpi=150)
         plt.clf()
+
+
+def project_parameters(cfg: DictConfig):
+    cmap = cmap_std = mpl.colormaps.get_cmap("Spectral_r")
+    cmap.set_bad("grey")
+    shape = (32, 32, 3)
+    # example project names include "TNP-KR - MNIST", "MNIST", etc, so match
+    matches = lambda pattern: re.match(pattern, cfg.project, re.IGNORECASE)
+    match cfg.project:
+        case _ if matches("Gaussian Processes"):
+            build_dataloaders = partial(build_dataloaders_gp_2d, cfg=cfg)
+            shape = (16, 16, 1)
+            cmap = mpl.colormaps.get_cmap("grey")
+            cmap.set_bad("blue")
+            # cmap = mpl.colormaps.get_cmap("viridis")
+            # cmap.set_bad("grey")
+        case _ if matches("MNIST"):
+            build_dataloaders = build_dataloaders_mnist
+            shape = (28, 28, 1)
+            cmap = mpl.colormaps.get_cmap("grey")
+            cmap.set_bad("blue")
+        case _ if matches("CelebA"):
+            build_dataloaders = build_dataloaders_celeba
+        case _ if matches("Cifar"):
+            build_dataloaders = build_dataloaders_cifar_10
+        case _:
+            raise Exception(f"No dataloader defined for {cfg.project}!")
+    return build_dataloaders, shape, cmap, cmap_std
+
+
+def build_dataloaders_gp_2d(
+    batch_size: int,
+    num_ctx_min: int,
+    num_ctx_max: int,
+    num_test_max: int,
+    cfg: DictConfig,
+):
+    """A custom 2D GP dataloader for plotting 2D images.
+
+    .. note::
+        The dataloader used for training and testing uses context points
+        on a continuous domain, while this only uses points on a grid for
+        visualization purposes.
+    """
+    gp = instantiate(cfg.kernel)
+    s_dim = len(cfg.data.s)
+    s_grid = build_grid(cfg.data.s).reshape(-1, s_dim)  # flatten spatial dims
+    s = jnp.repeat(s_grid[None, ...], batch_size, axis=0)
+    L = s.shape[1]
+    obs_noise, batch_size = cfg.data.obs_noise, batch_size
+    valid_lens_test = jnp.repeat(L, batch_size)
+
+    def gen_batch(rng: jax.Array):
+        rng_gp, rng_eps, rng_valid, rng_permute, rng = random.split(rng, 5)
+        f, var, ls, period, *_ = gp.simulate(rng_gp, s_grid, batch_size)
+        f_noisy = f + obs_noise * random.normal(rng_eps, f.shape)
+        valid_lens_ctx = random.randint(
+            rng_valid,
+            (batch_size,),
+            num_ctx_min,
+            num_ctx_max,
+        )
+        permute_idx = random.choice(rng_permute, L, (L,), replace=False)
+        inv_permute_idx = jnp.argsort(permute_idx)
+        s_permuted = s[:, permute_idx, :]
+        f_permuted = f[:, permute_idx, :]
+        f_noisy_permuted = f_noisy[:, permute_idx, :]
+        s_ctx = s_permuted[:, :num_ctx_max, :]
+        f_ctx = f_noisy_permuted[:, :num_ctx_max, :]
+        s_test = s_permuted[:, :num_test_max, :]
+        f_test = f_permuted[:, :num_test_max, :]
+        return (
+            s_ctx,
+            f_ctx,
+            valid_lens_ctx,
+            s_test,
+            f_test,
+            valid_lens_test,
+            s,  # add full original for plotting
+            f,
+            inv_permute_idx,
+        )
+
+    def dataloader(rng: jax.Array):
+        while True:
+            rng_batch, rng = random.split(rng)
+            yield gen_batch(rng_batch)
+
+    return (dataloader, dataloader, dataloader)  # train, valid, test
 
 
 if __name__ == "__main__":
