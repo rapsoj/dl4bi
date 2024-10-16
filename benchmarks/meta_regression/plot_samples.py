@@ -2,14 +2,19 @@ import re
 from glob import glob
 
 import hydra
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+from celeba import build_dataloaders as build_dataloaders_celeba
+from cifar_10 import build_dataloaders as build_dataloaders_cifar_10
 from jax import random
+from mnist import build_dataloaders as build_dataloaders_mnist
 from omegaconf import DictConfig
 
 from dl4bi.meta_regression.train_utils import (
     build_gp_dataloader,
     cfg_to_run_name,
     load_ckpt,
+    plot_img,
     plot_posterior_predictive,
 )
 
@@ -19,13 +24,14 @@ def main(cfg: DictConfig):
     gp_tasks = re.compile("Gaussian Processes", re.IGNORECASE)
     img_tasks = re.compile("MNIST|CelebA|Cifar", re.IGNORECASE)
     only_regex = re.compile(cfg.get("only", ".*"), re.IGNORECASE)
-    exclude_regex = re.compile(cfg.get("exclude", ""), re.IGNORECASE)
+    exclude_regex = re.compile(cfg.get("exclude", r"^$"), re.IGNORECASE)
+    num_samples = cfg.get("num_samples", 16)
     if gp_tasks.match(cfg.project):
         if "1d" in cfg.data.name:
             return plot_1d_gp_samples(cfg, only_regex, exclude_regex)
         return plot_2d_gp_samples(cfg, only_regex, exclude_regex)
     elif img_tasks.match(cfg.project):
-        return plot_2d_img_samples(cfg, only_regex, exclude_regex)
+        return plot_2d_img_samples(cfg, only_regex, exclude_regex, num_samples)
 
 
 def plot_1d_gp_samples(
@@ -43,11 +49,7 @@ def plot_1d_gp_samples(
     cfg.data.num_ctx.max = num_ctx
     cfg.kernel.kwargs.ls.kwargs.dist = "fixed"
     dir = f"results/gp/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/"
-    ckpt = {}
-    for p in glob(dir + "*.ckpt"):
-        if only_regex.match(str(p)) and not exclude_regex.match(str(p)):
-            state, tmp_cfg = load_ckpt(p)
-            ckpt[cfg_to_run_name(tmp_cfg)] = state
+    ckpt = load_ckpts(dir, only_regex, exclude_regex)
     num_rows, num_cols = len(ckpt), len(lengthscales)
     fig_size = (6 * num_cols, 4 * num_rows)
     for i in range(num_samples):
@@ -76,6 +78,7 @@ def plot_1d_gp_samples(
                     f_mu[..., 0],
                     f_std[..., 0],
                 )
+                # NOTE: only set title and labels for upper-left most axes
                 if row == 0:
                     axs[row, col].set_title(f"ls={ls:0.1f}")
                 if col == 0:
@@ -91,8 +94,107 @@ def plot_2d_gp_samples(rng, cfg, **kwargs):
     pass
 
 
-def plot_2d_img_samples(rng, cfg, **kwargs):
-    pass
+def get_image_task_dataloader(cfg: DictConfig, num_ctx: int, img_ax_size: int):
+    L = img_ax_size * img_ax_size
+    build_data_loader = {
+        "MNIST": build_dataloaders_mnist,
+        "CelebA": build_dataloaders_celeba,
+        "Cifar_10": build_dataloaders_cifar_10,
+    }[cfg.project]
+    return build_data_loader(
+        batch_size=1,
+        num_ctx_max=num_ctx,
+        num_ctx_min=num_ctx,
+        num_test_max=L,
+    )[-1]
+
+
+def plot_2d_img_samples(cfg, only_regex, exclude_regex, num_samples=16, num_ctx=50):
+    dir = f"results/{cfg.project.lower()}/{cfg.seed}/"
+    ckpt = load_ckpts(dir, only_regex, exclude_regex)
+    num_channels, fig_size = {"MNIST": (1, 28), "CelebA": (3, 32), "Cifar_10": (3, 32)}[
+        cfg.project
+    ]
+    task_dataloader = get_image_task_dataloader(cfg, num_ctx, fig_size)
+    for i in range(num_samples):
+        min_boundary, max_boundary = 10, -10
+        rng = random.key(i)
+        rng_extra, rng_sample = random.split(rng)
+        (
+            s_ctx,
+            f_ctx,
+            valid_lens_ctx,
+            _,
+            _,
+            valid_lens_test,
+            s_test_full,
+            f_test_full,
+            inv_permute_idx,
+        ) = next(task_dataloader(rng_sample))
+        plt.clf()
+        num_rows, num_cols = len(ckpt), 4
+        fig, axs = plt.subplots(
+            num_rows,
+            num_cols,
+            figsize=(9 * num_cols, 6 * num_rows),
+        )
+        model_preds = {}
+        for row_idx, model_name in enumerate(ckpt):
+            state = ckpt[model_name]
+            f_mu, f_std, *_ = state.apply_fn(
+                {"params": state.params, **state.kwargs},
+                s_ctx,
+                f_ctx,
+                s_test_full,
+                valid_lens_ctx,
+                valid_lens_test,
+                rngs={"extra": rng_extra},
+            )
+            model_preds[model_name] = (f_mu, f_std)
+            min_boundary = min(min_boundary, f_std.min())
+            max_boundary = max(max_boundary, f_std.max())
+        sm = mpl.cm.ScalarMappable(
+            cmap="Spectral_r",
+            norm=mpl.colors.Normalize(vmin=min_boundary, vmax=max_boundary),
+        )
+        sm.set_array([])
+        for row_idx, model_name in enumerate(ckpt):
+            f_mu, f_std = model_preds[model_name]
+            plot_img(
+                0,
+                (fig_size, fig_size, num_channels),
+                f_ctx[0, :num_ctx],
+                f_mu[0],
+                f_std[0],
+                f_test_full[0],
+                inv_permute_idx,
+                axs[row_idx],
+            )
+            # NOTE: unset titles by row, unless its the first row, and increase tick size
+            for col_idx in range(num_cols):
+                axs[row_idx, col_idx].tick_params(axis="both", labelsize=16)
+                if row_idx != 0:
+                    axs[row_idx, col_idx].set_title("")
+                else:
+                    axs[row_idx, col_idx].set_title(
+                        axs[row_idx, col_idx].get_title(), fontsize=24
+                    )
+            axs[row_idx, 0].set_ylabel(f"{model_name}", fontsize=24)
+        cbar_ax = fig.add_axes([0.05, 0.3, 0.02, 0.4])
+        fig.colorbar(sm, cax=cbar_ax)
+        fig.tight_layout(rect=[0.05, 0, 1, 1])
+        fig.savefig(dir + f"comparison_sample_{i+1}.png", dpi=150)
+        plt.clf()
+
+
+def load_ckpts(dir: str, only_regex: re.Pattern, exclude_regex: re.Pattern):
+    """Loads all checkpoints in a given base dir"""
+    ckpt = {}
+    for p in glob(dir + "*.ckpt"):
+        if only_regex.match(str(p)) and not exclude_regex.match(str(p)):
+            state, tmp_cfg = load_ckpt(p)
+            ckpt[cfg_to_run_name(tmp_cfg)] = state
+    return ckpt
 
 
 if __name__ == "__main__":
