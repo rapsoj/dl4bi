@@ -65,11 +65,11 @@ def plot_1d_gp_samples(
     for i in range(num_samples):
         fig, axs = plt.subplots(num_rows, num_cols, figsize=fig_size)
         rng_i, rng_data = random.split(rng_data)
-        for col, ls in enumerate(lengthscales):
+        for col_idx, ls in enumerate(lengthscales):
             cfg.kernel.kwargs.ls.kwargs.kwargs = {"value": ls}
             dataloader = build_gp_dataloader(cfg.data, cfg.kernel)
             s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, *_ = next(dataloader(rng_i))
-            for row, run_name in enumerate(sorted(ckpts)):
+            for row_idx, run_name in enumerate(sorted(ckpts)):
                 state = ckpts[run_name]["state"]
                 f_mu, f_std, *_ = state.apply_fn(
                     {"params": state.params, **state.kwargs},
@@ -79,7 +79,7 @@ def plot_1d_gp_samples(
                     valid_lens_ctx,
                     rngs={"dropout": rng_dropout, "extra": rng_extra},
                 )
-                plt.sca(axs[row, col])
+                plt.sca(axs[row_idx, col_idx])
                 plot_posterior_predictive(
                     s_ctx[0, :num_ctx, 0],
                     f_ctx[0, :num_ctx, 0],
@@ -89,12 +89,16 @@ def plot_1d_gp_samples(
                     f_std[..., 0],
                 )
                 # NOTE: only set labels for non-interior plots
-                if row == 0:
-                    axs[row, col].set_title(f"ls={ls:0.1f}")
-                if col == 0:
-                    axs[row, col].set_ylabel(run_name)
-                if row == num_rows - 1:
-                    axs[row, col].set_xlabel("s")
+                axs[row_idx, col_idx].set_xticks([])
+                axs[row_idx, col_idx].set_yticks([])
+                axs[row_idx, col_idx].set_xlabel("")
+                axs[row_idx, col_idx].set_ylabel("")
+                if row_idx == 0:
+                    axs[row_idx, col_idx].set_title(
+                        f"lengthscale={ls:0.1f}", fontsize=36
+                    )
+                if col_idx == 0:
+                    axs[row_idx, col_idx].set_ylabel(run_name, fontsize=36)
         fig.tight_layout()
         fig.savefig(results_dir / f"comparison_sample_{i+1}.png", dpi=150)
         plt.clf()
