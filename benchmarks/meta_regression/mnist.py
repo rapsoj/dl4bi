@@ -5,6 +5,7 @@ from pathlib import Path
 import hydra
 import jax
 import jax.numpy as jnp
+import matplotlib as mpl
 import optax
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -49,6 +50,8 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
+    cmap = mpl.colormaps.get_cmap("grey")
+    cmap.set_bad("blue")
     state = train(
         rng_train,
         model,
@@ -59,12 +62,15 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
         cfg.valid_interval,
         callbacks=[
-            Callback(partial(log_img_plots, shape=(28, 28, 1)), cfg.plot_interval)
+            Callback(
+                partial(log_img_plots, shape=(28, 28, 1), cmap=cmap),
+                cfg.plot_interval,
+            )
         ],
     )
     metrics = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path = Path(f"results/mnist/{cfg.seed}/{run_name}")
+    path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 

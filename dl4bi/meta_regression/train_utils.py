@@ -1,4 +1,5 @@
 import pickle
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -322,6 +323,24 @@ def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
     ckpt = {"state": state, "config": OmegaConf.to_container(cfg, resolve=True)}
     save_args = orbax_utils.save_args_from_target(ckpt)
     ckptr.save(path.absolute(), ckpt, save_args=save_args)
+
+
+def load_ckpts(
+    dir: Union[str, Path],
+    only_regex: Union[str, re.Pattern] = r".*",
+    exclude_regex: Union[str, re.Pattern] = "$^",
+):
+    """Loads all checkpoints in a given base dir."""
+    ckpt = {}
+    if isinstance(only_regex, str):
+        only_regex = re.compile(only_regex, re.IGNORECASE)
+    if isinstance(exclude_regex, str):
+        exclude_regex = re.compile(exclude_regex, re.IGNORECASE)
+    for p in Path(dir).glob("*.ckpt"):
+        if only_regex.match(str(p)) and not exclude_regex.match(str(p)):
+            state, tmp_cfg = load_ckpt(p)
+            ckpt[cfg_to_run_name(tmp_cfg)] = {"state": state, "cfg": tmp_cfg}
+    return ckpt
 
 
 def load_ckpt(path: Union[str, Path]):
@@ -786,6 +805,8 @@ def log_img_plots(
     batch: tuple,
     shape: tuple[int, int, int],
     num_plots: int = 16,
+    cmap=mpl.colormaps.get_cmap("grey"),
+    cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
 ):
     """Logs `num_plots` from the given batch."""
     rng_dropout, rng_extra = random.split(rng_step)
@@ -822,8 +843,20 @@ def log_img_plots(
         if f_mu.shape != f_test.shape:  # bootstrapped
             K = f_mu.shape[0] // f_test.shape[0]
             s = i * K
-            f_mu_i = f_mu[s : s + K].mean(axis=0)  # TODO(danj): legitimate?
-        fig = plot_img(i, shape, f_ctx_i, f_mu_i, f_std_i, f_test_full_i, inv_idx_i)
+            f_mu_i = f_mu[s : s + K].mean(axis=0)
+            # Law of total variance: V[Y] = V[E[Y|X]] + E[V[Y|X]]
+            f_std_i = f_mu[s : s + K].std(axis=0) + f_std[s : s + K].mean(axis=0)
+        fig = plot_img(
+            i,
+            shape,
+            f_ctx_i,
+            f_mu_i,
+            f_std_i,
+            f_test_full_i,
+            inv_idx_i,
+            cmap=cmap,
+            cmap_std=cmap_std,
+        )
         paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
@@ -839,27 +872,26 @@ def plot_img(
     f_std: jax.Array,  # [L, 1]
     f_test: jax.Array,  # [L, 1]
     inv_permute_idx: jax.Array,  # [L]
-    axs=None,
+    axs: Optional[mpl.axes.Axes] = None,
+    cmap=mpl.colormaps.get_cmap("grey"),
+    cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
 ):
-    """Plots a triptych of [task, pred, truth]."""
+    """Plots a triptych of [task, uncertainty, pred, truth]."""
     task = f_ctx_to_img_task(shape, f_ctx, inv_permute_idx)
     task_pred = f_to_img_task(shape, f_mu)
     task_std = f_std_to_img_task(shape, f_std)
     task_true = f_to_img_task(shape, f_test)
     if axs is None:
-        _, axs = plt.subplots(1, 4, figsize=(15, 5))
-    cmap = mpl.colormaps.get_cmap("Spectral_r")
-    cmap.set_bad("grey")
+        _, axs = plt.subplots(1, 4, figsize=(20, 5))
     # NOTE: cmap is ignored when images has RGB channels
-    axs[0].imshow(task_std, cmap=cmap, interpolation="none")
-    axs[0].set_title("Uncertainty")
-    axs[1].imshow(task, cmap=cmap, interpolation="none")
-    axs[1].set_title("Task")
+    axs[0].set_title("Task")
+    axs[0].imshow(task, cmap=cmap, interpolation="none")
+    axs[1].set_title("Uncertainty")
+    axs[1].imshow(task_std, cmap=cmap_std, interpolation="none")
+    axs[2].set_title("Prediction")
     axs[2].imshow(task_pred, cmap=cmap, interpolation="none")
-    axs[2].set_title("Predicted")
-    axs[3].imshow(task_true, cmap=cmap, interpolation="none")
     axs[3].set_title("Ground Truth")
-
+    axs[3].imshow(task_true, cmap=cmap, interpolation="none")
     plt.tight_layout()
     return plt.gcf()
 

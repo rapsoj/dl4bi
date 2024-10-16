@@ -58,7 +58,12 @@ def main(cfg: DictConfig):
     )
     model = instantiate(cfg.model)
     H, W = cfg.data.s[0].num, cfg.data.s[1].num
-    callback = Callback(partial(log_img_plots, shape=(H, W, 1)), cfg.plot_interval)
+    cmap = mpl.colormaps.get_cmap("Spectral_r")
+    cmap.set_bad("grey")
+    callback = Callback(
+        partial(log_img_plots, shape=(H, W, 1), cmap=cmap),
+        cfg.plot_interval,
+    )
     state = None
     finetune_path = cfg.get("finetune", None)
     train_num_steps = cfg.train_num_steps

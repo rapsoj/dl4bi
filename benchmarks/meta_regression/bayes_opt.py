@@ -28,7 +28,7 @@ from dl4bi.meta_regression.train_utils import (
 @hydra.main("configs/gp", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
-    path = f"results/gp/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
+    path = f"results/{cfg.project}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
     path = Path(path)
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
