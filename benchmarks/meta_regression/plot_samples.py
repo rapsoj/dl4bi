@@ -186,8 +186,6 @@ def project_parameters(cfg: DictConfig):
             shape = (16, 16, 1)
             cmap = mpl.colormaps.get_cmap("grey")
             cmap.set_bad("blue")
-            # cmap = mpl.colormaps.get_cmap("viridis")
-            # cmap.set_bad("grey")
         case _ if matches("MNIST"):
             build_dataloaders = build_dataloaders_mnist
             shape = (28, 28, 1)
