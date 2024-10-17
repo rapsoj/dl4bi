@@ -32,26 +32,27 @@ def main(cfg: DictConfig):
     img_tasks = re.compile("MNIST|CelebA|Cifar", re.IGNORECASE)
     only_regex = re.compile(cfg.get("only", ".*"), re.IGNORECASE)
     exclude_regex = re.compile(cfg.get("exclude", r"^$"), re.IGNORECASE)
+    num_ctx = cfg.get("num_ctx", 10)
     num_samples = cfg.get("num_samples", 16)
     results_dir = Path(f"results/{cfg.project}")
     if gp_tasks.match(cfg.project):
         results_dir /= f"{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}"
         ckpts = load_ckpts(results_dir, only_regex, exclude_regex)
         if "1d" in cfg.data.name:
-            return plot_1d_gp_samples(cfg, ckpts, num_samples, results_dir)
-        return plot_2d_img_samples(cfg, ckpts, num_samples, results_dir)
+            return plot_1d_gp_samples(cfg, ckpts, num_ctx, num_samples, results_dir)
+        return plot_2d_img_samples(cfg, ckpts, num_ctx, num_samples, results_dir)
     elif img_tasks.match(cfg.project):
         results_dir /= f"{cfg.seed}"
         ckpts = load_ckpts(results_dir, only_regex, exclude_regex)
-        return plot_2d_img_samples(cfg, ckpts, num_samples, results_dir)
+        return plot_2d_img_samples(cfg, ckpts, num_ctx, num_samples, results_dir)
 
 
 def plot_1d_gp_samples(
     cfg: DictConfig,
     ckpts: dict,
+    num_ctx: int = 10,
     num_samples: int = 16,
     results_dir: Path = Path("."),
-    num_ctx: int = 10,
     lengthscales: list[float] = [0.1, 0.3, 0.5],
 ):
     rng = random.key(cfg.seed)
@@ -107,9 +108,9 @@ def plot_1d_gp_samples(
 def plot_2d_img_samples(
     cfg: DictConfig,
     ckpts: dict,
+    num_ctx: int = 50,
     num_samples: int = 16,
     results_dir: Path = Path("."),
-    num_ctx: int = 50,
 ):
     build_dataloaders, shape, cmap, cmap_std = project_parameters(cfg)
     H, W, C = shape

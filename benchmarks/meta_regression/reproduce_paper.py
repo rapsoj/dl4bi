@@ -181,7 +181,6 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
         overrides,
         "LoRe - CelebA",
     )
-    # TODO(danj): GPT-2 LLM benchmark: [(12, 1), (6, 2), (6, 1)]
 
 
 def gp_benchmark(

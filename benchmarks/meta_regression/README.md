@@ -32,20 +32,30 @@ all.sat.temps %>% write_csv(str_c(path, "sat.csv"))
 ```
 
 # Plotting Samples
-To compare all models for a project and a given seed:
+To compare models after running `python reproduce_paper.py tnp_kr`:
 ```bash
-python plot_samples.py --config-path=configs/gp data=1d seed=20
-python plot_samples.py --config-path=configs/gp data=1d_long seed=20
-python plot_samples.py --config-path=configs/gp data=2d seed=20
-python plot_samples.py --config-path=configs/celeba seed=20
-python plot_samples.py --config-path=configs/mnist seed=20
-python plot_samples.py --config-path=configs/cifar_10 seed=20
+# GP 1D on [-2, 2]
+python plot_samples.py --config-path=configs/gp project="TNP-KR - Gaussian Processes" data=1d kernel=rbf seed=20 +num_ctx=16
+python plot_samples.py --config-path=configs/gp project="TNP-KR - Gaussian Processes" data=1d kernel=periodic seed=20 +num_ctx=16
+python plot_samples.py --config-path=configs/gp project="TNP-KR - Gaussian Processes" data=1d kernel=matern_3_2 seed=20 +num_ctx=16
+# GP 1D on [-10, 10]
+python plot_samples.py --config-path=configs/gp project="TNP-KR - Gaussian Processes" data=1d_long kernel=rbf seed=20 +num_ctx=16
+python plot_samples.py --config-path=configs/gp project="TNP-KR - Gaussian Processes" data=1d_long kernel=periodic seed=20 +num_ctx=16
+python plot_samples.py --config-path=configs/gp project="TNP-KR - Gaussian Processes" data=1d_long kernel=matern_3_2 seed=20 +num_ctx=16
+# GP 2D
+python plot_samples.py --config-path=configs/gp project="TNP-KR - Gaussian Processes" data=2d kernel=rbf seed=20 +num_ctx=128
+# CelebA
+python plot_samples.py --config-path=configs/celeba project="TNP-KR - CelebA" seed=20 +num_ctx=128
+# MNIST
+python plot_samples.py --config-path=configs/mnist project="TNP-KR - MNIST" seed=20 +num_ctx=128
+# Cifar 10
+python plot_samples.py --config-path=configs/cifar_10 project="TNP-KR - Cifar 10" seed=20 +num_ctx=128
 ```
 
 Examples with options:
 ```bash
 python plot_samples.py --config-path=configs/gp seed=20 +exclude='.*RFF.*' +num_samples=3
-python plot_samples.py --config-path=configs/gp data=2d kernel=periodic seed=20 +only='.*TNP.*' +num_samples=3
+python plot_samples.py --config-path=configs/gp project="Gaussian Processes" data=2d kernel=periodic seed=20 +only='.*TNP.*' +num_samples=3
 python plot_samples.py --config-path=configs/gp data=1d_long kernel=periodic seed=20 +exclude='.*B.NP.*' +num_samples=3
 python plot_samples.py --config-path=configs/mnist seed=20 +exclude='.*B.NP.*' +num_samples=3
 ```
