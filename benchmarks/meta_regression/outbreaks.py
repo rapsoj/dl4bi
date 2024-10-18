@@ -74,7 +74,6 @@ def build_dataloader(
     num_test_max: int = 256,
 ):
     B, L = batch_size, 16 * 16
-    # load & convert from [0, 1] -> [-1, 1]
     path = "cache/outbreaks/outbreaks.npy"  # contains [time, f_test]
     dataset = np.load(path, mmap_mode="r")
     s_grid = build_grid([dict(start=-2.0, stop=2.0, num=16)] * 2).reshape(L, 2)
