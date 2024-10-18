@@ -75,7 +75,7 @@ def build_dataloader(
 ):
     B, L = batch_size, 16 * 16
     # load & convert from [0, 1] -> [-1, 1]
-    path = "cache/outbreaks/outbreaks.npy"
+    path = "cache/outbreaks/outbreaks.npy"  # contains [time, f_test]
     dataset = np.load(path, mmap_mode="r")
     s_grid = build_grid([dict(start=-2.0, stop=2.0, num=16)] * 2).reshape(L, 2)
     s_grid = jnp.repeat(s_grid[None, ...], B, axis=0)  # [L, 2] -> [B, L, 2]
@@ -88,9 +88,10 @@ def build_dataloader(
             batch_idx = random.choice(rng_batch, N, (B,), replace=False)
             permute_idx = random.choice(rng_permute, L, (L,), replace=False)
             batch = dataset[batch_idx]
-            time, f_test = batch[:, [1]], batch[:, 2:]
+            time, f_test = batch[:, [0]], batch[:, 1:]
+            time = jnp.repeat(time[:, None, :], L, axis=1)
             f_test = 2 * (f_test - 0.5)  # [0, 1] -> [-1, 1]
-            s_test = jnp.hstack([s_grid, time])
+            s_test = jnp.concatenate([s_grid, time], axis=-1)
             f_test = f_test.reshape(B, -1, 1)  # [B, H, W, 1] -> [B, L, 1]
             inv_permute_idx = jnp.argsort(permute_idx)
             # permute the order and select the first valid_lens_ctx for context
