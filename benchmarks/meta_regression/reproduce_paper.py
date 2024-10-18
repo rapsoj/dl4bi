@@ -51,7 +51,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         "tnp_d",
         "tnp_kr_full",
         "tnp_kr_fast",
-        "convcnp",
+        "convcnp_long",
     ]
     exclude_2d = ["bnp", "banp", "convcnp"]
     models_2d = [m for m in models if m not in exclude_2d]
@@ -181,7 +181,6 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
         overrides,
         "LoRe - CelebA",
     )
-    # TODO(danj): GPT-2 LLM benchmark: [(12, 1), (6, 2), (6, 1)]
 
 
 def gp_benchmark(
