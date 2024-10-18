@@ -10,6 +10,9 @@
 # Population Genetics
 `python popgen.py model=tnp_kr_full seed=7 [wandb=False] [+name="Experiment name"]`
 
+# Outbreaks
+`python outbreaks.py model=tnp_kr_fast seed=7 [wandb=False] [+name="Experiment name"]`
+
 # MNIST
 `python mnist.py model=tnp_kr_full seed=7 [wandb=False] [+name="Experiment name"]`
 
