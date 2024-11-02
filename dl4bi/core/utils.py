@@ -1,10 +1,8 @@
 from functools import partial
 
-import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
-from flax.training.train_state import TrainState
 from jax import jit, lax, random, vmap
 from jax.tree_util import Partial
 
@@ -61,6 +59,12 @@ def pad_concat(x: jax.Array, y: jax.Array):
     elif L_y > L_x:
         x = p_e(x) if is_even else p_o(x)
     return jnp.concatenate([x, y], axis=-1)
+
+
+@jit
+def outer_subtract(x: jax.Array, y: jax.Array):
+    """Outer subtracts two arrays: `[L, D] x [K, D] -> [L, K, D]`"""
+    return vmap(vmap(jnp.subtract, (None, 0)), (0, None))(x, y)
 
 
 @partial(jit, static_argnames=("num_samples"))

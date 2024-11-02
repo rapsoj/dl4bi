@@ -19,6 +19,7 @@ from .attention import (
     exponential_scorer,
     rbf_scorer,
 )
+from .bias import DistanceBias
 from .conv import (
     ConvCNPBlock,
     ConvCNPNet,
@@ -56,5 +57,6 @@ from .utils import (
     bootstrap,
     mask_attn,
     mask_from_valid_lens,
+    outer_subtract,
     pad_concat,
 )

@@ -58,6 +58,7 @@ class TNPDS(nn.Module):
             $\mu_f,\log(\sigma_f^2\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
         """
         B, L_ctx, _ = s_ctx.shape
+        bias = None
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         s_f_ctx = jnp.concatenate([s_ctx, f_ctx], axis=-1)
         s_f_test = jnp.concatenate([s_test, f_test], axis=-1)
@@ -66,6 +67,7 @@ class TNPDS(nn.Module):
         s_f_test_enc, _ = self.enc(
             s_f_test_embed,
             s_f_ctx_embed,
+            bias,
             valid_lens_ctx,
             training,
             **kwargs,
