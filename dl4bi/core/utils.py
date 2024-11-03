@@ -61,12 +61,6 @@ def pad_concat(x: jax.Array, y: jax.Array):
     return jnp.concatenate([x, y], axis=-1)
 
 
-@jit
-def outer_subtract(x: jax.Array, y: jax.Array):
-    """Outer subtracts two arrays: `[L, D] x [K, D] -> [L, K, D]`"""
-    return vmap(vmap(jnp.subtract, (None, 0)), (0, None))(x, y)
-
-
 @partial(jit, static_argnames=("num_samples"))
 def bootstrap(
     rng: jax.Array,

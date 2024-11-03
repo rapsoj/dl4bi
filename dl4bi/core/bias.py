@@ -1,70 +1,38 @@
-from collections.abc import Callable
-from typing import Optional
-
 import flax.linen as nn
+import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
 from jax import jit, vmap
-from sps.kernels import rbf
-
-from .mlp import MLP
-from .utils import outer_subtract
 
 
-@jit
-def distance_bias(
-    qs: jax.Array,
-    ks: jax.Array,
-    valid_lens_qs: Optional[jax.Array] = None,
-    valid_lens_ks: Optional[jax.Array] = None,
-    **kwargs,
-):
-    d = vmap(outer_subtract)(qs, ks)
-    return -jnp.linalg.norm(d, axis=-1)[:, None, ...]  # [B, 1, Q, K]
-
-
-@jit
-def distance_sq_bias(
-    qs: jax.Array,
-    ks: jax.Array,
-    valid_lens_qs: Optional[jax.Array] = None,
-    valid_lens_ks: Optional[jax.Array] = None,
-    **kwargs,
-):
-    # [B, 1, Q, K]
-    return (vmap(outer_subtract)(qs, ks) ** 2).sum(axis=-1)[:, None, ...]
-
-
-# TODO(danj): support multiple heads; support var and period?
-class KernelBias(nn.Module):
-    kernel: Callable = rbf
+class DistanceBias(nn.Module):
     num_heads: int = 4
 
     @nn.compact
-    def __call__(
-        self,
-        qs: jax.Array,
-        ks: jax.Array,
-        valid_lens_qs: Optional[jax.Array] = None,
-        valid_lens_ks: Optional[jax.Array] = None,
-    ):
-        init_ones = nn.initializers.constant(1)
-        var, ls = 1.0, self.param("ls", init_ones, (1,))
-        return vmap(rbf, in_axes=(0, 0, None, None))(qs, ks, var, ls)[:, None, ...]
+    def __call__(self, d: jax.Array):
+        d = jnp.repeat(d[:, None, ...], self.num_heads, axis=1)
+        a = self.param("a", init.constant(-1), (1, self.num_heads, 1, 1))
+        return a * d  # [B, H, Q, K]
 
 
-# TODO(danj): support multiple heads
-class EmbedDistanceBias(nn.Module):
-    embed: nn.Module
+class TISABias(nn.Module):
+    """[Translation-Invariant Self-Attention (TISA)](https://arxiv.org/abs/2106.01950) Bias."""
+
+    num_basis: int = 5
+    num_heads: int = 4
 
     @nn.compact
-    def __call__(
-        self,
-        qs: jax.Array,
-        ks: jax.Array,
-        valid_lens_qs: Optional[jax.Array] = None,
-        valid_lens_ks: Optional[jax.Array] = None,
-    ):
-        (B, Q, _), K = qs.shape, ks.shape[1]
-        d_sq = distance_sq_bias(qs, ks, valid_lens_qs, valid_lens_ks)[..., None]
-        return self.embed(d_sq).reshape(B, 1, Q, K)
+    def __call__(self, d: jax.Array):
+        (B, Q, K), H, F = d.shape, self.num_heads, self.num_basis
+        a = self.param("a", init.constant(1), (H * F,))
+        b = self.param("b", init.constant(1), (H * F,))
+        c = self.param("c", init.constant(0), (H * F,))
+        x = vmap(rbf_basis, in_axes=(None, 0, 0, 0), out_axes=1)(d, a, b, c)
+        return x.reshape(B, H, F, Q, K).sum(axis=2)  # [B, H * F, Q, K] -> [B, H, Q, K]
+
+
+# TODO(danj): remove absolute value on b to make this strictly more expressive?
+@jit
+def rbf_basis(d, a, b, c):
+    """Equation 5 in [Translation-Invariant Self-Attention (TISA)](https://arxiv.org/abs/2106.01950) Bias."""
+    return a * jnp.exp(-jnp.abs(b) * (d - c) ** 2)

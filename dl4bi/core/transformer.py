@@ -7,7 +7,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 
-from .attention import FastAttention, FusedAttention, MultiHeadAttention
+from .attention import MultiHeadAttention
 from .mlp import MLP
 
 
@@ -217,7 +217,7 @@ class KRBlock(nn.Module):
         An instance of the `KRBlock` model.
     """
 
-    attn: nn.Module = MultiHeadAttention(FastAttention())
+    attn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([128, 64])
     p_dropout: float = 0.0
@@ -241,48 +241,3 @@ class KRBlock(nn.Module):
         qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)
         qvs_5, kvs_5 = self.ffn(qvs_4, training), self.ffn(kvs_4, training)
         return qvs_3 + drop(qvs_5), kvs_3 + drop(kvs_5)
-
-
-class KRStack(nn.Module):
-    """A stack of `KRBlock`s.
-
-    Args:
-        blk: An instance of the block module.
-        norm: Final normalization module used before output.
-        num_blks: Number of blocks to use.
-        num_reps: Number of times to repeat each block.
-
-    Returns:
-        An instance of a `KRStack`.
-    """
-
-    blk: nn.Module = KRBlock()
-    norm: nn.Module = nn.LayerNorm()
-    num_blks: int = 6
-    num_reps: int = 1
-
-    @nn.compact
-    def __call__(
-        self,
-        qvs: jax.Array,
-        kvs: jax.Array,
-        bias_qk: Optional[jax.Array] = None,
-        bias_kk: Optional[jax.Array] = None,
-        valid_lens: Optional[jax.Array] = None,
-        training: bool = False,
-    ):
-        for _ in range(self.num_blks):
-            blk = self.blk.copy()
-            for _ in range(self.num_reps):
-                qvs, kvs = blk(qvs, kvs, bias_qk, bias_kk, valid_lens, training)
-        return self.norm(qvs), self.norm(kvs)
-
-    @classmethod
-    def build_fast(cls, num_blks: int = 6, num_reps: int = 1):
-        blk = KRBlock(MultiHeadAttention(FastAttention()))
-        return cls(blk, nn.LayerNorm(), num_blks, num_reps)
-
-    @classmethod
-    def build_fused(cls, num_blks: int = 6, num_reps: int = 1):
-        blk = KRBlock(MultiHeadAttention(FusedAttention()))
-        return cls(blk, nn.LayerNorm(), num_blks, num_reps)

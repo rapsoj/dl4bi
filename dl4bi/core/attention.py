@@ -6,9 +6,10 @@ import jax
 import jax.numpy as jnp
 from jax import jit, lax, random, vmap
 from jax.nn import dot_product_attention
+from sps.kernels import outer_subtract
 
 from .mlp import MLP
-from .utils import mask_attn, mask_from_valid_lens, outer_subtract
+from .utils import mask_attn, mask_from_valid_lens
 
 
 def gaussian_orf(key: jax.Array, m: int, d: int, structured: bool = True):
@@ -347,7 +348,7 @@ class Attention(nn.Module):
         vs = vs.transpose(0, 2, 1, 3).reshape(-1, K, D_V_H)
         scores = self.scorer(qs.astype(self.dtype), ks.astype(self.dtype))
         if bias is not None:
-            scores += bias.reshape(-1, Q, K)
+            scores += jnp.broadcast_to(bias, (B, H, Q, K)).reshape(-1, Q, K)
         if valid_lens is not None:
             valid_lens = jnp.repeat(valid_lens, H, axis=0)
             scores = mask_attn(scores, valid_lens)
@@ -468,15 +469,11 @@ class MultiHeadAttention(nn.Module):
         Returns:
             `ctx` and `attn`, the updated values and attention weights.
         """
-        init_ones = nn.initializers.constant(1)
         qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
         (B, Q, D_QK), (K, D_V), H = qs.shape, vs.shape[-2:], self.num_heads
         qs = qs.reshape(B, Q, H, D_QK // H)
         ks = ks.reshape(B, K, H, D_QK // H)
         vs = vs.reshape(B, K, H, D_V // H)
-        if bias is not None:  # learn a separate scale for each head
-            bias_scale = self.param("bias_scale", init_ones, (1, H, 1, 1))
-            bias = bias_scale * jnp.broadcast_to(bias, (B, H, Q, K))
         ctx, attn = self.attn(qs, ks, vs, bias, valid_lens, training, **kwargs)
         return self.proj_out(ctx.reshape(B, Q, D_V)), attn
 

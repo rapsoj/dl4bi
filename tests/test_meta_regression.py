@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import optax
 from jax import jit, random
 
-from dl4bi.core import KRStack
+from dl4bi.core import FusedAttention
 from dl4bi.meta_regression import (
     ANP,
     BANP,
@@ -13,7 +13,6 @@ from dl4bi.meta_regression import (
     DKR,
     NP,
     TNPD,
-    TNPDS,
     TNPKR,
     TNPND,
     ConvCNP,
@@ -87,10 +86,9 @@ def test_context_data_leaks():
         BANP,
         DKR,
         TNPD,
-        TNPDS,
         TNPND,
         TNPKR,
-        lambda: TNPKR(dec=KRStack.build_fused()),
+        lambda: TNPKR(attn=FusedAttention()),
         ConvCNP,
     ]:
         print(np)
