@@ -366,6 +366,13 @@ class FusedAttention(nn.Module):
         A `FusedAttention` module.
 
     .. note::
+        Since the CUDA kernel requires `jnp.bfloat16`, this implementation
+        normalizes the queries and keys using `norm_qs` and `norm_ks` in order
+        to stabilize dot product logits in the attention calculation. While this
+        slightly slows computation, it often obviates the need to search for an
+        appropriate `scale` argument.
+
+    .. note::
         As of 2024-08-29, this requires `jax-nightly` and an NVIDIA GPU of
         Ampere architecture or above.
 
@@ -375,6 +382,9 @@ class FusedAttention(nn.Module):
         also does not return the attention matrix since it never completely
         materializes it.
     """
+
+    norm_qs: nn.Module = nn.LayerNorm(dtype=jnp.bfloat16)
+    norm_ks: nn.Module = nn.LayerNorm(dtype=jnp.bfloat16)
 
     @nn.compact
     def __call__(
@@ -409,8 +419,8 @@ class FusedAttention(nn.Module):
             valid_lens = jnp.repeat(L, B)
         # As of 2024-08-29, the CUDA kernel requires bfloat16
         return dot_product_attention(
-            jnp.bfloat16(qs),
-            jnp.bfloat16(ks),
+            self.norm_qs(qs),
+            self.norm_ks(ks),
             jnp.bfloat16(vs),
             bias,
             # TODO(danj): remove when PR lands https://github.com/google/jax/issues/23349

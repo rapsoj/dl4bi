@@ -37,13 +37,13 @@ class TNPKR(nn.Module):
     embed_s: Callable = lambda x: x
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
-    embed_obs_s_f: nn.Module = MLP([256, 64])
+    embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
     dist: Callable = l2_dist_sq
     bias: nn.Module = DistanceBias()
     attn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
-    ffn: nn.Module = MLP([128, 64])
-    head: nn.Module = MLP([128, 2])
+    ffn: nn.Module = MLP([256, 64], nn.gelu)
+    head: nn.Module = MLP([256, 64, 2], nn.gelu)
 
     @nn.compact
     def __call__(
@@ -82,11 +82,11 @@ class TNPKR(nn.Module):
         vdist = vmap(self.dist)
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
-        obs = self.embed_obs(jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8))
-        unobs = self.embed_obs(jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8))
-        obs_s_f_ctx = stack(obs, self.embed_s(s_ctx), self.embed_f(f_ctx))
-        obs_s_f_test = stack(unobs, self.embed_s(s_test), self.embed_f(f_test))
-        qvs, kvs = self.embed_obs_s_f(obs_s_f_test), self.embed_obs_s_f(obs_s_f_ctx)
+        obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
+        unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
+        ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
+        test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
+        qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
         d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
         for _ in range(self.num_blks):
             attn, ffn = self.attn.copy(), self.ffn.copy()
@@ -95,7 +95,7 @@ class TNPKR(nn.Module):
                 b_qk, b_kk = bias(d_qk), bias(d_kk)
                 blk = KRBlock(attn, norm, ffn)
                 qvs, kvs = blk(qvs, kvs, b_qk, b_kk, valid_lens_ctx, training)
-        qvs = self.norm(qvs)
+        qvs = self.norm.copy()(qvs)
         f_dist = self.head(qvs, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
         f_std = jnp.exp(f_log_var / 2)

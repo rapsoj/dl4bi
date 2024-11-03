@@ -1,9 +1,14 @@
 cls: TNPKR
 kwargs:
-  embed_obs_s_f:
+  num_blks: 6
+  num_reps: 1
+  embed_all:
     cls: MLP
     kwargs:
-      dims: [256, 64]
+      dims: [256, 128, 64]
+      act_fn: gelu
+  dist:
+    func: l2_dist_sq
   bias:
     cls: DistanceBias
     kwargs:
@@ -12,11 +17,15 @@ kwargs:
     cls: MultiHeadAttention
     kwargs:
       num_heads: 4
+      attn:
+        cls: FusedAttention
   ffn:
     cls: MLP
     kwargs:
-      dims: [128, 64]
+      dims: [256, 64]
+      act_fn: gelu
   head:
     cls: MLP
     kwargs:
-      dims: [128, 2]
+      dims: [256, 64, 2]
+      act_fn: gelu
