@@ -75,11 +75,13 @@ class TNPKR(nn.Module):
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         s_f_ctx = stack(self.embed_s(s_ctx), self.embed_f(f_ctx))
         s_f_test = stack(self.embed_s(s_test), self.embed_f(f_test))
-        bias = self.bias(s_ctx, f_ctx, s_test, valid_lens_ctx, valid_lens_test)
+        bias_qk = self.bias(s_ctx, s_test, valid_lens_ctx, valid_lens_test)
+        bias_kk = self.bias(s_test, s_test, valid_lens_test, valid_lens_test)
         s_f_test_enc, _ = self.dec(
             self.embed_s_f(s_f_test),
             self.embed_s_f(s_f_ctx),
-            bias,
+            bias_qk,
+            bias_kk,
             valid_lens_ctx,
             training,
         )

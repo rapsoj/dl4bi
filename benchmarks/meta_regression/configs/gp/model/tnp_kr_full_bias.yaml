@@ -5,9 +5,7 @@ kwargs:
     kwargs:
       dims: [256, 64]
   bias:
-    cls: DistanceBias
-    kwargs:
-      num_heads: 4
+    func: distance_bias
   dec:
     cls: KRStack
     kwargs:

@@ -227,14 +227,15 @@ class KRBlock(nn.Module):
         self,
         qvs: jax.Array,
         kvs: jax.Array,
-        bias: Optional[jax.Array] = None,
+        bias_qk: Optional[jax.Array] = None,
+        bias_kk: Optional[jax.Array] = None,
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
         qvs_1, kvs_1 = self.norm(qvs), self.norm(kvs)
-        qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, bias, valid_lens, training)
-        kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, bias, valid_lens, training)
+        qvs_2, _ = self.attn(qvs_1, kvs_1, kvs_1, bias_qk, valid_lens, training)
+        kvs_2, _ = self.attn(kvs_1, kvs_1, kvs_1, bias_kk, valid_lens, training)
         qvs_3, kvs_3 = qvs + drop(qvs_2), kvs + drop(kvs_2)
         norm_2 = self.norm.copy()
         qvs_4, kvs_4 = norm_2(qvs_3), norm_2(kvs_3)
@@ -265,14 +266,15 @@ class KRStack(nn.Module):
         self,
         qvs: jax.Array,
         kvs: jax.Array,
-        bias: Optional[jax.Array] = None,
+        bias_qk: Optional[jax.Array] = None,
+        bias_kk: Optional[jax.Array] = None,
         valid_lens: Optional[jax.Array] = None,
         training: bool = False,
     ):
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
-                qvs, kvs = blk(qvs, kvs, bias, valid_lens, training)
+                qvs, kvs = blk(qvs, kvs, bias_qk, bias_kk, valid_lens, training)
         return self.norm(qvs), self.norm(kvs)
 
     @classmethod

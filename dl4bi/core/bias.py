@@ -1,41 +1,31 @@
-from collections.abc import Callable
 from typing import Optional
 
-import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import vmap
+from jax import jit, vmap
 
 from .utils import outer_subtract
 
 
-class DistanceBias(nn.Module):
-    """A Distance Bias module.
+@jit
+def distance_bias(
+    qs: jax.Array,
+    ks: jax.Array,
+    valid_lens_qs: Optional[jax.Array] = None,
+    valid_lens_ks: Optional[jax.Array] = None,
+    **kwargs,
+):
+    d = vmap(outer_subtract)(qs, ks)
+    return -jnp.linalg.norm(d, axis=-1)[:, None, ...]  # [B, 1, Q, K]
 
-    Args:
-        transform: A function that transforms the differences between
-            `s_ctx` and `s_test`. Default is -L1 norm.
-        num_heads: Number of attention heads. Used to create
-            a learnable scalar for the bias in each head.
 
-    Returns:
-        An instance of `DistanceBias` module.
-    """
-
-    transform: Callable = lambda d: -jnp.linalg.norm(d, axis=-1)  # -L1
-    num_heads: int = 4
-
-    @nn.compact
-    def __call__(
-        self,
-        s_ctx: jax.Array,  # [B, L_ctx, D_S]
-        f_ctx: jax.Array,  # [B, L_ctx, D_F]
-        s_test: jax.Array,  # [B, L_test, D_S]
-        valid_lens_ctx: Optional[jax.Array] = None,  # [B]
-        valid_lens_test: Optional[jax.Array] = None,  # [B]
-    ):
-        init = nn.initializers.constant(1)
-        bias_scale = self.param("bias_scale", init, (1, self.num_heads, 1, 1))
-        bias = self.transform(vmap(outer_subtract)(s_ctx, s_test))
-        bias = jnp.repeat(bias[:, None, ...], self.num_heads, axis=1)
-        return bias_scale * bias
+@jit
+def distance_sq_bias(
+    qs: jax.Array,
+    ks: jax.Array,
+    valid_lens_qs: Optional[jax.Array] = None,
+    valid_lens_ks: Optional[jax.Array] = None,
+    **kwargs,
+):
+    d_sq = vmap(outer_subtract)(qs, ks) ** 2
+    return -d_sq.sum(axis=-1)[:, None, ...]  # [B, 1, Q, K]
