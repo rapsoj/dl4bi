@@ -8,9 +8,9 @@ kwargs:
       dims: [256, 128, 64]
       act_fn: gelu
   dist:
-    func: l2_dist
+    func: l2_dist_sq
   bias:
-    cls: TISABias
+    cls: DistanceBias
     kwargs:
       num_heads: 4
   attn:
