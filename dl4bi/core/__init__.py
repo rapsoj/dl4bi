@@ -19,7 +19,7 @@ from .attention import (
     exponential_scorer,
     rbf_scorer,
 )
-from .bias import distance_bias, distance_sq_bias
+from .bias import EmbedDistanceBias, KernelBias, distance_bias, distance_sq_bias
 from .conv import (
     ConvCNPBlock,
     ConvCNPNet,
