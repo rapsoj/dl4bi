@@ -31,9 +31,6 @@ from dl4bi.meta_regression.train_utils import (
     train,
 )
 
-# TODO(danj): figure out what is causing huge spike in loss
-# TODO(danj): attention bias that privilges local information
-
 
 @hydra.main("configs/heaton", config_name="default", version_base=None)
 def main(cfg: DictConfig):

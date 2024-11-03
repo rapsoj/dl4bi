@@ -1,6 +1,6 @@
 defaults:
   - _self_ # use default global values below
-  - model: tnp_kr_fused_big
+  - model: tnp_kr
   - kernel: matern_1_2
   - data: 30x50
   - test: sim
