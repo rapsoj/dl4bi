@@ -13,7 +13,7 @@ kwargs:
   bias:
     cls: TISABias
     kwargs:
-      num_basis: 3
+      num_basis: 1
       num_heads: 4
   attn:
     cls: MultiHeadAttention
