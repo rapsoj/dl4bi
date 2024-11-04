@@ -86,7 +86,7 @@ def main(cfg: DictConfig):
     )
     metrics = evaluate(rng_test, state, valid_dataloader, cfg.valid_num_steps)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path = Path(f"results/heaton/{cfg.seed}/{run_name}")
+    path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
     # NOTE: uncomment to run actual test
