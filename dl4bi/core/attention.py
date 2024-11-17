@@ -339,7 +339,7 @@ def scan_attention(
         length=math.ceil(Q / qs_chunk_size),
     )
 
-    return rearrange(os, "C Qc B H D -> B (C Qc) H D")
+    return rearrange(os, "C Q B H D -> B (C Q) H D")
 
 
 def scan_ks(
