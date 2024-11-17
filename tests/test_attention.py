@@ -22,7 +22,7 @@ from dl4bi.core import (
 )
 
 
-def test_vanilla_attention():
+def test_vanilla_attention_impl():
     B, L, H, D = 4, 7, 4, 16
     key = random.key(42)
     rng_qkv, rng_bias, rng_init = random.split(key, 3)
@@ -38,7 +38,7 @@ def test_vanilla_attention():
         assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
 
 
-def test_multihead_attention():
+def test_multihead_attention_impl():
     B, H, L, D = 4, 4, 7, 64
     key = random.key(42)
     rng_qkv, rng_bias, rng_init = random.split(key, 3)
@@ -54,7 +54,7 @@ def test_multihead_attention():
         assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
 
 
-def test_fast_attention():
+def test_fast_attention_impl():
     B, L, H, D = 4, 128, 4, 16
     key = random.key(42)
     rng_qkv, rng_valid, rng_init = random.split(key, 3)
@@ -77,7 +77,7 @@ def test_fast_attention():
     assert max_error_fast < 2.0, "Fast: Large max error in approximation!"
 
 
-def test_scan_attention():
+def test_scan_attention_impl():
     B, L, H, D = 4, 128, 4, 16
     key = random.key(42)
     rng_qkvs, rng_valid, rng_init = random.split(key, 3)
@@ -99,7 +99,7 @@ def test_scan_attention():
     assert max_error_scan < 0.005, "Scan: Large max error in approximation!"
 
 
-def test_fused_attention():
+def test_fused_attention_impl():
     B, L, H, D = 4, 128, 4, 16
     key = random.key(42)
     rng_qkv, rng_bias, rng_valid, rng_init = random.split(key, 4)

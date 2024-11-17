@@ -367,9 +367,9 @@ def scan_ks(
         exp_scores = jnp.exp(scores - new_row_maxs)
         row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
         os_chunk = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs_chunk)
-        exp_row_maxs_diff = jnp.exp(row_maxs - new_row_maxs)
-        new_row_sums = exp_row_maxs_diff * row_sums + row_sums_chunk
-        os *= exp_row_maxs_diff * row_sums / new_row_sums
+        row_sums_adj = jnp.exp(row_maxs - new_row_maxs) * row_sums
+        new_row_sums = row_sums_adj + row_sums_chunk
+        os *= row_sums_adj / new_row_sums
         os += os_chunk / new_row_sums
         return (i + K_c, os, new_row_maxs, new_row_sums), None
 
