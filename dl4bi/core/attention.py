@@ -323,23 +323,17 @@ def scan_attention(
 
     def qs_scanner(i, _):
         Q_c = min(Q, qs_chunk_size)
-        qs_chunk = slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
+        qs_chunk = slice(qs, (0, i, 0, 0), (B, Q_c, H, D))
         return i + Q_c, scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size)
 
-    # JAX/numpy store data in row major format, so putting the scanned axes
-    # first improves cache locality
-    qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> L B H D"), (qs, ks, vs))
-    if ks_mask is not None:
-        ks_mask = rearrange(ks_mask, "B K -> K B")
-
     _, os = scan(
-        qs_scanner,
+        jax.remat(qs_scanner),
         init=0,
         xs=None,
         length=math.ceil(Q / qs_chunk_size),
     )
 
-    return rearrange(os, "C Q B H D -> B (C Q) H D")
+    return rearrange(os, "C B Q H D -> B (C Q) H D")
 
 
 def scan_ks(
@@ -349,36 +343,38 @@ def scan_ks(
     ks_mask: Optional[jax.Array] = None,
     ks_chunk_size: int = 1024,
 ):
-    (Q_c, B, H, D), K = qs_chunk.shape, ks.shape[0]
+    (B, Q_c, H, D), K = qs_chunk.shape, ks.shape[1]
     qs_chunk /= jnp.sqrt(D)
 
     def ks_scanner(carry: tuple, _):
         i, os, row_maxs, row_sums = carry
         K_c = min(K, ks_chunk_size)
-        ks_chunk = slice(ks, (i, 0, 0, 0), (K_c, B, H, D))
-        vs_chunk = slice(vs, (i, 0, 0, 0), (K_c, B, H, D))
-        scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
+        ks_chunk = slice(ks, (0, i, 0, 0), (B, K_c, H, D))
+        vs_chunk = slice(vs, (0, i, 0, 0), (B, K_c, H, D))
+        scores = jnp.einsum("B Q H D, B K H D -> B H Q K", qs_chunk, ks_chunk)
         if ks_mask is not None:
-            ks_mask_chunk = slice(ks_mask, (i, 0), (K_c, B))
-            ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
+            ks_mask_chunk = slice(ks_mask, (0, i), (B, K_c))
+            ks_mask_chunk = rearrange(ks_mask_chunk, "B K -> B 1 1 K")
             scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
         row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
         exp_scores = jnp.exp(scores - new_row_maxs)
         row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
-        os_chunk = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs_chunk)
+        os_chunk = jnp.einsum("B H Q K, B K H D -> B Q H D", exp_scores, vs_chunk)
         row_sums_adj = jnp.exp(row_maxs - new_row_maxs) * row_sums
+        row_sums_adj_t = rearrange(row_sums_adj, "B H Q 1 -> B Q H 1")
         new_row_sums = row_sums_adj + row_sums_chunk
-        os *= row_sums_adj / new_row_sums
-        os += os_chunk / new_row_sums
+        new_row_sums_t = rearrange(row_sums_adj, "B H Q 1 -> B Q H 1")
+        os *= row_sums_adj_t / new_row_sums_t
+        os += os_chunk / new_row_sums_t
         return (i + K_c, os, new_row_maxs, new_row_sums), None
 
-    os = jnp.zeros((Q_c, B, H, D))
-    row_sums = jnp.zeros((Q_c, B, H, 1))
-    row_maxs = jnp.full((Q_c, B, H, 1), -float("inf"))
+    os = jnp.zeros((B, Q_c, H, D))
+    row_sums = jnp.zeros((B, H, Q_c, 1))
+    row_maxs = jnp.full((B, H, Q_c, 1), -float("inf"))
 
     (_, os, row_maxs, row_sums), _ = scan(
-        ks_scanner,
+        jax.remat(ks_scanner),
         init=(0, os, row_maxs, row_sums),
         xs=None,
         length=math.ceil(K / ks_chunk_size),
