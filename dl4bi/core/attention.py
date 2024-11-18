@@ -307,6 +307,7 @@ class ScanAttention(nn.Module):
 
 # TODO(danj): update to Flash Attention 2
 # TODO(danj): test with jax.remat for gradient checkpointing scan functions?
+# TODO(danj): https://bit.ly/4eFA4mC
 @partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size"))
 def scan_attention(
     qs: jax.Array,
@@ -318,7 +319,8 @@ def scan_attention(
 ):
     """Scan Attention based on [Flash Attention 2](https://arxiv.org/abs/2307.08691).
 
-    Implementation based on [flash-attention-jax](https://github.com/lucidrains/flash-attention-jax).
+    Implementation based on [flash-attention-jax](https://github.com/lucidrains/flash-attention-jax)
+    and Google's [memory-efficient-attention](https://bit.ly/4eFA4mC).
     """
     B, Q, H, D = qs.shape
 
