@@ -3,7 +3,6 @@ from time import time
 import jax
 import jax.numpy as jnp
 from jax import random
-from jaxlib.xla_client import XlaRuntimeError
 
 from dl4bi.core import (
     MLP,
@@ -96,7 +95,7 @@ def test_scan_attention_impl():
     assert ctx_true.shape == (B, L, H, D), "Full: incorrect context output shape!"
     assert ctx_scan.shape == (B, L, H, D), "Scan: incorrect context output shape!"
     assert mse_scan < 1e-7, "Scan: Large MSE error in approximation"
-    assert max_error_scan < 0.005, "Scan: Large max error in approximation!"
+    assert max_error_scan < 1e-6, "Scan: Large max error in approximation!"
 
 
 def test_fused_attention_impl():
@@ -140,19 +139,15 @@ def test_fast_softmax_attention_speed():
     t_fast_stop = time()
     t_fast_diff = t_fast_stop - t_fast_start
     del jit_fast_attn, fast_attn, params  # free up memory
-
-    try:
-        attn = Attention()
-        _, p_true = attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
-        jit_attn = jax.jit(attn.apply)  # force compile
+    attn = Attention()
+    _, p_true = attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
+    jit_attn = jax.jit(attn.apply)  # force compile
+    jit_attn(p_true, qs, ks, vs, bias, valid_lens)
+    t_true_start = time()
+    for i in range(N):
         jit_attn(p_true, qs, ks, vs, bias, valid_lens)
-        t_true_start = time()
-        for i in range(N):
-            jit_attn(p_true, qs, ks, vs, bias, valid_lens)
-        t_true_stop = time()
-        t_true_diff = t_true_stop - t_true_start
-    except XlaRuntimeError:  # OOM
-        t_true_diff = 1e6
+    t_true_stop = time()
+    t_true_diff = t_true_stop - t_true_start
 
     assert jnp.isclose(t_fast_diff, t_true_diff, atol=1e-4), "Fast isn't faster!"
 
@@ -175,24 +170,19 @@ def test_scan_attention_speed():
     t_scan_stop = time()
     t_scan_diff = t_scan_stop - t_scan_start
     del jit_scan_attn, scan_attn, params  # free up memory
-
-    try:
-        attn = Attention()
-        _, p_true = attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
-        jit_attn = jax.jit(attn.apply)  # force compile
+    attn = Attention()
+    _, p_true = attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
+    jit_attn = jax.jit(attn.apply)  # force compile
+    jit_attn(p_true, qs, ks, vs, bias, valid_lens)
+    t_true_start = time()
+    for i in range(N):
         jit_attn(p_true, qs, ks, vs, bias, valid_lens)
-        t_true_start = time()
-        for i in range(N):
-            jit_attn(p_true, qs, ks, vs, bias, valid_lens)
-        t_true_stop = time()
-        t_true_diff = t_true_stop - t_true_start
-    except XlaRuntimeError:  # OOM
-        t_true_diff = 1e6
+    t_true_stop = time()
+    t_true_diff = t_true_stop - t_true_start
 
     max_t, factor = 2e-4, 1
     # NOTE: can use the following assert for benchmarking
     # assert t_scan_diff < max_t, f"Scan takes longer than {max_t}s!"
-    assert t_true_diff < 1e-3
     assert t_scan_diff < factor * t_true_diff, f"Scan is more than {factor}x slower!"
 
 
