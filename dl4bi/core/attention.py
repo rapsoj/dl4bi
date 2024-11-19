@@ -358,11 +358,26 @@ def _fa2_scan_ks(
         K_c = min(K, ks_chunk_size)
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (K_c, B, H, D))
         vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (K_c, B, H, D))
-        scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
+        ks_mask_chunk = jnp.array(True)
         if ks_mask is not None:
             ks_mask_chunk = lax.dynamic_slice(ks_mask, (i, 0), (K_c, B))
             ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
-            scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
+        _carry = update(
+            qs_chunk,
+            ks_chunk,
+            vs_chunk,
+            ks_mask_chunk,
+            os,
+            row_maxs,
+            row_sums,
+        )
+        return (i + K_c, *_carry), None
+
+    @jit
+    @partial(jax.remat, prevent_cse=False)
+    def update(qs_chunk, ks_chunk, vs_chunk, ks_mask_chunk, os, row_maxs, row_sums):
+        scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
+        scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
         row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
         exp_scores = jnp.exp(scores - new_row_maxs)
@@ -372,7 +387,7 @@ def _fa2_scan_ks(
         new_row_sums = exp_row_maxs_diff * row_sums + row_sums_chunk
         os *= exp_row_maxs_diff
         os += os_chunk
-        return (i + K_c, os, new_row_maxs, new_row_sums), None
+        return os, new_row_maxs, new_row_sums
 
     os = jnp.zeros((Q_c, B, H, D))
     row_sums = jnp.zeros((Q_c, B, H, 1))

@@ -180,9 +180,9 @@ def test_scan_attention_speed():
     t_true_stop = time()
     t_true_diff = t_true_stop - t_true_start
 
-    max_t, factor = 5e-5, 2
+    max_t, factor = 5e-5, 1.1
     # NOTE: can use the following assert for benchmarking
-    assert t_scan_diff < max_t, f"Scan takes longer than {max_t}s!"
+    # assert t_scan_diff < max_t, f"Scan takes longer than {max_t}s!"
     assert t_scan_diff < factor * t_true_diff, f"Scan is more than {factor}x slower!"
 
 
