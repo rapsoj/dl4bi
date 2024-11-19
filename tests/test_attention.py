@@ -182,7 +182,7 @@ def test_scan_attention_speed():
 
     max_t, factor = 2e-4, 5
     # NOTE: can use the following assert for benchmarking
-    # assert t_scan_diff < max_t, f"Scan takes longer than {max_t}s!"
+    assert t_scan_diff < max_t, f"Scan takes longer than {max_t}s!"
     assert t_scan_diff < factor * t_true_diff, f"Scan is more than {factor}x slower!"
 
 
