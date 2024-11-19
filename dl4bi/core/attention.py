@@ -304,8 +304,6 @@ class ScanAttention(nn.Module):
         ), None
 
 
-# TODO(danj): update to Flash Attention 2
-# TODO(danj): test with jax.remat for gradient checkpointing scan functions?
 @partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size"))
 def flash_attention_2(
     qs: jax.Array,
@@ -400,100 +398,6 @@ def _fa2_scan_ks(
         length=math.ceil(K / ks_chunk_size),
     )
     return os / row_sums
-
-
-# NOTE: This may be faster on TPUs which can dynamically allocate elements in a batch,
-# but it does not seem to be faster than flash_attention_2 (scan impl) on a NVIDIA 4090.
-def memory_efficient_attention(
-    qs: jax.Array,
-    ks: jax.Array,
-    vs: jax.Array,
-    ks_mask: Optional[jax.Array] = None,
-    qs_chunk_size: int = 1024,
-    ks_chunk_size: int = 1024,
-    dtype: jnp.dtype = jnp.float32,
-    precision: lax.Precision = lax.Precision.HIGHEST,
-):
-    """Memory efficient attention based on [Google's implementation](https://tinyurl.com/memory-efficient-attention)."""
-    vscan_qs = vmap(_me_scan_qs, in_axes=(0, 0, 0, 0, None, None, None, None))
-    return vscan_qs(qs, ks, vs, ks_mask, qs_chunk_size, ks_chunk_size, dtype, precision)
-
-
-@partial(jit, static_argnums=(4, 5, 6, 7))
-def _me_scan_qs(
-    qs: jax.Array,
-    ks: jax.Array,
-    vs: jax.Array,
-    ks_mask: Optional[jax.Array] = None,
-    qs_chunk_size: int = 1024,
-    ks_chunk_size: int = 1024,
-    dtype: jnp.dtype = jnp.float32,
-    precision: lax.Precision = lax.Precision.HIGHEST,
-):
-    Q, H, D = qs.shape
-    Q_c = min(Q, qs_chunk_size)
-
-    def qs_scanner(i, _):
-        qs_chunk = lax.dynamic_slice(qs, (i, 0, 0), slice_sizes=(Q_c, H, D))
-        return (
-            i + Q_c,
-            _me_scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size, dtype, precision),
-        )
-
-    _, res = lax.scan(qs_scanner, init=0, xs=None, length=math.ceil(Q / qs_chunk_size))
-    return res.reshape(Q, H, D)
-
-
-def _me_scan_ks(
-    qs_chunk: jax.Array,
-    ks: jax.Array,
-    vs: jax.Array,
-    ks_mask: Optional[jax.Array] = None,
-    ks_chunk_size: int = 1024,
-    dtype: jnp.dtype = jnp.float32,
-    precision: lax.Precision = lax.Precision.HIGHEST,
-):
-    (Q_c, H, D), K = qs_chunk.shape, ks.shape[0]
-    K_c = min(K, ks_chunk_size)
-    qs_chunk /= jnp.sqrt(D)
-    if ks_mask is None:
-        ks_mask = jnp.array(True)
-
-    @partial(jax.remat, prevent_cse=False)
-    def attend(qs, ks, vs, ks_mask):
-        scores = jnp.einsum(
-            "Q H D, K H D -> Q H K",
-            qs,
-            ks,
-            precision=precision,
-        ).astype(dtype)
-        scores = jnp.where(ks_mask, scores, -float("inf"))
-        max_score = jnp.max(scores, axis=-1, keepdims=True)
-        max_score = jax.lax.stop_gradient(max_score)
-        exp_scores = jnp.exp(scores - max_score)
-        os = jnp.einsum(
-            "Q H K, K H D -> Q H D",
-            exp_scores,
-            vs,
-            precision=precision,
-        ).astype(dtype)
-        return os, exp_scores.sum(axis=-1), max_score.reshape((Q_c, H))
-
-    def ks_scanner(i):
-        ks_chunk = lax.dynamic_slice(ks, (i, 0, 0), slice_sizes=(K_c, H, D))
-        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0), slice_sizes=(K_c, H, D))
-        ks_mask_chunk = lax.dynamic_slice(ks_mask, (i,), slice_sizes=(K_c,))
-        return attend(qs_chunk, ks_chunk, vs_chunk, ks_mask_chunk)
-
-    # all of these outputs from lax.map have a leading chunk dim, i.e. [C, ...]
-    os, sum_exp_scores, max_scores = lax.map(ks_scanner, xs=jnp.arange(0, K, K_c))
-    global_max_scores = jnp.max(max_scores, axis=0, keepdims=True)
-    max_diffs = jnp.exp(max_scores - global_max_scores)  # [C, Q, H] - [1, Q, H]
-    os *= max_diffs[..., None]  # [C, Q, H, D] * [C, Q, H, 1]
-    sum_exp_scores *= max_diffs  # [C, Q, H] * [C, Q, H]
-    os = os.sum(axis=0)  # [C, Q, H, D] -> [Q, H, D]
-    sum_exp_scores = sum_exp_scores[..., None].sum(axis=0)  # [C, Q, H, 1] -> [Q, H, 1]
-    return os / sum_exp_scores  # [Q, H, D] / [Q, H, 1]
 
 
 class DotScorer(nn.Module):
