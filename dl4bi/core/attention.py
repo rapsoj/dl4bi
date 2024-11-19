@@ -352,34 +352,27 @@ def _fa2_scan_ks(
 ):
     (Q_c, B, H, D), K = qs_chunk.shape, ks.shape[0]
     qs_chunk /= jnp.sqrt(D)
-    if ks_mask is None:
-        ks_mask = jnp.array(True)
-
-    @partial(jax.remat, prevent_cse=False)
-    def attend(qs, ks, vs, ks_mask):
-        scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs, ks)
-        scores = jnp.where(ks_mask, scores, -float("inf"))
-        row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
-        new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
-        exp_scores = jnp.exp(scores - new_row_maxs)
-        row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
-        os = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs)
-        row_sums_adj = jnp.exp(row_maxs - new_row_maxs) * row_sums
-        new_row_sums = row_sums_adj + row_sums_chunk
-        os *= row_sums_adj / new_row_sums
-        os += os / new_row_sums
-        return os, new_row_maxs, new_row_sums
 
     def ks_scanner(carry: tuple, _):
         i, os, row_maxs, row_sums = carry
         K_c = min(K, ks_chunk_size)
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (K_c, B, H, D))
         vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (K_c, B, H, D))
+        scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
         if ks_mask is not None:
             ks_mask_chunk = lax.dynamic_slice(ks_mask, (i, 0), (K_c, B))
             ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
-        _carry = attend(qs_chunk, ks_chunk, vs_chunk, ks_mask)
-        return (i + K_c, *_carry), None
+            scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
+        row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
+        new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
+        exp_scores = jnp.exp(scores - new_row_maxs)
+        row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
+        os_chunk = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs_chunk)
+        row_sums_adj = jnp.exp(row_maxs - new_row_maxs) * row_sums
+        new_row_sums = row_sums_adj + row_sums_chunk
+        os *= row_sums_adj / new_row_sums
+        os += os_chunk / new_row_sums
+        return (i + K_c, os, new_row_maxs, new_row_sums), None
 
     os = jnp.zeros((Q_c, B, H, D))
     row_sums = jnp.zeros((Q_c, B, H, 1))
