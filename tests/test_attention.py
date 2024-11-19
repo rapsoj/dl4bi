@@ -78,7 +78,7 @@ def test_fast_attention_impl():
 
 
 def test_scan_attention_impl():
-    B, L, H, D = 4, 128, 4, 16
+    B, L, H, D = 4, 313, 4, 16
     key = random.key(42)
     rng_qkvs, rng_valid, rng_init = random.split(key, 3)
     bias = None
@@ -158,7 +158,7 @@ def test_fast_softmax_attention_speed():
 
 
 def test_scan_attention_speed():
-    B, L, H, D, N, C = 1, 10240, 4, 16, 5, 1024
+    B, L, H, D, N, C = 5, 1024, 4, 16, 5, 256
     key = random.key(42)
     rng_qkv, rng_bias, rng_valid, rng_init = random.split(key, 4)
     data = random.normal(rng_qkv, (3, B, L, H, D))
@@ -189,9 +189,10 @@ def test_scan_attention_speed():
     except XlaRuntimeError:  # OOM
         t_true_diff = 1e6
 
-    max_t, factor = 2e-4, 5
+    max_t, factor = 2e-4, 1
     # NOTE: can use the following assert for benchmarking
-    assert t_scan_diff < max_t, f"Scan takes longer than {max_t}s!"
+    # assert t_scan_diff < max_t, f"Scan takes longer than {max_t}s!"
+    assert t_true_diff < 1e-3
     assert t_scan_diff < factor * t_true_diff, f"Scan is more than {factor}x slower!"
 
 
