@@ -1,14 +1,14 @@
-name: 32x32 # HxW, specified tensor dims format
+name: 64x64 # HxW, specified tensor dims format
 s:
   - start: -1.5  # y = Lat
     stop: 1.5
-    num: 32
+    num: 64
   - start: -2.5 # x = Lon
     stop: 2.5
-    num: 32
+    num: 64
 num_ctx:
-  min: 512 # ~50%
-  max: 768 # ~75%
+  min: 2048 # ~50%
+  max: 3072 # ~75%
 mask_threshold: 1.0 # P(X > 1.0) =~ 15% for N(0, 1)
 min_pct_valid: 0.5
 batch_size: 16
