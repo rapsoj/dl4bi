@@ -244,7 +244,7 @@ def cfg_to_run_name(cfg: DictConfig):
     if name == "TNPKR":
         name = "TNP-KR"
         attn_cls = OmegaConf.select(cfg, "model.kwargs.attn.kwargs.attn.cls")
-        if attn_cls is None:
+        if attn_cls == "Attention" or attn_cls is None:
             name += "-Full"  # default for TNP-KR
         else:
             name += "-" + attn_cls.replace("Attention", "")  # i.e. Fused, Fast

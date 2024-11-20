@@ -262,6 +262,7 @@ class ScanAttention(nn.Module):
 
     qs_chunk_size: int = 1024
     ks_chunk_size: int = 1024
+    bias_func: Callable = lambda x: jnp.zeros_like(x)
 
     @nn.compact
     def __call__(
@@ -269,7 +270,8 @@ class ScanAttention(nn.Module):
         qs: jax.Array,  # [B, Q, H, D_QK_H]
         ks: jax.Array,  # [B, K, H D_QK_H]
         vs: jax.Array,  # [B, K, H, D_H]
-        bias: Optional[jax.Array] = None,  # unused here
+        qs_meta: jax.Array,  # [B, Q, D_M]
+        ks_meta: jax.Array,  # [B, K, D_M]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         **kwargs,
@@ -289,19 +291,139 @@ class ScanAttention(nn.Module):
             `ctx` and `attn`, the updated values and None, respectively,
             since scanned attention never materializes the attention matrix.
         """
-        if bias is not None:
-            warnings.warn("ScanAttention does not currently support bias!")
         ks_mask = None
         if valid_lens is not None:
             ks_mask = mask_from_valid_lens(ks.shape[1], valid_lens)[..., 0]
-        return flash_attention_2(
+        return scan_attention(
             qs,
             ks,
             vs,
+            qs_meta,
+            ks_meta,
             ks_mask,
             self.qs_chunk_size,
             self.ks_chunk_size,
+            self.bias_func,
         ), None
+
+
+@partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size", "bias_func"))
+def scan_attention(
+    qs: jax.Array,  # [B, Q, H, D_QK_H]
+    ks: jax.Array,  # [B, K, H D_QK_H]
+    vs: jax.Array,  # [B, K, H, D_H]
+    qs_meta: jax.Array,  # [B, Q, D_M]
+    ks_meta: jax.Array,  # [B, K, D_M]
+    ks_mask: jax.Array,  # [B, K]
+    qs_chunk_size: int = 1024,
+    ks_chunk_size: int = 1024,
+    bias_func: Callable = lambda x: jnp.zeros_like(x),
+):
+    """[Flash Attention 2](https://arxiv.org/abs/2307.08691) implementation using `jax.lax.scan`.
+
+    Implementation based on [flash-attention-jax](https://github.com/lucidrains/flash-attention-jax)
+    and Google's [memory-efficient-attention](https://bit.ly/4eFA4mC).
+    """
+    (B, Q, H, D), M = qs.shape, qs_meta.shape[-1]
+
+    # JAX/numpy store data in row major format, so (theoretically) putting the
+    # scanned axes first improves cache locality
+    qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> L B H D"), (qs, ks, vs))
+    qs_meta, ks_meta = map(lambda x: rearrange(x, "B L M -> L B M"), (qs_meta, ks_meta))
+    ks_mask = rearrange(ks_mask, "B K -> K B")
+
+    def qs_scanner(i, _):
+        Q_c = min(Q, qs_chunk_size)
+        qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
+        qs_meta_chunk = lax.dynamic_slice(qs_meta, (i, 0, 0), (Q_c, B, M))
+        return i + Q_c, _sa_scan_ks(
+            qs_chunk,
+            ks,
+            vs,
+            qs_meta_chunk,
+            ks_meta,
+            ks_mask,
+            ks_chunk_size,
+            bias_func,
+        )
+
+    _, os = scan(
+        qs_scanner,
+        init=0,
+        xs=None,
+        length=math.ceil(Q / qs_chunk_size),
+    )
+
+    return rearrange(os, "C Q B H D -> B (C Q) H D")
+
+
+def _sa_scan_ks(
+    qs_chunk: jax.Array,  # [Q_c, B, H, D]
+    ks: jax.Array,  # [K, B, H, D]
+    vs: jax.Array,  # [K, B, H, D]
+    qs_meta_chunk: jax.Array,  # [Q_c, B, M]
+    ks_meta: jax.Array,  # [K, B, M]
+    ks_mask: jax.Array,  # [K, B]
+    ks_chunk_size: int = 1024,
+    bias_func: Callable = lambda x: jnp.zeros_like(x),
+):
+    (Q_c, B, H, D), K, M = qs_chunk.shape, ks.shape[0], ks_meta.shape[-1]
+    qs_chunk /= jnp.sqrt(D)
+
+    def ks_scanner(carry: tuple, _):
+        i, os, row_maxs, row_sums = carry
+        K_c = min(K, ks_chunk_size)
+        ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (K_c, B, H, D))
+        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (K_c, B, H, D))
+        ks_meta_chunk = lax.dynamic_slice(ks_meta, (i, 0, 0), (K_c, B, M))
+        ks_mask_chunk = lax.dynamic_slice(ks_mask, (i, 0), (K_c, B))
+        ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
+        _carry = update(
+            ks_chunk,
+            vs_chunk,
+            ks_meta_chunk,
+            ks_mask_chunk,
+            os,
+            row_maxs,
+            row_sums,
+        )
+        return (i + K_c, *_carry), None
+
+    @jit
+    @partial(jax.remat, prevent_cse=False)
+    def update(
+        ks_chunk,
+        vs_chunk,
+        ks_meta_chunk,
+        ks_mask_chunk,
+        os,
+        row_maxs,
+        row_sums,
+    ):
+        scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
+        scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
+        row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
+        new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
+        exp_scores = jnp.exp(scores - new_row_maxs)
+        row_sums_chunk = jnp.sum(exp_scores, axis=-1, keepdims=True)
+        os_chunk = jnp.einsum("Q B H K, K B H D -> Q B H D", exp_scores, vs_chunk)
+        exp_row_maxs_diff = jnp.exp(row_maxs - new_row_maxs)
+        new_row_sums = exp_row_maxs_diff * row_sums + row_sums_chunk
+        os *= exp_row_maxs_diff
+        os += os_chunk
+        return os, new_row_maxs, new_row_sums
+
+    os = jnp.zeros((Q_c, B, H, D))
+    row_sums = jnp.zeros((Q_c, B, H, 1))
+    row_maxs = jnp.full((Q_c, B, H, 1), -float("inf"))
+
+    (_, os, row_maxs, row_sums), _ = scan(
+        ks_scanner,
+        init=(0, os, row_maxs, row_sums),
+        xs=None,
+        length=math.ceil(K / ks_chunk_size),
+    )
+    return os / row_sums
 
 
 @partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size"))
