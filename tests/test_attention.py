@@ -16,6 +16,7 @@ from dl4bi.core import (
     MultiKernelAttention,
     MultiplicativeScorer,
     ScanAttention,
+    ScanTISABiasedAttention,
     exponential_scorer,
     rbf_scorer,
 )
@@ -97,6 +98,19 @@ def test_scan_attention_impl():
     assert max_error_scan < 0.01, "Scan: Large max error in approximation!"
 
 
+def test_scan_tisa_biased_attention_impl():
+    B, L, H, D, S = 4, 313, 4, 16, 2
+    key = random.key(42)
+    rng_qkvs, rng_locs, rng_valid, rng_init = random.split(key, 4)
+    qs_locs, ks_locs = random.normal(rng_locs, (2, B, L, S))
+    qs, ks, vs = random.normal(rng_qkvs, (3, B, L, H, D))
+    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
+    (ctx_scan, _), _ = ScanTISABiasedAttention().init_with_output(
+        rng_init, qs, ks, vs, qs_locs, ks_locs, valid_lens
+    )
+    assert ctx_scan.shape == (B, L, H, D), "Scan: incorrect context output shape!"
+
+
 def test_fused_attention_impl():
     B, L, H, D = 4, 128, 4, 16
     key = random.key(42)
@@ -151,7 +165,6 @@ def test_fast_softmax_attention_speed():
     assert jnp.isclose(t_fast_diff, t_true_diff, atol=1e-4), "Fast isn't faster!"
 
 
-# TODO(danj): add bias to this test
 def test_scan_attention_speed():
     B, L, H, D, N, C = 5, 1024, 4, 16, 5, 1024
     key = random.key(42)
@@ -174,6 +187,48 @@ def test_scan_attention_speed():
     jit_attn = jax.jit(attn.apply)  # force compile
     jit_attn(p_true, qs, ks, vs, bias, valid_lens)
     t_true_start = time()
+    for i in range(N):
+        jit_attn(p_true, qs, ks, vs, bias, valid_lens)
+    t_true_stop = time()
+    t_true_diff = t_true_stop - t_true_start
+
+    max_t, factor = 5e-5, 1.1
+    # NOTE: can use the following assert for benchmarking
+    # assert t_scan_diff < max_t, f"Scan takes longer than {max_t}s!"
+    assert t_scan_diff < factor * t_true_diff, f"Scan is more than {factor}x slower!"
+
+
+# TODO(danj): add bias to standard attention
+def test_scan_tisa_biased_attention_speed():
+    B, L, H, D, S, N, C = 5, 1024, 4, 16, 2, 5, 1024
+    key = random.key(42)
+    bias = None  # not yet supported
+    rng_qkv, rng_locs, rng_valid, rng_init = random.split(key, 4)
+    qs, ks, vs = random.normal(rng_qkv, (3, B, L, H, D))
+    qs_locs, ks_locs = random.normal(rng_locs, (2, B, L, S))
+    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L)
+    scan_attn = ScanTISABiasedAttention(C, C)
+    _, params = scan_attn.init_with_output(
+        rng_init, qs, ks, vs, qs_locs, ks_locs, valid_lens
+    )
+    jit_scan_attn = jax.jit(scan_attn.apply)  # force compile
+    jit_scan_attn(
+        params, qs, ks, vs, qs_locs, ks_locs, valid_lens, rngs={"rng_extra": key}
+    )
+    t_scan_start = time()
+    for i in range(N):
+        jit_scan_attn(
+            params, qs, ks, vs, qs_locs, ks_locs, valid_lens, rngs={"rng_extra": key}
+        )
+    t_scan_stop = time()
+    t_scan_diff = t_scan_stop - t_scan_start
+    del jit_scan_attn, scan_attn, params  # free up memory
+    attn = Attention()
+    _, p_true = attn.init_with_output(rng_init, qs, ks, vs, bias, valid_lens)
+    jit_attn = jax.jit(attn.apply)  # force compile
+    jit_attn(p_true, qs, ks, vs, bias, valid_lens)
+    t_true_start = time()
+    # TODO(danj): ADD BIAS HERE
     for i in range(N):
         jit_attn(p_true, qs, ks, vs, bias, valid_lens)
     t_true_stop = time()

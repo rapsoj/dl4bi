@@ -10,6 +10,7 @@ from .attention import (
     MultiplicativeScorer,
     ProductKernelAttention,
     ScanAttention,
+    ScanTISABiasedAttention,
     build_elu_phi,
     build_exp_phi,
     build_gelu_phi,

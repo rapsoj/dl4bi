@@ -5,15 +5,16 @@ from functools import partial
 from typing import Optional
 
 import flax.linen as nn
+import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
 from einops import rearrange
 from jax import jit, lax, random, vmap
 from jax.lax import scan
 from jax.nn import dot_product_attention
-from sps.kernels import outer_subtract
+from sps.kernels import outer_subtract, l2_dist
 
-from .bias import zero_bias
+from .bias import rbf_basis
 from .mlp import MLP
 from .utils import mask_attn, mask_from_valid_lens
 
@@ -246,16 +247,14 @@ def fast_attend(
     return d_inv * buf_3
 
 
-# TODO(danj): implement TISA bias version
 class ScanTISABiasedAttention(nn.Module):
-    r"""Performs query-key-value attention with a scan for reduced memory usage.
-
-    .. warning::
-        This does not currently support bias.
+    r"""Performs query-key-value attention with a scan and TISA bias for reduced
+        memory usage.
 
     Args:
         qs_chunk_size: Number of queries to process in each chunk of scan.
         ks_chunk_size: Number of keys to process in each chunk of scan.
+        num_basis: Number of basis functions for TISA bias.
 
     Returns:
         A `ScanTISABiasedAttention` module.
@@ -263,6 +262,7 @@ class ScanTISABiasedAttention(nn.Module):
 
     qs_chunk_size: int = 1024
     ks_chunk_size: int = 1024
+    num_basis: int = 5
 
     @nn.compact
     def __call__(
@@ -270,8 +270,8 @@ class ScanTISABiasedAttention(nn.Module):
         qs: jax.Array,  # [B, Q, H, D_QK_H]
         ks: jax.Array,  # [B, K, H D_QK_H]
         vs: jax.Array,  # [B, K, H, D_H]
-        qs_meta: jax.Array,  # [B, Q, D_M]
-        ks_meta: jax.Array,  # [B, K, D_M]
+        qs_locs: jax.Array,  # [B, Q, D_S]
+        ks_locs: jax.Array,  # [B, K, D_S]
         valid_lens: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         **kwargs,
@@ -291,6 +291,10 @@ class ScanTISABiasedAttention(nn.Module):
             `ctx` and `attn`, the updated values and None, respectively,
             since scanned attention never materializes the attention matrix.
         """
+        H, F = qs.shape[2], self.num_basis
+        a = self.param("a", init.constant(1), (H * F,))
+        b = self.param("b", init.constant(1), (H * F,))
+        c = self.param("c", init.constant(0), (H * F,))
         ks_mask = None
         if valid_lens is not None:
             ks_mask = mask_from_valid_lens(ks.shape[1], valid_lens)[..., 0]
@@ -298,12 +302,14 @@ class ScanTISABiasedAttention(nn.Module):
             qs,
             ks,
             vs,
-            qs_meta,
-            ks_meta,
+            qs_locs,
+            ks_locs,
+            a,
+            b,
+            c,
             ks_mask,
             self.qs_chunk_size,
             self.ks_chunk_size,
-            self.bias_func,
         ), None
 
 
@@ -312,33 +318,38 @@ def scan_tisa_biased_attention(
     qs: jax.Array,  # [B, Q, H, D_QK_H]
     ks: jax.Array,  # [B, K, H D_QK_H]
     vs: jax.Array,  # [B, K, H, D_H]
-    qs_meta: jax.Array,  # [B, Q, D_M]
-    ks_meta: jax.Array,  # [B, K, D_M]
+    qs_locs: jax.Array,  # [B, Q, D_M]
+    ks_locs: jax.Array,  # [B, K, D_M]
+    a: jax.Array,  # [H, F]
+    b: jax.Array,  # [H, F]
+    c: jax.Array,  # [H, F]
     ks_mask: jax.Array,  # [B, K]
     qs_chunk_size: int = 1024,
     ks_chunk_size: int = 1024,
 ):
-    (B, Q, H, D), M = qs.shape, qs_meta.shape[-1]
+    (B, Q, H, D), M = qs.shape, qs_locs.shape[-1]
 
     # JAX/numpy store data in row major format, so (theoretically) putting the
     # scanned axes first improves cache locality
     qs, ks, vs = map(lambda x: rearrange(x, "B L H D -> L B H D"), (qs, ks, vs))
-    qs_meta, ks_meta = map(lambda x: rearrange(x, "B L M -> L B M"), (qs_meta, ks_meta))
+    qs_locs, ks_locs = map(lambda x: rearrange(x, "B L M -> L B M"), (qs_locs, ks_locs))
     ks_mask = rearrange(ks_mask, "B K -> K B")
 
     def qs_scanner(i, _):
         Q_c = min(Q, qs_chunk_size)
         qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
-        qs_meta_chunk = lax.dynamic_slice(qs_meta, (i, 0, 0), (Q_c, B, M))
+        qs_locs_chunk = lax.dynamic_slice(qs_locs, (i, 0, 0), (Q_c, B, M))
         return i + Q_c, _stba_scan_ks(
             qs_chunk,
             ks,
             vs,
-            qs_meta_chunk,
-            ks_meta,
+            qs_locs_chunk,
+            ks_locs,
+            a,
+            b,
+            c,
             ks_mask,
             ks_chunk_size,
-            bias_func,
         )
 
     _, os = scan(
@@ -355,13 +366,16 @@ def _stba_scan_ks(
     qs_chunk: jax.Array,  # [Q_c, B, H, D]
     ks: jax.Array,  # [K, B, H, D]
     vs: jax.Array,  # [K, B, H, D]
-    qs_meta_chunk: jax.Array,  # [Q_c, B, M]
-    ks_meta: jax.Array,  # [K, B, M]
+    qs_locs_chunk: jax.Array,  # [Q_c, B, S]
+    ks_locs: jax.Array,  # [K, B, S]
+    a: jax.Array,  # [H * F]
+    b: jax.Array,  # [H * F]
+    c: jax.Array,  # [H * F]
     ks_mask: jax.Array,  # [K, B]
     ks_chunk_size: int = 1024,
-    bias_func: Callable = zero_bias,  # ([B, Q, M], [B, K, M]) -> [B, H, Q, K]
 ):
-    (Q_c, B, H, D), K, M = qs_chunk.shape, ks.shape[0], ks_meta.shape[-1]
+    (Q_c, B, H, D), K, S = qs_chunk.shape, ks.shape[0], ks_locs.shape[-1]
+    K_c, F = min(K, ks_chunk_size), a.size // H
     qs_chunk /= jnp.sqrt(D)
 
     def ks_scanner(carry: tuple, _):
@@ -369,13 +383,13 @@ def _stba_scan_ks(
         K_c = min(K, ks_chunk_size)
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (K_c, B, H, D))
         vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (K_c, B, H, D))
-        ks_meta_chunk = lax.dynamic_slice(ks_meta, (i, 0, 0), (K_c, B, M))
+        ks_locs_chunk = lax.dynamic_slice(ks_locs, (i, 0, 0), (K_c, B, S))
         ks_mask_chunk = lax.dynamic_slice(ks_mask, (i, 0), (K_c, B))
         ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
         _carry = update(
             ks_chunk,
             vs_chunk,
-            ks_meta_chunk,
+            ks_locs_chunk,
             ks_mask_chunk,
             os,
             row_maxs,
@@ -388,15 +402,18 @@ def _stba_scan_ks(
     def update(
         ks_chunk,
         vs_chunk,
-        ks_meta_chunk,
+        ks_locs_chunk,
         ks_mask_chunk,
         os,
         row_maxs,
         row_sums,
     ):
-        qs_meta_chunk_ = rearrange(qs_meta_chunk, "Q B M -> B Q M")
-        ks_meta_chunk_ = rearrange(ks_meta_chunk, "K B M -> B K M")
-        bias = bias_func(qs_meta_chunk_, ks_meta_chunk_)
+        # TODO(danj): cleanup TISA
+        qs_locs_chunk_ = rearrange(qs_locs_chunk, "Q B S -> B Q S")
+        ks_locs_chunk_ = rearrange(ks_locs_chunk, "K B S -> B K S")
+        d = vmap(l2_dist)(qs_locs_chunk_, ks_locs_chunk_)
+        bias = vmap(rbf_basis, in_axes=(None, 0, 0, 0), out_axes=1)(d, a, b, c)
+        bias = bias.reshape(B, H, F, Q_c, K_c).sum(axis=2)
         bias = rearrange(bias, "B H Q K -> Q B H K")
         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk) + bias
         scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
