@@ -247,6 +247,7 @@ def fast_attend(
     return d_inv * buf_3
 
 
+# TODO(danj): fix BUG when chunk_size // num_tokens != 0
 class MultiHeadScanTISABiasedAttention(nn.Module):
     r"""Performs multihead query-key-value scanned TISA biased attention.
 
