@@ -262,7 +262,7 @@ class ScanAttention(nn.Module):
 
     qs_chunk_size: int = 1024
     ks_chunk_size: int = 1024
-    bias_func: Callable = lambda x: jnp.zeros_like(x)
+    bias_func: Callable = lambda *_: 0
 
     @nn.compact
     def __call__(
@@ -317,7 +317,7 @@ def scan_attention(
     ks_mask: jax.Array,  # [B, K]
     qs_chunk_size: int = 1024,
     ks_chunk_size: int = 1024,
-    bias_func: Callable = lambda x: jnp.zeros_like(x),
+    bias_func: Callable = lambda *_: 0,
 ):
     """[Flash Attention 2](https://arxiv.org/abs/2307.08691) implementation using `jax.lax.scan`.
 
@@ -365,7 +365,7 @@ def _sa_scan_ks(
     ks_meta: jax.Array,  # [K, B, M]
     ks_mask: jax.Array,  # [K, B]
     ks_chunk_size: int = 1024,
-    bias_func: Callable = lambda x: jnp.zeros_like(x),
+    bias_func: Callable = lambda *_: 0,
 ):
     (Q_c, B, H, D), K, M = qs_chunk.shape, ks.shape[0], ks_meta.shape[-1]
     qs_chunk /= jnp.sqrt(D)
@@ -401,6 +401,7 @@ def _sa_scan_ks(
         row_sums,
     ):
         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk)
+        scores += bias_func(qs_meta_chunk, ks_meta_chunk)
         scores = jnp.where(ks_mask_chunk, scores, -float("inf"))
         row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
