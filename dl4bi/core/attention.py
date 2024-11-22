@@ -1131,7 +1131,7 @@ class SpatioTemporalMLPAttention(nn.Module):
         # TODO(danj): use some sort of softmax normalization,
         # even though this would prevent negative attn values?
         ctx = self.norm(attn @ self.proj_vs(vs))  # [B, Q, D]
-        gate = self.proj_gate(vs)  # [B, Q, D]
+        gate = self.proj_gate(ctx)  # [B, Q, D]
         # TODO(danj): is it weird to sum over the temporal dimension?
         vnode = jnp.mean(gate * ctx, axis=1, where=v_mask)
         return ctx, self.norm.copy()(vnode)
