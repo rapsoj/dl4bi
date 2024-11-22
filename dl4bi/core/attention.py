@@ -8,6 +8,7 @@ import flax.linen as nn
 import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
+import numpy as np
 from einops import rearrange
 from jax import jit, lax, random, vmap
 from jax.lax import scan
@@ -34,6 +35,7 @@ def gaussian_orf(key: jax.Array, m: int, d: int, structured: bool = True):
         A (structured) orthogonal random feature matrix.
     """
 
+    # TODO(danj): this only returns 1s when d=1
     def gaussian_orf_square(rng):
         q, _ = jnp.linalg.qr(random.normal(rng, (d, d)))
         return q.T
@@ -589,12 +591,12 @@ def scan_flash_attention_2(
     Implementation based on [flash-attention-jax](https://github.com/lucidrains/flash-attention-jax)
     and Google's [memory-efficient-attention](https://bit.ly/4eFA4mC).
     """
-    B, Q, H, D = qs.shape
+    (B, Q, H, D), Q_c = qs.shape, qs_chunk_size
 
-    def qs_scanner(i, _):
-        Q_c = min(Q, qs_chunk_size)
-        qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
-        return i + Q_c, _sfa2_scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size)
+    @partial(jit, static_argnums=(1,))
+    def qs_scanner(i, q_c):
+        qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (q_c, B, H, D))
+        return i + q_c, _sfa2_scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size)
 
     # JAX/numpy store data in row major format, so (theoretically) putting the
     # scanned axes first improves cache locality
@@ -605,8 +607,7 @@ def scan_flash_attention_2(
     _, os = scan(
         qs_scanner,
         init=0,
-        xs=None,
-        length=math.ceil(Q / qs_chunk_size),
+        xs=np.array([Q_c] * (Q // Q_c) + [Q % Q_c]),
     )
 
     return rearrange(os, "C Q B H D -> B (C Q) H D")
@@ -619,17 +620,17 @@ def _sfa2_scan_ks(
     ks_mask: Optional[jax.Array] = None,
     ks_chunk_size: int = 1024,
 ):
-    (Q_c, B, H, D), K = qs_chunk.shape, ks.shape[0]
+    (Q_c, B, H, D), K, K_c = qs_chunk.shape, ks.shape[0], ks_chunk_size
     qs_chunk /= jnp.sqrt(D)
 
-    def ks_scanner(carry: tuple, _):
+    @partial(jit, static_argnums=(1,))
+    def ks_scanner(carry: tuple, k_c: int):
         i, os, row_maxs, row_sums = carry
-        K_c = min(K, ks_chunk_size)
-        ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (K_c, B, H, D))
-        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (K_c, B, H, D))
+        ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (k_c, B, H, D))
+        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D))
         ks_mask_chunk = jnp.array(True)
         if ks_mask is not None:
-            ks_mask_chunk = lax.dynamic_slice(ks_mask, (i, 0), (K_c, B))
+            ks_mask_chunk = lax.dynamic_slice(ks_mask, (i, 0), (k_c, B))
             ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
         _carry = update(
             qs_chunk,
@@ -640,7 +641,7 @@ def _sfa2_scan_ks(
             row_maxs,
             row_sums,
         )
-        return (i + K_c, *_carry), None
+        return (i + k_c, *_carry), None
 
     @jit
     @partial(jax.remat, prevent_cse=False)
@@ -665,8 +666,7 @@ def _sfa2_scan_ks(
     (_, os, row_maxs, row_sums), _ = scan(
         ks_scanner,
         init=(0, os, row_maxs, row_sums),
-        xs=None,
-        length=math.ceil(K / ks_chunk_size),
+        xs=np.array([K_c] * (K // K_c) + [K % K_c]),
     )
     return os / row_sums
 
