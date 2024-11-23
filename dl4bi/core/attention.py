@@ -434,9 +434,9 @@ class TISABiasedScanAttention(nn.Module):
         memory usage.
 
     Args:
-        num_basis: Number of basis functions for TISA bias.
         qs_chunk_size: Number of queries to process in each chunk of scan.
         ks_chunk_size: Number of keys to process in each chunk of scan.
+        num_basis: Number of basis functions for TISA bias.
 
     Returns:
         A `ScanTISABiasedAttention` module.
