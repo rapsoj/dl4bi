@@ -1,4 +1,4 @@
-cls: ScanTISABiasedTNPKR
+cls: ScanTNPKR
 kwargs:
   num_blks: 6
   num_reps: 1
@@ -8,10 +8,14 @@ kwargs:
       dims: [256, 128, 64]
       act_fn: gelu
   attn:
-    cls: MultiHeadScanTISABiasedAttention
+    cls: MultiHeadAttention
     kwargs:
-      num_heads: 4
-      num_basis: 5
+      attn:
+        cls: ScanTISABiasedAttention
+        kwargs:
+          num_basis: 5
+          qs_chunk_size: 1024
+          ks_chunk_size: 1024
   ffn:
     cls: MLP
     kwargs:

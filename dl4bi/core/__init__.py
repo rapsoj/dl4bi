@@ -6,7 +6,6 @@ from .attention import (
     FusedAttention,
     KernelAttention,
     MultiHeadAttention,
-    MultiHeadScanTISABiasedAttention,
     MultiKernelAttention,
     MultiplicativeScorer,
     ProductKernelAttention,
@@ -51,7 +50,6 @@ from .mle import gp_mle_bfgs, gp_mle_sgd
 from .mlp import MLP, MLPMixer, MLPMixerBlock
 from .transformer import (
     KRBlock,
-    ScanBiasedKRBlock,
     TransformerDecoder,
     TransformerDecoderBlock,
     TransformerEncoder,

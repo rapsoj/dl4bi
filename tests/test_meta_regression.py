@@ -16,7 +16,7 @@ from dl4bi.meta_regression import (
     TNPKR,
     TNPND,
     ConvCNP,
-    ScanTISABiasedTNPKR,
+    ScanTNPKR,
 )
 from dl4bi.meta_regression import (
     train_utils as tu,
@@ -42,7 +42,7 @@ def test_models():
         TNPD,
         TNPND,
         TNPKR,
-        ScanTISABiasedTNPKR,
+        ScanTNPKR,
         ConvCNP,
     ]:
         m = np()
@@ -104,7 +104,7 @@ def test_context_data_leaks():
         lambda: TNPKR(attn=MultiHeadAttention(Attention())),
         lambda: TNPKR(attn=MultiHeadAttention(FusedAttention())),
         lambda: TNPKR(attn=MultiHeadAttention(FastAttention())),
-        ScanTISABiasedTNPKR,
+        ScanTNPKR,
         ConvCNP,
     ]:
         print(np)
@@ -153,7 +153,7 @@ def test_train_step_loss():
         TNPD,
         TNPND,
         TNPKR,
-        ScanTISABiasedTNPKR,
+        ScanTNPKR,
         ConvCNP,
     ]:
         print(np)

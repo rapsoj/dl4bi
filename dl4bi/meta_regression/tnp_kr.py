@@ -7,14 +7,14 @@ import jax.numpy as jnp
 from jax import vmap
 from sps.kernels import l2_dist_sq
 
+from dl4bi.core.attention import ScanTISABiasedAttention
+
 from ..core import (
     MLP,
     DistanceBias,
     FusedAttention,
     KRBlock,
     MultiHeadAttention,
-    MultiHeadScanTISABiasedAttention,
-    ScanBiasedKRBlock,
 )
 
 
@@ -107,7 +107,8 @@ class TNPKR(nn.Module):
                 bias, norm = self.bias.copy(), self.norm.copy()
                 b_qk, b_kk = bias(d_qk), bias(d_kk)
                 blk = KRBlock(attn, norm, ffn)
-                qvs, kvs = blk(qvs, kvs, b_qk, b_kk, valid_lens_ctx, training)
+                kwargs = {"qk": {"bias": b_qk}, "kk": {"bias": b_kk}}
+                qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, **kwargs)
         qvs = self.norm.copy()(qvs)
         f_dist = self.head(qvs, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
@@ -116,8 +117,9 @@ class TNPKR(nn.Module):
         return f_mu, f_std
 
 
-class ScanTISABiasedTNPKR(nn.Module):
-    """Transformer Neural Process - Kernel Regression (TNP-KR).
+class ScanTNPKR(nn.Module):
+    """Transformer Neural Process - Kernel Regression (TNP-KR) using memory efficient
+    scanning.
 
     Args:
         num_blks: Number of `KRBlocks` to use.
@@ -149,7 +151,7 @@ class ScanTISABiasedTNPKR(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    attn: nn.Module = MultiHeadScanTISABiasedAttention()
+    attn: nn.Module = MultiHeadAttention(ScanTISABiasedAttention())
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64], nn.gelu)
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
@@ -195,12 +197,14 @@ class ScanTISABiasedTNPKR(nn.Module):
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
+        qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx}
+        kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx}
         for _ in range(self.num_blks):
             attn, ffn = self.attn.copy(), self.ffn.copy()
             for _ in range(self.num_reps):
                 attn, norm, ffn = self.attn.copy(), self.norm.copy(), self.ffn.copy()
-                blk = ScanBiasedKRBlock(attn, norm, ffn)
-                qvs, kvs = blk(qvs, kvs, s_test, s_ctx, valid_lens_ctx, training)
+                blk = KRBlock(attn, norm, ffn)
+                qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)
         f_dist = self.head(qvs, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
