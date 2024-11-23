@@ -431,7 +431,6 @@ def scan_ks(
     return os / row_sums
 
 
-# TODO(danj): fix case when sequence length is not multiple of chunk size
 class TISABiasedScanAttention(nn.Module):
     r"""Performs query-key-value attention with a scan and TISA bias for reduced
         memory usage.
