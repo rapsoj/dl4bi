@@ -325,7 +325,7 @@ def scan_flash_attention_2(
     (B, Q, H, D), Q_c = qs.shape, qs_chunk_size
     Q_c = min(Q, qs_chunk_size)
 
-    @partial(jit, static_argnums=(1,))
+    @jit
     def qs_scanner(i, _):
         qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
         return i + Q_c, _sfa2_scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size)
@@ -336,14 +336,22 @@ def scan_flash_attention_2(
     if ks_mask is not None:
         ks_mask = rearrange(ks_mask, "B K -> K B")
 
-    _, os = scan(
+    i, os = scan(
         qs_scanner,
         init=0,
         xs=None,
         length=Q // Q_c,
     )
+    os = rearrange(os, "C Q B H D -> B (C Q) H D")
 
-    return rearrange(os, "C Q B H D -> B (C Q) H D")
+    remainder = Q % Q_c
+    if remainder:
+        qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (remainder, B, H, D))
+        os_chunk = _sfa2_scan_ks(qs_chunk, ks, vs, ks_mask, ks_chunk_size)
+        os_chunk = rearrange(os_chunk, "Q B H D -> B Q H D")
+        os = jnp.concatenate([os, os_chunk], axis=1)
+
+    return os
 
 
 def _sfa2_scan_ks(
@@ -357,15 +365,10 @@ def _sfa2_scan_ks(
     K_c = min(K, ks_chunk_size)
     qs_chunk /= jnp.sqrt(D)
 
-    @partial(jit, static_argnums=(1,))
+    @jit
     def ks_scanner(carry: tuple, _):
         i, os, row_maxs, row_sums = carry
-        ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (K_c, B, H, D))
-        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (K_c, B, H, D))
-        ks_mask_chunk = jnp.array(True)
-        if ks_mask is not None:
-            ks_mask_chunk = lax.dynamic_slice(ks_mask, (i, 0), (K_c, B))
-            ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
+        ks_chunk, vs_chunk, ks_mask_chunk = chunk_ks(i, K_c)
         _carry = update(
             qs_chunk,
             ks_chunk,
@@ -376,6 +379,15 @@ def _sfa2_scan_ks(
             row_sums,
         )
         return (i + K_c, *_carry), None
+
+    def chunk_ks(i, k_c):
+        ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (k_c, B, H, D))
+        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D))
+        ks_mask_chunk = jnp.array(True)
+        if ks_mask is not None:
+            ks_mask_chunk = lax.dynamic_slice(ks_mask, (i, 0), (k_c, B))
+            ks_mask_chunk = rearrange(ks_mask_chunk, "K B -> 1 B 1 K")
+        return ks_chunk, vs_chunk, ks_mask_chunk
 
     @jit
     @partial(jax.remat, prevent_cse=False)
@@ -397,12 +409,27 @@ def _sfa2_scan_ks(
     row_sums = jnp.zeros((Q_c, B, H, 1))
     row_maxs = jnp.full((Q_c, B, H, 1), -float("inf"))
 
-    (_, os, row_maxs, row_sums), _ = scan(
+    (i, os, row_maxs, row_sums), _ = scan(
         ks_scanner,
         init=(0, os, row_maxs, row_sums),
         xs=None,
         length=K // K_c,
     )
+
+    # last block
+    remainder = K % K_c
+    if remainder:
+        ks_chunk, vs_chunk, ks_mask_chunk = chunk_ks(i, remainder)
+        os, row_maxs, row_sums = update(
+            qs_chunk,
+            ks_chunk,
+            vs_chunk,
+            ks_mask_chunk,
+            os,
+            row_maxs,
+            row_sums,
+        )
+
     return os / row_sums
 
 
@@ -496,6 +523,7 @@ def scan_tisa_biased_attention(
     if ks_mask is not None:
         ks_mask = rearrange(ks_mask, "B K -> K B")
 
+    @jit
     def qs_scanner(i, _):
         Q_c = min(Q, qs_chunk_size)
         qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
@@ -539,6 +567,7 @@ def _stba_scan_ks(
     K_c, F = min(K, ks_chunk_size), a.size // H
     qs_chunk /= jnp.sqrt(D)
 
+    @jit
     def ks_scanner(carry: tuple, _):
         i, os, row_maxs, row_sums = carry
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (K_c, B, H, D))
