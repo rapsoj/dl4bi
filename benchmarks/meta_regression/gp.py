@@ -49,7 +49,12 @@ def main(cfg: DictConfig):
     clbk = log_posterior_predictive_plots
     if cfg.data.name == "2d":
         H, W = cfg.data.s[0].num, cfg.data.s[1].num
-        clbk = partial(log_2d_grid_gp_plots, shape=(H, W, 1), cfg=cfg)
+        clbk = partial(
+            log_2d_grid_gp_plots,
+            shape=(H, W, 1),
+            data=cfg.data,
+            kernel=cfg.kernel,
+        )
     state = train(
         rng_train,
         model,
