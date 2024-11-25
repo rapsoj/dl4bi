@@ -851,14 +851,15 @@ def log_2d_grid_gp_plots(
     state: TrainState,
     batch: tuple,
     shape: tuple[int, int, int],
-    cfg: DictConfig,
+    data: DictConfig,
+    kernel: DictConfig,
     num_plots: int = 16,
 ):
     """Logs `num_plots` from the given batch for 2D GPs."""
     rng_step, rng_batch = random.split(rng_step)
     cmap = mpl.colormaps.get_cmap("Spectral_r")
     cmap.set_bad("grey")
-    batch = next(build_2d_grid_gp_dataloader(cfg.data, cfg.kernel)(rng_batch))
+    batch = next(build_2d_grid_gp_dataloader(data, kernel)(rng_batch))
     log_img_plots(step, rng_step, state, batch, shape, cmap=cmap, num_plots=num_plots)
 
 
