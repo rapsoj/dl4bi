@@ -308,6 +308,60 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
     return dataloader
 
 
+def build_2d_grid_gp_dataloader(data: DictConfig, kernel: DictConfig):
+    """A custom 2D GP dataloader in which generated context and test points
+        reside only on the 2d grid.
+
+    .. note::
+        The dataloader used for training and testing uses context points
+        on a continuous domain, while this only uses points on a grid for
+        visualization purposes.
+    """
+    gp = instantiate(kernel)
+    s_dim = len(data.s)
+    s_grid = build_grid(data.s).reshape(-1, s_dim)  # flatten spatial dims
+    s = jnp.repeat(s_grid[None, ...], data.batch_size, axis=0)
+    L = s.shape[1]
+    obs_noise, batch_size = data.obs_noise, data.batch_size
+    valid_lens_test = jnp.repeat(L, batch_size)
+
+    def gen_batch(rng: jax.Array):
+        rng_gp, rng_eps, rng_valid, rng_permute, rng = random.split(rng, 5)
+        f, var, ls, period, *_ = gp.simulate(rng_gp, s_grid, batch_size)
+        f_noisy = f + obs_noise * random.normal(rng_eps, f.shape)
+        valid_lens_ctx = random.randint(
+            rng_valid,
+            (batch_size,),
+            data.num_ctx.min,
+            data.num_ctx.max,
+        )
+        permute_idx = random.choice(rng_permute, L, (L,), replace=False)
+        inv_permute_idx = jnp.argsort(permute_idx)
+        s_permuted = s[:, permute_idx, :]
+        f_permuted = f[:, permute_idx, :]
+        f_noisy_permuted = f_noisy[:, permute_idx, :]
+        s_ctx = s_permuted[:, : data.num_ctx.max, :]
+        f_ctx = f_noisy_permuted[:, : data.num_ctx.max, :]
+        return (
+            s_ctx,
+            f_ctx,
+            valid_lens_ctx,
+            s_permuted,  # s_test
+            f_permuted,  # f_test
+            valid_lens_test,
+            s,  # add full original for plotting
+            f,
+            inv_permute_idx,
+        )
+
+    def dataloader(rng: jax.Array):
+        while True:
+            rng_batch, rng = random.split(rng)
+            yield gen_batch(rng_batch)
+
+    return dataloader
+
+
 def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
     "Save a checkpoint."
     shutil.rmtree(path, ignore_errors=True)
@@ -762,8 +816,6 @@ def log_posterior_predictive_plots(
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls, period = (
         batch
     )
-    if s_ctx.shape[-1] > 1:  # TODO(danj): support 2D
-        return
     f_mu, f_std, *_ = state.apply_fn(
         {"params": state.params, **state.kwargs},
         s_ctx,
@@ -788,6 +840,24 @@ def log_posterior_predictive_plots(
         num_plots,
     )
     wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
+
+
+def log_2d_grid_gp_plots(
+    step: int,
+    rng_step: int,
+    state: TrainState,
+    batch: tuple,
+    shape: tuple[int, int, int],
+    data: DictConfig,
+    kernel: DictConfig,
+    num_plots: int = 16,
+):
+    """Logs `num_plots` from the given batch for 2D GPs."""
+    rng_step, rng_batch = random.split(rng_step)
+    cmap = mpl.colormaps.get_cmap("Spectral_r")
+    cmap.set_bad("grey")
+    batch = next(build_2d_grid_gp_dataloader(data, kernel)(rng_batch))
+    log_img_plots(step, rng_step, state, batch, shape, cmap=cmap, num_plots=num_plots)
 
 
 def log_img_plots(
