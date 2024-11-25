@@ -18,12 +18,13 @@ from sps.kernels import rbf
 from sps.utils import build_grid
 
 from dl4bi.meta_regression.train_utils import (
-    build_2d_gp_dataloader,
+    build_2d_grid_gp_dataloader,
     build_gp_dataloader,
     instantiate,
     load_ckpts,
     plot_img,
     plot_posterior_predictive,
+    train,
 )
 
 
@@ -115,14 +116,16 @@ def plot_2d_img_samples(
 ):
     build_dataloaders, shape, cmap, cmap_std = project_parameters(cfg)
     H, W, C = shape
-    train_dataloader = build_dataloaders(
-        batch_size=1,
-        num_ctx_min=num_ctx,
-        num_ctx_max=num_ctx,
-        num_test_max=H * W,
-    )
-    if isinstance(train_dataloader, tuple):
-        train_dataloader = train_dataloader[0]
+    if build_dataloaders == build_2d_grid_gp_dataloader:
+        cfg.data.update({"batch_size": 1, "num_ctx": {"max": num_ctx, "min": num_ctx}})
+        train_dataloader = build_dataloaders(cfg.data, cfg.kernel)
+    else:
+        train_dataloader, *_ = build_dataloaders(
+            batch_size=1,
+            num_ctx_min=num_ctx,
+            num_ctx_max=num_ctx,
+            num_test_max=H * W,
+        )
     rng = random.key(cfg.seed)
     num_models = len(ckpts)
     for i in range(num_samples):
@@ -199,7 +202,7 @@ def project_parameters(cfg: DictConfig):
     matches = lambda pattern: re.match(pattern, cfg.project, re.IGNORECASE)
     match cfg.project:
         case _ if matches("Gaussian Processes"):
-            build_dataloaders = partial(build_2d_gp_dataloader, cfg=cfg)
+            build_dataloaders = build_2d_grid_gp_dataloader
             shape = (16, 16, 1)
             cmap = mpl.colormaps.get_cmap("grey")
             cmap.set_bad("blue")

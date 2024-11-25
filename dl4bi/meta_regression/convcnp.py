@@ -57,8 +57,8 @@ class ConvCNP(nn.Module):
                 dict(start=lo, stop=up, num=int(self.points_per_unit * (up - lo)))
                 for (lo, up) in zip(self.s_lower, self.s_upper)
             ]
-        )  # [*P... , s_dim]
-        s_grid = jnp.repeat(s_grid[None, :], B, axis=0)  # [B, *P... , s_dim]
+        )  # [*P..., s_dim]
+        s_grid = jnp.repeat(s_grid[None, :], B, axis=0)  # [B, *P..., s_dim]
         conv_dims = s_grid.shape[:-1]  # [B, *P...]
         s_vec = s_grid.reshape(B, -1, s_dim)  # [B, L_grid, s_dim]
         h = self.enc(s_ctx, f_ctx, s_vec, valid_lens_ctx)  # [B, L_grid, D]

@@ -15,7 +15,7 @@ from dl4bi.meta_regression.train_utils import (
     cosine_annealing_lr,
     evaluate,
     instantiate,
-    log_2d_gp_plots,
+    log_2d_grid_gp_plots,
     log_posterior_predictive_plots,
     save_ckpt,
     train,
@@ -49,7 +49,7 @@ def main(cfg: DictConfig):
     clbk = log_posterior_predictive_plots
     if cfg.data.name == "2d":
         H, W = cfg.data.s[0].num, cfg.data.s[1].num
-        clbk = partial(log_2d_gp_plots, shape=(H, W, 1), cfg=cfg)
+        clbk = partial(log_2d_grid_gp_plots, shape=(H, W, 1), cfg=cfg)
     state = train(
         rng_train,
         model,
