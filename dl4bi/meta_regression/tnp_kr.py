@@ -100,14 +100,25 @@ class TNPKR(nn.Module):
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
         d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
+        qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx}
+        kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx}
         for _ in range(self.num_blks):
             attn, ffn = self.attn.copy(), self.ffn.copy()
             for _ in range(self.num_reps):
                 bias, norm = self.bias.copy(), self.norm.copy()
                 b_qk, b_kk = bias(d_qk), bias(d_kk)
                 blk = KRBlock(attn, norm, ffn)
+                # TODO(danj): the kwargs don't propagate anywhere
                 kwargs = {"qk": {"bias": b_qk}, "kk": {"bias": b_kk}}
-                qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, **kwargs)
+                qvs, kvs = blk(
+                    qvs,
+                    kvs,
+                    valid_lens_ctx,
+                    training,
+                    qk_kwargs,
+                    kk_kwargs,
+                    **kwargs,
+                )
         qvs = self.norm.copy()(qvs)
         f_dist = self.head(qvs, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
