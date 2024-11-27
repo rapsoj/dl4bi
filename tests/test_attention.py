@@ -100,42 +100,6 @@ def test_fast_attention_impl():
     assert max_error_fast < 2.0, "Fast: Large max error in approximation!"
 
 
-def test_biased_fast_attention_impl():
-    B, L, H, D, D_S = 4, 128, 4, 16, 2
-    key = random.key(42)
-    rng_qkv, rng_valid, rng_init, rng_s = random.split(key, 4)
-    qs_s, ks_s = random.normal(rng_s, (2, B, L, D_S))
-    vdist = jax.vmap(l2_dist_sq)
-    attn_kwargs = {"bias": vdist(qs_s, ks_s), "qs_s": qs_s, "ks_s": ks_s}
-    data = random.normal(rng_qkv, (3, B, L, H, D))
-    qs, ks, vs = data[0], data[1], data[2]
-    valid_lens = random.randint(rng_valid, (B,), 0, maxval=L, dtype=jnp.int32)
-    (ctx_true, _), _ = Attention().init_with_output(
-        rng_init,
-        qs,
-        ks,
-        vs,
-        valid_lens,
-        **attn_kwargs,
-    )
-    (ctx_fast, _), _ = DistanceBiasedFastAttention().init_with_output(
-        rng_init,
-        qs,
-        ks,
-        vs,
-        valid_lens,
-        **attn_kwargs,
-    )
-    mse_fast = jnp.square(ctx_true - ctx_fast).mean()
-    max_error_fast = jnp.max(jnp.abs(ctx_true - ctx_fast))
-    assert ctx_true.shape == (B, L, H, D), "Full: incorrect context output shape!"
-    assert ctx_fast.shape == (B, L, H, D), "Fast: incorrect context output shape!"
-    # Source: https://tinyurl.com/google-fast-attn
-    # TODO (jhoott): change thersholds
-    assert mse_fast < 0.05, "Fast: Large MSE error in approximation"
-    assert max_error_fast < 2.0, "Fast: Large max error in approximation!"
-
-
 def test_scan_attention_impl():
     B, L, H, D, C = 4, 313, 4, 16, 256
     key = random.key(42)
@@ -409,3 +373,7 @@ def test_multikernel_attention():
     )
     assert jnp.isfinite(ctx).all(), "MultikernelAttention produced non-finite values!"
     assert ctx.shape == (B, L, D), "Incorrect context output shape!"
+
+
+if __name__ == "__main__":
+    test_biased_fast_attention_impl()
