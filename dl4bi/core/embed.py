@@ -120,3 +120,30 @@ def _pe_gaussian_fourier(B: jax.Array, std: float):
     return jit(
         lambda s: jnp.concatenate([jnp.sin(s_proj(s)), jnp.cos(s_proj(s))], axis=-1)
     )
+
+
+class RFF_FeaturesEncoder(nn.Module):
+    D: int
+
+    @nn.compact
+    def __call__(self, s: jax.Array):
+        n_features = s.shape[-1]
+        w = self.variable(
+            "projections",
+            "rff_w",
+            lambda: jax.random.normal(
+                self.make_rng("params"), shape=(n_features, self.D)
+            )
+            * jnp.sqrt(2),
+        )
+        b = self.variable(
+            "projections",
+            "rff_b",
+            lambda: jax.random.uniform(
+                self.make_rng("params"), shape=(self.D,), minval=0, maxval=2 * jnp.pi
+            )
+            * jnp.sqrt(2),
+        )
+        projection = jnp.dot(s, w.value) + b.value  # (n_samples, D)
+        rff = jnp.sqrt(2.0 / self.D) * jnp.cos(projection)
+        return rff

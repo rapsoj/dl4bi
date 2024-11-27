@@ -14,7 +14,7 @@ from jax.nn import dot_product_attention
 from sps.kernels import l2_dist, outer_subtract
 
 from .bias import rbf_basis
-from .embed import GaussianFourierEmbedding
+from .embed import RFF_FeaturesEncoder
 from .mlp import MLP
 from .utils import mask_attn, mask_from_valid_lens
 
@@ -285,8 +285,7 @@ class DistanceBiasedFastAttention(nn.Module):
             "qk_orf",
             lambda: gen_proj(self.make_rng("params")),
         )
-        # TODO(jhoott): giving a new rng each step?
-        s_proj: nn.Module = GaussianFourierEmbedding(self.s_embd_dim)
+        s_proj: nn.Module = RFF_FeaturesEncoder(self.s_embd_dim)
         qs_s_proj = s_proj(qs_s)
         ks_s_proj = s_proj(ks_s)
         a = self.param("a", init.constant(-1), (1, 1, H, 1))
