@@ -129,7 +129,7 @@ def build_dataloaders(
         mask_threshold = norm.ppf(
             1 - data.mask_pct,
             loc=0,
-            scale=kernel.kwargs.var.kwargs.mu,
+            scale=kernel.kwargs.var.kwargs.kwargs.mu,
         )
         pct_masked = jit(lambda f: (f > mask_threshold).sum(axis=(1, 2)) / L_train)
 
@@ -139,15 +139,12 @@ def build_dataloaders(
             s = s.reshape(-1, D)
             f, *_ = gp.simulate(rng_f, s, mB)  # f: [mB, L_train, 1]
             # resample when any sample doesn't meet masking criteria
-            count = 1
             while jnp.logical_or(
                 pct_masked(f) < data.min_masked_pct,
                 pct_masked(f) > data.max_masked_pct,
             ).any():
-                count += 1
                 rng_re, rng_f = random.split(rng_f)
                 f, *_ = gp.simulate(rng_re, s, mB)  # f: [mB, L_train, 1]
-            print(count)
             # use the next image in the batch to mask the previous
             rot_idx = jnp.arange(1, mB + 1).at[-1].set(0)
             f_mask = f[rot_idx] > mask_threshold
