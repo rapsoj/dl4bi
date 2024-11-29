@@ -7,8 +7,8 @@ kwargs:
     kwargs:
       dims: [256, 128, 64]
       act_fn: gelu
-  dist:
-    func: l2_dist
+  dist: null
+  bias: null
   attn:
     cls: MultiHeadAttention
     kwargs:
@@ -16,14 +16,11 @@ kwargs:
       attn:
         cls: DistanceBiasedFastAttention
         kwargs:
-          num_ortho_features: 128
+          num_ortho_features: 64
           s_rbf_rff:
             cls: RBFRandomFourierFeatures
             kwargs:
-              embed_dim: 128
-        # cls: FastAttention
-        # kwargs:
-        #   num_ortho_features: 128
+              embed_dim: 48
   ffn:
     cls: MLP
     kwargs:

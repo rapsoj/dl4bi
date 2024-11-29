@@ -240,7 +240,7 @@ class DistanceBiasedFastAttention(nn.Module):
     p_dropout: float = 0.0
     build_phi: Callable = build_stable_positive_softmax_phi
     num_ortho_features: int = 64
-    s_rbf_rff: nn.Module = RBFRandomFourierFeatures(64)
+    s_rbf_rff: nn.Module = RBFRandomFourierFeatures(48)
 
     @nn.compact
     def __call__(
