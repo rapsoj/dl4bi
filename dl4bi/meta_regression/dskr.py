@@ -16,8 +16,8 @@ from ..core import (
 )
 
 
-class DSTKR(nn.Module):
-    """Deep Spatiotemporal Kernel Regression.
+class DSKR(nn.Module):
+    """Deep Sparse Kernel Regression.
 
     Args:
 
