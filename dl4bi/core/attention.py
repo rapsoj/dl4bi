@@ -981,11 +981,14 @@ class MultiHeadAttention(nn.Module):
         Returns:
             `ctx` and `attn`, the updated values and attention weights.
         """
-        (B, Q, D_V), H = vs.shape, self.num_heads
+        H = self.num_heads
         qs, ks, vs = self.proj_qs(qs), self.proj_ks(ks), self.proj_vs(vs)
-        qs, ks, vs = map(lambda x: rearrange(x, "B L D -> B L H E", H=H), (qs, ks, vs))
+        qs, ks, vs = map(
+            lambda x: rearrange(x, "B L (H D) -> B L H D", H=H), (qs, ks, vs)
+        )
         ctx, attn = self.attn(qs, ks, vs, valid_lens, training, **kwargs)
-        return self.proj_out(ctx.reshape(B, Q, D_V)), attn
+        ctx = rearrange(ctx, "B L H D -> B L (H D)")
+        return self.proj_out(ctx), attn
 
 
 @jit
