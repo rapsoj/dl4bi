@@ -270,10 +270,10 @@ class DistanceBiasedFastAttention(nn.Module):
             since the attention matrix is never materialized in FAVOR+.
         """
         (H, D_QK_H), K = qs.shape[-2:], ks.shape[1]
-        S_RFF = self.s_rbf_rff.embed_dim
+        E = self.s_rbf_rff.embed_dim
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
-        gen_qk_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_QK_H)
+        gen_qk_proj = lambda rng: gaussian_orf(rng, self.num_ortho_features, D_QK_H + E)
         qk_proj = self.variable(
             "projections", "qk_orf", lambda: gen_qk_proj(self.make_rng("params"))
         )
