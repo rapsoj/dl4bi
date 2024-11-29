@@ -7,6 +7,8 @@ import jax.nn.initializers as init
 import jax.numpy as jnp
 from einops import repeat
 
+from dl4bi.core.attention import MultiHeadAttention
+
 from ..core import (
     MLP,
     KRBlock,
@@ -32,6 +34,7 @@ class DSTKR(nn.Module):
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
     max_dist: float = float("inf")
     attn: nn.Module = SpatioTemporalMLPAttention()
+    vattn: nn.Module = MultiHeadAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64], nn.gelu)
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
@@ -78,15 +81,15 @@ class DSTKR(nn.Module):
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
         vnode = self.param("vnode", init.ones, (kvs.shape[-1],))
-        vnode = repeat(vnode, "D -> B D", B=qvs.shape[0])
+        vnode = repeat(vnode, "D -> B 1 D", B=qvs.shape[0])
         qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx, "vnode": vnode}
         kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx, "vnode": vnode}
         for _ in range(self.num_blks):
-            attn, ffn = self.attn.copy(), self.ffn.copy()
+            attn, ffn, vattn = self.attn.copy(), self.ffn.copy(), self.vattn.copy()
             for _ in range(self.num_reps):
                 norm = self.norm.copy()
-                # TODO(danj): update vnode from kvs
-                # vnode = update
+                # TODO(danj): add vnode to kvs?
+                vnode, _ = vattn(vnode, kvs, kvs, valid_lens_ctx, training)
                 blk = KRBlock(attn, norm, ffn)
                 qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)

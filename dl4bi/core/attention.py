@@ -1160,7 +1160,7 @@ class SpatioTemporalMLPAttention(nn.Module):
         # vnode (global behavior)
         vnode = kwargs.get("vnode")
         if vnode is not None:
-            vnode = repeat(vnode, "B D -> B Q K D", Q=Q, K=K)
+            vnode = repeat(vnode, "B 1 D -> B Q K D", Q=Q, K=K)
             m = stack(m, vnode)
         # mask
         if valid_lens is None:

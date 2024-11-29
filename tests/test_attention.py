@@ -63,7 +63,7 @@ def test_spatiotemporal_mlp_attention_impl():
     ks_t = random.normal(rng_t, (B, L, T))
     qs_t = ks_t + 1  # queries are temporally later than keys
     valid_lens = jnp.array([2, 4, 6, 3])
-    for vnode in [None, jnp.ones((B, D))]:
+    for vnode in [None, jnp.ones((B, 1, D))]:
         (ctx, attn), _ = SpatioTemporalMLPAttention().init_with_output(
             rng_init,
             qs,
