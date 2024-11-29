@@ -5,11 +5,11 @@ import flax.linen as nn
 import jax
 import jax.nn.initializers as init
 import jax.numpy as jnp
+from einops import repeat
 
 from ..core import (
     MLP,
     KRBlock,
-    MultiHeadAttention,
     SpatioTemporalMLPAttention,
 )
 
@@ -30,8 +30,8 @@ class DSTKR(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    max_dist: float = 1
-    attn: nn.Module = MultiHeadAttention(SpatioTemporalMLPAttention())
+    max_dist: float = float("inf")
+    attn: nn.Module = SpatioTemporalMLPAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64], nn.gelu)
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
@@ -78,16 +78,17 @@ class DSTKR(nn.Module):
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         qvs, kvs = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
         vnode = self.param("vnode", init.ones(), (kvs.shape[-1],))
+        vnode = repeat(vnode, "D -> B D", B=qvs.shape[0])
         qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx, "vnode": vnode}
         kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx, "vnode": vnode}
         for _ in range(self.num_blks):
             attn, ffn = self.attn.copy(), self.ffn.copy()
             for _ in range(self.num_reps):
                 norm = self.norm.copy()
-                blk = KRBlock(attn, norm, ffn)
-                qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
                 # TODO(danj): update vnode from kvs
                 # vnode = update
+                blk = KRBlock(attn, norm, ffn)
+                qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)
         f_dist = self.head(qvs, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)

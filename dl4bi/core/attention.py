@@ -1138,7 +1138,7 @@ class MultiKernelAttention(nn.Module):
 # TODO(danj): implement memory efficient version
 class SpatioTemporalMLPAttention(nn.Module):
     proj_vs: nn.Module = MLP([64], nn.gelu)
-    proj_attn: nn.Module = MLP([256, 256, 1], nn.gelu)
+    proj_attn: nn.Module = MLP([256, 64, 1], nn.gelu)
     norm: nn.Module = nn.LayerNorm()
     max_dist: float = float("inf")
 
@@ -1183,9 +1183,10 @@ class SpatioTemporalMLPAttention(nn.Module):
             t_mask = (t_diff > 0)[..., 0]  # [B, Q, K]
             mask = jnp.logical_and(mask, t_mask)
             m = stack(m, t_diff)
-        # TODO(danj): project attention and gate with single network?
-        attn = self.proj_attn(m)[..., 0]
-        attn = jnp.where(mask, attn, 0)
-        # TODO(danj): use some sort of softmax normalization,
-        # even though this would prevent negative attn values?
-        return self.norm(attn @ self.proj_vs(vs))  # [B, Q, D]
+        # TODO(danj): gated instead of scalar attention?
+        scores = self.proj_attn(m)[..., 0]
+        scores = jnp.where(mask, scores, -float("inf"))
+        # TODO(danj): replace softmax with post-norm?
+        attn = nn.softmax(scores, axis=-1)
+        ctx = attn @ self.proj_vs(vs)
+        return ctx, attn

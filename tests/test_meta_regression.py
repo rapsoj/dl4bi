@@ -10,7 +10,7 @@ from dl4bi.meta_regression import (
     BNP,
     CANP,
     CNP,
-    DKR,
+    DSTKR,
     NP,
     TNPD,
     TNPKR,
@@ -38,7 +38,7 @@ def test_models():
         ANP,
         CANP,
         BANP,
-        DKR,
+        DSTKR,
         TNPD,
         TNPND,
         TNPKR,
@@ -98,7 +98,7 @@ def test_context_data_leaks():
         ANP,
         CANP,
         BANP,
-        DKR,
+        DSTKR,
         TNPD,
         TNPND,
         lambda: TNPKR(attn=MultiHeadAttention(Attention())),
@@ -149,7 +149,7 @@ def test_train_step_loss():
         ANP,
         CANP,
         BANP,
-        DKR,
+        DSTKR,
         TNPD,
         TNPND,
         TNPKR,
@@ -192,7 +192,7 @@ def test_sample():
     s_ctx = jnp.linspace(0, 0.90, 90)[:, None]  # [L_ctx, 1]
     s_test = jnp.linspace(0.90, 1.0, 10)[:, None]  # [L_test, 1]
     f_ctx = s_ctx  # [L_ctx, 1] : just a line
-    for np in [NP, CNP, ANP, CANP, DKR, TNPD, TNPKR, ConvCNP]:
+    for np in [NP, CNP, ANP, CANP, TNPD, TNPKR, ConvCNP]:
         print(np)
         model = np()
         kwargs = model.init(

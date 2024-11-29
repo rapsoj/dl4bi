@@ -44,7 +44,7 @@ from .bnp import BNP
 from .canp import CANP
 from .cnp import CNP
 from .convcnp import ConvCNP
-from .dkr import DKR
+from .dstkr import DSTKR
 from .np import NP
 from .tnp_d import TNPD
 from .tnp_kr import TNPKR, ScanTNPKR
