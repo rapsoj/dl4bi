@@ -5,9 +5,9 @@ import flax.linen as nn
 import jax
 import jax.nn.initializers as init
 import jax.numpy as jnp
+import jraph
 from einops import repeat
 from jax import jit
-from jax.tree_util import Partial
 from jraph import GraphsTuple
 from scipy.spatial import KDTree
 from sps.kernels import l2_dist
@@ -51,6 +51,11 @@ def k_nearest_senders(rx: jax.Array, tx: jax.Array, k: int):
     return idx.flatten(), d.flatten()
 
 
+def edge_update_fn(edge, *args):
+    return edge
+
+
+# TODO(danj): graph padding??
 class GDSKR(nn.Module):
     """GDSKR
 
@@ -120,6 +125,7 @@ class GDSKR(nn.Module):
                 globals=jnp.max(x_c, axis=0, keepdims=True),
             )
             graphs += [g]
+        graphs = jraph.batch(graphs)
 
 
 class DSKR(nn.Module):
