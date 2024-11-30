@@ -29,8 +29,11 @@ from ..core import (
 # prediction head
 #  vnode
 #  qs
+# Can we condition projections for attention on global state?
 
 
+# TODO(danj): use kdtree in scipy spatial and return distances
+# for bias too
 def k_nearest(dist: Callable, x: jax.Array, y: jax.Array, k: int):
     return jnp.argsort(dist(x, y), axis=-1)[:, :k]
 
