@@ -9,7 +9,8 @@ from einops import repeat
 from jax import jit
 from jax.tree_util import Partial
 from jraph import GraphsTuple
-from sps.kernels import l2_dist_sq
+from scipy.spatial import KDTree
+from sps.kernels import l2_dist
 
 from dl4bi.core.attention import MultiHeadAttention
 
@@ -32,14 +33,36 @@ from ..core import (
 # Can we condition projections for attention on global state?
 
 
-# TODO(danj): use kdtree in scipy spatial and return distances
-# for bias too
-def k_nearest(dist: Callable, x: jax.Array, y: jax.Array, k: int):
-    return jnp.argsort(dist(x, y), axis=-1)[:, :k]
+def custom_k_nearest_senders(
+    rx: jax.Array,
+    tx: jax.Array,
+    k: int,
+    dist: Callable = l2_dist,
+):
+    """Retrieves k-nearest senders, but uses a $O(n^2)$ memory."""
+    d = dist(rx, tx)
+    idx = jnp.argsort(d, axis=-1)
+    d = jnp.take_along_axis(d, idx, axis=-1)
+    return idx[:, :k].flatten(), d[:, :k].flatten()
+
+
+def k_nearest_senders(rx: jax.Array, tx: jax.Array, k: int):
+    d, idx = KDTree(tx).query(rx, k)
+    return idx.flatten(), d.flatten()
 
 
 class GDSKR(nn.Module):
     """GDSKR
+
+    .. note::
+        Fixed effects can be embedded with `embed_s`, i.e. if the "index"
+        consists of [fixed effects, space, time], `embed_s` could be a Flax
+        module that embeds them separately and concatenates the output.
+
+    .. note::
+        When the index set, `s`, includes fixed effects or features that
+        do not factor into calculating the k-nearest neighbors, you
+        can override `k_nearest_senders`.
 
     .. warning::
         `min(valid_lens_ctx)` and `min(valid_lens_test)` must both
@@ -47,7 +70,11 @@ class GDSKR(nn.Module):
     """
 
     k: int = 10
-    dist: Callable = l2_dist_sq  # TODO(danj): develop spatio-temporal dist
+    k_nearest_senders: Callable = k_nearest_senders
+    embed_s: Callable = lambda x: x
+    embed_f: Callable = lambda x: x
+    embed_obs: nn.Module = nn.Embed(2, 4)
+    embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
 
     @nn.compact
     def __call__(
@@ -65,15 +92,48 @@ class GDSKR(nn.Module):
             valid_lens_ctx = jnp.repeat(K, B)
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(Q, B)
-        receivers = jit(lambda x: jnp.repeat(x, self.k))
-        senders = jit(lambda x, y: k_nearest(self.dist, x, y, self.k).flatten())
+        stack = lambda *args: jnp.concatenate(args, axis=-1)
+        # calculate node features
+        f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
+        obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
+        unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
+        ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
+        test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
+        x_test, x_ctx = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
+        # build localized graphs
         graphs = []
+        gs_tc, gs_cc = [], []
+        receivers = jit(lambda n: jnp.repeat(jnp.arange(n), self.k))
         for b in range(B):
-            v_c, v_t = valid_lens_ctx[b], valid_lens_test[b]
-            s_c, s_t = s_ctx[b, :v_c], s_test[b, :v_t]
-            qk_rx, qk_tx = receivers(s_t), senders(s_t, s_c)
-            kk_rx, kk_tx = receivers(s_c), senders(s_c, s_c)
-            # add features
+            v_t, v_c = valid_lens_test[b], valid_lens_ctx[b]
+            s_t, s_c = s_test[b, :v_t], s_ctx[b, :v_c]
+            x_t, x_c = x_test[b, :v_t], x_ctx[b, :v_c]
+            rx_tc, rx_cc = receivers(s_t), receivers(s_c)
+            tx_tc, d_tc = self.k_nearest_senders(s_t, s_c, self.k)
+            tx_cc, d_cc = self.k_nearest_senders(s_c, s_c, self.k)
+            # TODO(danj): create a single graph with all edges
+            gs_tc += [
+                GraphsTuple(
+                    nodes=stack(x_t, x_c),
+                    edges=d_tc,
+                    receivers=rx_tc,
+                    senders=v_t + tx_tc,  # offset in node features
+                    n_node=v_t + v_c,
+                    n_edge=d_tc.size,
+                    globals=None,
+                )
+            ]
+            gs_cc += [
+                GraphsTuple(
+                    nodes=x_c,
+                    edges=d_cc,
+                    receivers=rx_cc,
+                    senders=tx_cc,
+                    n_node=v_c,
+                    n_edge=d_cc.size,
+                    globals=None,
+                )
+            ]
 
 
 class DSKR(nn.Module):
