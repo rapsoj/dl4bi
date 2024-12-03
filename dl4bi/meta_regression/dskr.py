@@ -20,7 +20,6 @@ from ..core import (
     SpatioTemporalMLPAttention,
 )
 
-# Embed x, s, t
 # Create a vnode
 # Build graph
 # Convolve
@@ -51,8 +50,15 @@ def k_nearest_senders(rx: jax.Array, tx: jax.Array, k: int):
     return idx.flatten(), d.flatten()
 
 
-def edge_update_fn(edge, *args):
-    return edge
+class GraphKR(nn.Module):
+    attn: nn.Module = MultiHeadAttention()
+    norm: nn.Module = nn.LayerNorm()
+    ffn: nn.Module = MLP([256, 64], nn.gelu)
+    head: nn.Module = MLP([256, 64, 2], nn.gelu)
+
+    @nn.compact
+    def __call__(self, g: GraphsTuple):
+        pass
 
 
 # TODO(danj): graph padding??
@@ -62,7 +68,8 @@ class GDSKR(nn.Module):
     .. note::
         Fixed effects can be embedded with `embed_s`, i.e. if the "index"
         consists of [fixed effects, space, time], `embed_s` could be a Flax
-        module that embeds them separately and concatenates the output.
+        module that embeds fixed effects, space, and time separately and
+        concatenates the output.
 
     .. note::
         When the index set, `s`, includes fixed effects or features that
@@ -76,35 +83,45 @@ class GDSKR(nn.Module):
 
     k: int = 10
     k_nearest_senders: Callable = k_nearest_senders
+    num_blks: int = 6
+    num_reps: int = 1
     embed_s: Callable = lambda x: x
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
+    attn: nn.Module = MultiHeadAttention()
+    norm: nn.Module = nn.LayerNorm()
+    ffn: nn.Module = MLP([256, 64], nn.gelu)
+    head: nn.Module = MLP([256, 64, 2], nn.gelu)
 
     @nn.compact
     def __call__(
         self,
-        s_ctx: jax.Array,  # [B, L_ctx, D_S]
-        f_ctx: jax.Array,  # [B, L_ctx, D_F]
-        s_test: jax.Array,  # [B, L_test, D_S]
+        s_ctx: jax.Array,  # [B, L_ctx, S]
+        f_ctx: jax.Array,  # [B, L_ctx, F]
+        s_test: jax.Array,  # [B, L_test, S]
         valid_lens_ctx: Optional[jax.Array] = None,  # [B]
         valid_lens_test: Optional[jax.Array] = None,  # [B]
         training: bool = False,
         **kwargs,
     ):
-        (B, Q), K = s_test.shape[:-1], s_ctx.shape[1]
+        (B, Q), (K, S) = s_test.shape[:-1], s_ctx.shape[-2:]
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(K, B)
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(Q, B)
-        stack = lambda *args: jnp.concatenate(args, axis=-1)
-        # calculate node features
+        # construct node features
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
         unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
-        ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
-        test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
-        x_test, x_ctx = self.norm(self.embed_all(test)), self.norm(self.embed_all(ctx))
+        stack = lambda *args: jnp.concatenate(args, axis=-1)
+        x_ctx, x_test = stack(obs, s_ctx, f_ctx), stack(unobs, s_test, f_test)
+
+        def embed_node_fn(x: jax.Array) -> jax.Array:
+            obs, s, f = x[..., :1], x[..., 1 : 1 + S], x[..., 1 + S :]
+            sep = stack(self.embed_obs(obs), self.embed_s(s), self.embed_f(f))
+            return self.norm(self.embed_all(sep))
+
         # build localized graphs
         graphs = []
         receivers = jit(lambda n: jnp.repeat(jnp.arange(n), self.k))
@@ -122,10 +139,24 @@ class GDSKR(nn.Module):
                 receivers=stack(rx_cc, n_c + rx_ct),
                 n_node=n_c + n_t,
                 n_edge=(n_c + n_t) * self.k,
-                globals=jnp.max(x_c, axis=0, keepdims=True),
+                globals=jnp.max(x_c, axis=0, keepdims=True),  # TODO(danj): attn?
             )
             graphs += [g]
         graphs = jraph.batch(graphs)
+        graphs = jraph.GraphMapFeatures(embed_node_fn=embed_node_fn)
+        for _ in range(self.num_blks):
+            attn, ffn = self.attn.copy(), self.ffn.copy()
+            for _ in range(self.num_reps):
+                attn, norm, ffn = self.attn.copy(), self.norm.copy(), self.ffn.copy()
+                # TODO(danj): calculate bias
+                # logits = proj_qs(nodes[receivers]) @ proj_ks(notes) + bias(d)
+                # OR could proj(nodes) - same for queries and keys
+                blk = KRBlock(attn, norm, ffn)
+                qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
+        # unbatch
+        # extract test points
+        # run prediction head
+        return graphs
 
 
 class DSKR(nn.Module):
