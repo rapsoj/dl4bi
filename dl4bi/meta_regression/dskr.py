@@ -148,11 +148,14 @@ class GDSKR(nn.Module):
             attn, ffn = self.attn.copy(), self.ffn.copy()
             for _ in range(self.num_reps):
                 attn, norm, ffn = self.attn.copy(), self.norm.copy(), self.ffn.copy()
-                # TODO(danj): calculate bias
-                # logits = proj_qs(nodes[receivers]) @ proj_ks(notes) + bias(d)
-                # OR could proj(nodes) - same for queries and keys
-                blk = KRBlock(attn, norm, ffn)
-                qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
+                # TODO(danj): implement - can we replace with a regular attention?
+                # ATTENTION - create attention matrices once in the beginning
+                # nodes_qk = proj_qk(nodes)
+                # scores = (nodes[receivers] * nodes[senders]).sum(axis=-1) + bias(edges)
+                # -> repeated indexing will suffer from random access on every iteration
+                # attn = segment_softmax(scores)
+                # nodes = attn @ proj_v(nodes)
+                # FFN with residual connections
         # unbatch
         # extract test points
         # run prediction head
