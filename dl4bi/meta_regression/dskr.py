@@ -150,6 +150,10 @@ class GDSKR(nn.Module):
                 attn, norm, ffn = self.attn.copy(), self.norm.copy(), self.ffn.copy()
                 # TODO(danj): implement - can we replace with a regular attention?
                 # ATTENTION - create attention matrices once in the beginning
+                # look at GAT in jraph...its almost exactly what you want
+                # qs = proj_qk(nodes)
+                # jnp.einsum("B * (C + T) D, B * (C + T) K D -> B  * (C + T) K", qs,
+                # -> these aren't dynamically linked...keys don't get updated
                 # nodes_qk = proj_qk(nodes)
                 # scores = (nodes[receivers] * nodes[senders]).sum(axis=-1) + bias(edges)
                 # -> repeated indexing will suffer from random access on every iteration
@@ -157,7 +161,7 @@ class GDSKR(nn.Module):
                 # nodes = attn @ proj_v(nodes)
                 # FFN with residual connections
         # unbatch
-        # extract test points
+        # extract test points graph.nodes[-n_t:]
         # run prediction head
         return graphs
 
