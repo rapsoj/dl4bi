@@ -3,7 +3,13 @@ import jax.numpy as jnp
 import optax
 from jax import jit, random
 
-from dl4bi.core import Attention, FastAttention, FusedAttention, MultiHeadAttention
+from dl4bi.core import (
+    Attention,
+    DeepKernelAttention,
+    FastAttention,
+    FusedAttention,
+    MultiHeadAttention,
+)
 from dl4bi.meta_regression import (
     ANP,
     BANP,
@@ -104,6 +110,7 @@ def test_context_data_leaks():
         lambda: TNPKR(attn=MultiHeadAttention(Attention())),
         lambda: TNPKR(attn=MultiHeadAttention(FusedAttention())),
         lambda: TNPKR(attn=MultiHeadAttention(FastAttention())),
+        lambda: TNPKR(attn=DeepKernelAttention()),
         ScanTNPKR,
         ConvCNP,
     ]:
