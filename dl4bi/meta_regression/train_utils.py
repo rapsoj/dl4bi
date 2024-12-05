@@ -243,7 +243,9 @@ def cfg_to_run_name(cfg: DictConfig):
     name = cfg.model.cls
     if "TNPKR" in name:
         name = {"TNPKR": "TNP-KR", "ScanTNPKR": "Scan TNP-KR"}[name]
-        attn_cls = OmegaConf.select(cfg, "model.kwargs.attn.kwargs.attn.cls")
+        attn_cls = OmegaConf.select(cfg, "model.kwargs.attn.cls")
+        if attn_cls == "MultiHeadAttention":
+            attn_cls = OmegaConf.select(cfg, "model.kwargs.attn.kwargs.attn.cls")
         name += ": " + attn_cls
     if name == "TNPD":
         name = "TNP-D"

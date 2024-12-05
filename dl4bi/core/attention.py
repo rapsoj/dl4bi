@@ -1024,7 +1024,9 @@ class DeepKernelAttention(nn.Module):
         An `DeepKernelAttention` module.
     """
 
-    proj_qks: Callable = MLP([256, 256, 64], nn.gelu)
+    # TODO(danj): make multiheaded??
+    # TODO(danj): try separate qk projections
+    proj_qks: Callable = MLP([128, 64], nn.gelu)
     proj_vs: nn.Module = MLP([64])
     proj_out: nn.Module = MLP([64])
     dtype: jnp.dtype = jnp.float32
@@ -1054,6 +1056,7 @@ class DeepKernelAttention(nn.Module):
             `ctx` and `attn`, the updated values and `None` for the `attn`
             since it is never materialized.
         """
+        # TODO(danj): incorporate location directly?
         K = ks.shape[1]
         if kwargs.get("bias") is not None:
             warnings.warn("DeepKernelAttention does not support bias!")
@@ -1063,7 +1066,7 @@ class DeepKernelAttention(nn.Module):
         vs = self.proj_vs(vs).astype(self.dtype)
         kvs = jnp.einsum("B K D, B K V -> B D V", ks, vs)
         ctx = jnp.einsum("B Q D, B D V -> B Q V", qs, kvs)
-        return self.proj_out(ctx), None
+        return self.proj_out(nn.LayerNorm()(ctx)), None
 
 
 # TODO(danj): add learnable kernel parameters?

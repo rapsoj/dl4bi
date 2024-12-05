@@ -5,7 +5,7 @@ kwargs:
   embed_all:
     cls: MLP
     kwargs:
-      dims: [256, 128, 64]
+      dims: [256, 64]
       act_fn: gelu
   dist: null
   bias: null
