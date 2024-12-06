@@ -1059,19 +1059,23 @@ class DeepKernelAttention(nn.Module):
         (K, D), H = ks.shape[-2:], self.num_heads
         if kwargs.get("bias") is not None:
             warnings.warn("DeepKernelAttention does not support bias!")
+        mask = jnp.array([1])
+        if valid_lens is not None:
+            mask = mask_from_valid_lens(K, valid_lens)
+            vs /= valid_lens[:, None, None]  # TODO(danj) necessary?
         stack = lambda *args: jnp.concatenate(args, axis=-1)
-        qs, ks = stack(qs, kwargs["qs_s"]), stack(ks, kwargs["ks_s"])
+        # vnode = ks.mean(axis=1, where=mask, keepdims=True)
+        # vnode = repeat(vnode, "B 1 V -> B K V", K=K)
+        # qs, ks = stack(vnode, kwargs["qs_s"], qs), stack(vnode, kwargs["ks_s"], ks)
+        qs, ks = stack(kwargs["qs_s"], qs), stack(kwargs["ks_s"], ks)
         qs, ks = map(
             lambda x: self.proj_qks(x).astype(self.dtype) / jnp.pow(D, 0.25), (qs, ks)
         )
         vs = self.proj_vs(vs).astype(self.dtype)
-        if valid_lens is not None:
-            ks *= mask_from_valid_lens(K, valid_lens)
-            vs /= valid_lens[:, None, None]  # average to prevent overflow in ctx
+        ks *= mask
         qs, ks, vs = map(
             lambda x: rearrange(x, "B L (H D) -> B H L D", H=H), (qs, ks, vs)
         )
-        # TODO(danj): normalize KVs somehow?
         kvs = jnp.einsum("B H K D, B H K V -> B H D V", ks, vs)
         ctx = jnp.einsum("B H Q D, B H D V -> B H Q V", qs, kvs)
         ctx = rearrange(ctx, "B H Q V -> B Q (H V)")
