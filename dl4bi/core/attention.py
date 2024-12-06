@@ -1061,7 +1061,9 @@ class DeepKernelAttention(nn.Module):
             warnings.warn("DeepKernelAttention does not support bias!")
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         qs, ks = stack(qs, kwargs["qs_s"]), stack(ks, kwargs["ks_s"])
-        qs, ks = map(lambda x: self.proj_qks(x) / jnp.pow(D, 0.25), (qs, ks))
+        qs, ks = map(
+            lambda x: self.proj_qks(x).astype(self.dtype) / jnp.pow(D, 0.25), (qs, ks)
+        )
         vs = self.proj_vs(vs).astype(self.dtype)
         if valid_lens is not None:
             ks *= mask_from_valid_lens(K, valid_lens)
