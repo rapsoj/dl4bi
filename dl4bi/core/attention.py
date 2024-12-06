@@ -1071,10 +1071,11 @@ class DeepKernelAttention(nn.Module):
         qs, ks, vs = map(
             lambda x: rearrange(x, "B L (H D) -> B H L D", H=H), (qs, ks, vs)
         )
+        # TODO(danj): normalize KVs somehow?
         kvs = jnp.einsum("B H K D, B H K V -> B H D V", ks, vs)
         ctx = jnp.einsum("B H Q D, B H D V -> B H Q V", qs, kvs)
         ctx = rearrange(ctx, "B H Q V -> B Q (H V)")
-        return nn.LayerNorm()(self.proj_out(ctx)), None
+        return nn.LayerNorm()(ctx), None
 
 
 # TODO(danj): add learnable kernel parameters?
