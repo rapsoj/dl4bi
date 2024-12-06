@@ -424,6 +424,7 @@ def scan_ks(
     ks_chunk_size: int = 1024,
 ):
     (Q_c, B, H, D), K = qs_chunk.shape, ks.shape[0]
+    D_V = vs.shape[-1]
     K_c = min(K, ks_chunk_size)
     qs_chunk /= jnp.sqrt(D)
 
@@ -444,7 +445,7 @@ def scan_ks(
 
     def chunk_ks(i, k_c):
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (k_c, B, H, D))
-        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D))
+        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D_V))
         ks_mask_chunk = jnp.array(True)
         if ks_mask is not None:
             ks_mask_chunk = lax.dynamic_slice(ks_mask, (i, 0), (k_c, B))
@@ -467,7 +468,7 @@ def scan_ks(
         os += os_chunk
         return os, new_row_maxs, new_row_sums
 
-    os = jnp.zeros((Q_c, B, H, D))
+    os = jnp.zeros((Q_c, B, H, D_V))
     row_sums = jnp.zeros((Q_c, B, H, 1))
     row_maxs = jnp.full((Q_c, B, H, 1), -float("inf"))
 
@@ -646,6 +647,7 @@ def tisa_biased_scan_ks(
 ):
     (Q_c, B, H, D), (K, _, S) = qs_chunk.shape, ks_s.shape
     K_c, F = min(K, ks_chunk_size), a.size // H
+    D_V = vs.shape[-1]
     qs_chunk /= jnp.sqrt(D)
 
     @jit
@@ -670,7 +672,7 @@ def tisa_biased_scan_ks(
 
     def chunk_ks(i, k_c):
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (k_c, B, H, D))
-        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, vs.shape[-1]))
+        vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D_V))
         ks_s_chunk = lax.dynamic_slice(ks_s, (i, 0, 0), (k_c, B, S))
         ks_mask_chunk = jnp.array(True)
         if ks_mask is not None:
@@ -715,7 +717,7 @@ def tisa_biased_scan_ks(
         os += os_chunk
         return os, new_row_maxs, new_row_sums
 
-    os = jnp.zeros((Q_c, B, H, D))
+    os = jnp.zeros((Q_c, B, H, D_V))
     row_sums = jnp.zeros((Q_c, B, H, 1))
     row_maxs = jnp.full((Q_c, B, H, 1), -float("inf"))
 
