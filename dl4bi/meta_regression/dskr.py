@@ -1,10 +1,10 @@
 from collections.abc import Callable
+from functools import partial
 from typing import Optional
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import jraph
 from jax import jit
 from jraph import GraphsTuple
 from scipy.spatial import KDTree
@@ -13,6 +13,7 @@ from sps.kernels import l2_dist
 from ..core import MLP, GraphKRBlock, mask_from_valid_lens
 
 
+@partial(jit, static_argnames=("k", "dist"))
 def custom_k_nearest_senders(
     rx: jax.Array,
     tx: jax.Array,
@@ -95,31 +96,25 @@ class DSKR(nn.Module):
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         x_ctx, x_test = self.norm(self.embed_all(ctx)), self.norm(self.embed_all(test))
         # build localized graphs
-        graphs = []
-        receivers = lambda n: jnp.repeat(jnp.arange(n), self.k)
         mask = mask_from_valid_lens(N_c, valid_lens_ctx)
-        s_send = jnp.where(mask, s_ctx, 1e6)
-        # TODO(danj): unloop this (vmap)
-        # TODO(danj): remove graphs altogether...
-        for b in range(B):
-            senders_ctx, d_ctx = self.k_nearest_senders(s_ctx[b], s_send[b], self.k)
-            senders_test, d_test = self.k_nearest_senders(s_test[b], s_send[b], self.k)
-            g = GraphsTuple(
-                nodes=jnp.vstack([x_ctx[b], x_test[b]]),
-                edges=stack(d_ctx, d_test),
-                senders=stack(senders_ctx, senders_test),
-                receivers=stack(receivers(N_c), N_c + receivers(N_t)),
-                n_node=jnp.array([N_c + N_t]),
-                n_edge=jnp.array([(N_c + N_t) * self.k]),
-                globals=jnp.max(x_ctx, axis=0, keepdims=True),  # TODO(danj): attn?
-            )
-            graphs += [g]
-        graphs = jraph.batch(graphs)
+        s_send = jnp.where(mask, s_ctx, jnp.inf)  # masked values = far away for kNN
+        knn = jit(lambda r, s: self.k_nearest_senders(r, s, self.k))
+        (s_ctx, d_ctx), (s_test, d_test) = knn(s_ctx, s_send), knn(s_test, s_send)
+        # TODO(danj): sort out senders, x_*, and d_*
+        g = GraphsTuple(
+            nodes=jnp.vstack([x_ctx, x_test]),
+            edges=distances,
+            senders=senders,
+            receivers=jnp.arange(B * (N_c + N_t)),
+            n_node=jnp.array(B * [N_c + N_t]),
+            n_edge=jnp.array(B * [(N_c + N_t) * self.k]),
+            globals=None,
+        )
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
-                graphs = blk(graphs, training)
-        x_t = jnp.stack([g.nodes[-N_t:] for g in jraph.unbatch(graphs)])
+                g = blk(g, training)
+        x_t = g.nodes.reshape(B, N_c + N_t, -1)[:, -N_t:, :]
         f_dist = self.head(x_t, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
         f_std = jnp.exp(f_log_var / 2)
