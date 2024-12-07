@@ -3,33 +3,14 @@ from typing import Optional
 
 import flax.linen as nn
 import jax
-import jax.nn.initializers as init
 import jax.numpy as jnp
 import jraph
-from einops import repeat
 from jax import jit
 from jraph import GraphsTuple
 from scipy.spatial import KDTree
 from sps.kernels import l2_dist
 
-from ..core import (
-    MLP,
-    GraphKRBlock,
-    KRBlock,
-    MultiHeadAttention,
-    SpatioTemporalMLPAttention,
-)
-
-# Create a vnode
-# Build graph
-# Convolve
-#  qs-ks
-#  ks-ks
-#  vnode-ks
-# prediction head
-#  vnode
-#  qs
-# Can we condition projections for attention on global state?
+from ..core import MLP, GraphKRBlock
 
 
 def custom_k_nearest_senders(
@@ -57,7 +38,7 @@ def k_nearest_senders_gpu(rx: jax.Array, tx: jax.Array, k: int):
     raise NotImplementedError()
 
 
-# TODO(danj): graph padding??
+# TODO(danj): include global vnode conditioning
 class DSKR(nn.Module):
     """GDSKR
 
@@ -99,11 +80,9 @@ class DSKR(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        (B, Q), (K, S) = s_test.shape[:-1], s_ctx.shape[-2:]
+        (B, N_t), (N_c, S) = s_test.shape[:-1], s_ctx.shape[-2:]
         if valid_lens_ctx is None:
-            valid_lens_ctx = jnp.repeat(K, B)
-        if valid_lens_test is None:
-            valid_lens_test = jnp.repeat(Q, B)
+            valid_lens_ctx = jnp.repeat(N_c, B)
         # construct node features
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
@@ -120,9 +99,9 @@ class DSKR(nn.Module):
         graphs = []
         receivers = jit(lambda n: jnp.repeat(jnp.arange(n), self.k))
         for b in range(B):
-            n_c, n_t = valid_lens_ctx[b], valid_lens_test[b]
-            s_c, s_t = s_ctx[b, :n_c], s_test[b, :n_t]
-            x_c, x_t = x_ctx[b, :n_c], x_test[b, :n_t]
+            n_c = valid_lens_ctx[b]
+            s_c, s_t = s_ctx[b, :n_c], s_test[b, :N_t]
+            x_c, x_t = x_ctx[b, :n_c], x_test[b, :N_t]
             tx_cc, d_cc = self.k_nearest_senders(s_c, s_c, self.k)
             tx_ct, d_ct = self.k_nearest_senders(s_t, s_c, self.k)
             rx_cc, rx_ct = receivers(s_c), receivers(s_t)
@@ -131,8 +110,8 @@ class DSKR(nn.Module):
                 edges=stack(d_cc, d_ct),
                 senders=stack(tx_cc, tx_ct),
                 receivers=stack(rx_cc, n_c + rx_ct),
-                n_node=n_c + n_t,
-                n_edge=(n_c + n_t) * self.k,
+                n_node=n_c + N_t,
+                n_edge=(n_c + N_t) * self.k,
                 globals=jnp.max(x_c, axis=0, keepdims=True),  # TODO(danj): attn?
             )
             graphs += [g]
@@ -142,7 +121,6 @@ class DSKR(nn.Module):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
                 graphs = blk(graphs, training)
-        # unbatch
-        # extract test points graph.nodes[-n_t:]
-        # run prediction head
-        return graphs
+        x_t = jnp.stack([g.nodes[-N_t:] for g in jraph.unbatch(graphs)])
+        f_mu, f_sigma = self.head(x_t)
+        return f_mu, f_sigma
