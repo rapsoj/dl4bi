@@ -1026,7 +1026,7 @@ class MultiHeadGraphAttention(nn.Module):
         Returns:
             `ctx` and `attn`, the updated values and attention weights.
         """
-        nodes, edges, receivers, senders, globals, _n_node, _n_edge = g
+        nodes, _edges, receivers, senders, globals, _n_node, _n_edge = g
         N, H = nodes.shape[0], self.num_heads
         to_mh = jit(lambda n: rearrange(n, "N (H D) -> N H D", H=H))
         from_mh = jit(lambda n: rearrange(n, "N H D -> N (H D)"))
