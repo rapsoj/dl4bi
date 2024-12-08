@@ -101,7 +101,7 @@ class DSKR(nn.Module):
         (s_cc, d_cc), (s_ct, d_ct) = knn(s_ctx, s_send), knn(s_test, s_send)
         s_cc = s_cc.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_c * K)
         s_ct = s_ct.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_t * K)
-        nodes = jnp.vstack([x_ctx.reshape(B * N_c, -1), x_test.reshape(B * N_t, -1)])
+        nodes = jnp.vstack([x_ctx, x_test]).reshape(B * (N_c + N_t), -1)
         edges = stack(d_cc.flatten(), d_ct.flatten())
         g = GraphsTuple(
             nodes,
