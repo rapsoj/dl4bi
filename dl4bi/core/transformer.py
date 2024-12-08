@@ -250,8 +250,8 @@ class GraphKRBlock(nn.Module):
 
     @nn.compact
     def __call__(self, g: GraphsTuple, training: bool, **kwargs):
-        n_0, *_ = g
         drop = nn.Dropout(self.p_dropout, deterministic=not training)
+        n_0, *_ = g
         n_1, _ = self.attn(g._replace(nodes=self.norm(n_0)), training, **kwargs)
         n_2 = n_0 + drop(n_1)
         n_3 = self.ffn(self.norm.copy()(n_2), training)
