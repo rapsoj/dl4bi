@@ -33,9 +33,7 @@ class TNPKR(nn.Module):
         dist: A distance function used to calculate pairwise distances between
             two arrays.
         bias: A bias module that consumes pairwise distances.
-        attn: An attention module used in `KRBlocks`.
-        norm: A normalization module used in `KRBlocks`.
-        ffn: A FeedForward Network used in `KRBlocks`.
+        blk: A block to use for each layer and each repetition.
         head: A prediction head.
 
     Returns:
@@ -133,12 +131,8 @@ class ScanTNPKR(nn.Module):
         embed_obs: A module that creates embeddings for observed (context) and
             unobserved (test) points.
         embed_all: A module that jointly embeds `obs`, `s`, and `f` embeddings.
-        dist: A distance function used to calculate pairwise distances between
-            two arrays.
-        bias: A bias module that consumes pairwise distances.
-        attn: An attention module used in `KRBlocks`.
+        blk: A block to use for each layer and each repetition.
         norm: A normalization module used in `KRBlocks`.
-        ffn: A FeedForward Network used in `KRBlocks`.
         head: A prediction head.
 
     Returns:

@@ -10,7 +10,7 @@ from jraph import GraphsTuple
 from scipy.spatial import KDTree
 from sps.kernels import l2_dist
 
-from ..core import MLP, GraphKRBlock, mask_from_valid_lens
+from ..core import MLP, GraphKRBlock, TISABias, mask_from_valid_lens
 
 
 @partial(jit, static_argnames=("k", "dist"))
@@ -69,6 +69,7 @@ class DSKR(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
+    bias: nn.Module = TISABias()
     blk: nn.Module = GraphKRBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
@@ -112,6 +113,7 @@ class DSKR(nn.Module):
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
+                bias = self.bias.copy()
                 g = blk(g, training)
         x_t = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         f_dist = self.head(x_t, training)

@@ -16,6 +16,7 @@ from dl4bi.core import (
     FusedAttention,
     KernelAttention,
     MultiHeadAttention,
+    MultiHeadGraphAttention,
     MultiKernelAttention,
     MultiplicativeScorer,
     ScanAttention,
@@ -54,6 +55,20 @@ def test_multihead_attention_impl():
         ).init_with_output(rng_init, qs, ks, vs, valid_lens, bias=bias)
         assert ctx.shape == (B, L, D), "Incorrect context output shape!"
         assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
+
+
+def test_multihead_graph_attention_impl():
+    B, H, L, D = 4, 4, 7, 64
+    key = random.key(42)
+    rng_qkv, rng_bias, rng_init = random.split(key, 3)
+    qs, ks, vs = random.normal(rng_qkv, (3, B, L, D))
+    bias = random.normal(rng_bias, (B, H, L, L))
+    valid_lens = jnp.array([2, 4, 6, 3])
+    (ctx, attn), _ = MultiHeadGraphAttention(H).init_with_output(
+        rng_init, qs, ks, vs, valid_lens, bias=bias
+    )
+    assert ctx.shape == (B, L, D), "Incorrect context output shape!"
+    assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
 
 
 def test_spatiotemporal_mlp_attention_impl():
@@ -407,7 +422,3 @@ def test_multikernel_attention():
     )
     assert jnp.isfinite(ctx).all(), "MultikernelAttention produced non-finite values!"
     assert ctx.shape == (B, L, D), "Incorrect context output shape!"
-
-
-if __name__ == "__main__":
-    test_biased_fast_attention_impl()

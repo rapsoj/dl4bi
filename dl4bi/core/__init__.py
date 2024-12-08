@@ -8,6 +8,7 @@ from .attention import (
     FusedAttention,
     KernelAttention,
     MultiHeadAttention,
+    MultiHeadGraphAttention,
     MultiKernelAttention,
     MultiplicativeScorer,
     ProductKernelAttention,
