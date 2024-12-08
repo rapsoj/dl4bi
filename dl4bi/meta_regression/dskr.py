@@ -84,10 +84,9 @@ class DSKR(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        (B, N_t), (N_c, S), K = s_test.shape[:-1], s_ctx.shape[-1:], self.k
+        (B, N_t), N_c, K = s_test.shape[:-1], s_ctx.shape[1], self.k
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(N_c, B)
-        # construct node features
         stack = lambda *args: jnp.concatenate(args, axis=-1)
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
@@ -95,19 +94,17 @@ class DSKR(nn.Module):
         ctx = stack(self.embed_obs(obs), self.embed_s(s_ctx), self.embed_f(f_ctx))
         test = stack(self.embed_obs(unobs), self.embed_s(s_test), self.embed_f(f_test))
         x_ctx, x_test = self.norm(self.embed_all(ctx)), self.norm(self.embed_all(test))
-        nodes = jnp.vstack([x_ctx.reshape(B * N_c, -1), x_test(B * N_t, -1)])
-        # build localized graphs
         mask = mask_from_valid_lens(N_c, valid_lens_ctx)
         s_send = jnp.where(mask, s_ctx, jnp.inf)  # masked values = far away for kNN
         knn = vmap(lambda r, s: self.k_nearest_senders(r, s, K))
-        (s_cc, d_ctx), (s_ct, d_test) = knn(s_ctx, s_send), knn(s_test, s_send)
+        (s_cc, d_cc), (s_ct, d_ct) = knn(s_ctx, s_send), knn(s_test, s_send)
         s_cc = s_cc.flatten() + jnp.repeat(jnp.arange(B) * (N_c * K), N_c * K)
         s_ct = s_ct.flatten() + jnp.repeat(jnp.arange(B) * (N_t * K), N_t * K)
         g = GraphsTuple(
-            nodes=nodes,
-            edges=stack(d_ctx.flatten(), d_test.flatten()),
+            nodes=jnp.vstack([x_ctx.reshape(B * N_c, -1), x_test.reshape(B * N_t, -1)]),
+            edges=stack(d_cc.flatten(), d_ct.flatten()),
             senders=stack(s_cc, s_ct),
-            receivers=jnp.arange(B * (N_c + N_t)),
+            receivers=jnp.arange(B * (N_c + N_t) * K),
             n_node=jnp.array(B * [N_c + N_t]),
             n_edge=jnp.array(B * [(N_c + N_t) * self.k]),
             globals=None,
@@ -116,7 +113,7 @@ class DSKR(nn.Module):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
                 g = blk(g, training)
-        x_t = g.nodes[:, -B * N_t :, :]
+        x_t = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         f_dist = self.head(x_t, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
         f_std = jnp.exp(f_log_var / 2)

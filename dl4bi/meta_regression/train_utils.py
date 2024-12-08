@@ -299,8 +299,10 @@ def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
             data.num_ctx.max,
         )
         s = jnp.repeat(s[None, ...], batch_size, axis=0)
-        f_noisy = f + obs_noise * random.normal(rng_eps, f.shape)
-        return s, f_noisy, valid_lens_ctx, s, f, valid_lens_test, var, ls, period
+        s_ctx = s[:, : data.num_ctx.max, :]
+        f_ctx = f + obs_noise * random.normal(rng_eps, f.shape)
+        f_ctx = f_ctx[:, : data.num_ctx.max, :]
+        return s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, var, ls, period
 
     def dataloader(rng: jax.Array):
         while True:
