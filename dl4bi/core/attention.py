@@ -14,7 +14,7 @@ from jax.lax import scan
 from jax.nn import dot_product_attention
 from sps.kernels import l2_dist, outer_subtract
 
-from .bias import TISABias, rbf_basis
+from .bias import rbf_basis
 from .embed import RBFRandomFourierFeatures
 from .mlp import MLP
 from .utils import mask_attn, mask_from_valid_lens
@@ -889,6 +889,9 @@ class FusedAttention(nn.Module):
         softmax attention that operates on an optimized CUDA kernel. It
         also does not return the attention matrix since it never completely
         materializes it.
+
+    .. note::
+        The keys and values must have the same shape for this implementation.
     """
 
     norm_qs: nn.Module = nn.LayerNorm(dtype=jnp.bfloat16)

@@ -87,10 +87,10 @@ def test_tnp_kr_fast_scale():
 
 
 def test_context_data_leaks():
-    B, L, N = 4, 10, 5
+    B, L, N = 4, 128, 64
     key = random.key(42)
     rng_data, rng_params, rng_dropout, rng_extra = random.split(key, 4)
-    s = jnp.linspace(0, 1.0, L)
+    s = jnp.linspace(-2.0, 2.0, L)
     s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, S, D_s=1]
     valid_lens_ctx = jnp.array([N] * B, dtype=jnp.int32)
     valid_lens_test = jnp.array([L] * B, dtype=jnp.int32)
@@ -134,6 +134,7 @@ def test_context_data_leaks():
             valid_lens_test=valid_lens_test,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
         )
+        print(jnp.max(jnp.max(f_mu - f_mu_half)))
         assert jnp.allclose(f_mu, f_mu_half)
         assert jnp.allclose(f_std, f_std_half)
 
