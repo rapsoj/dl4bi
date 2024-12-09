@@ -1038,10 +1038,47 @@ class MultiHeadGraphAttention(nn.Module):
         qks_r, qks_s = qks[receivers], qks[senders]
         scores = jnp.einsum("N H D, N H D -> N H", qks_r, qks_s)
         scores += kwargs.get("bias", 0)
-        attn = jraph.segment_softmax(scores, receivers, N)
+        bucket_size = kwargs.get("bucket_size")
+        attn = _graph_segment_softmax(scores, receivers, N, bucket_size)
         messages = from_mh(attn[..., None] * vs[senders])
-        ctx = self.proj_out(jraph.segment_sum(messages, receivers, N))
-        return ctx, attn
+        ctx = jax.ops.segment_sum(
+            messages,
+            receivers,
+            N,
+            indices_are_sorted=True,
+            bucket_size=bucket_size,
+        )
+        return self.proj_out(ctx), attn
+
+
+@partial(jit, static_argnames=("num_segments", "bucket_size"))
+def _graph_segment_softmax(
+    logits: jax.Array,
+    segment_ids: jax.Array,
+    num_segments: int,
+    bucket_size: Optional[int] = None,
+):
+    """Segment softmax with `bucket_size` control for numerical stability.
+
+    Based on [jraph's implementation](https://github.com/google-deepmind/jraph/blob/51f5990104f7374492f8f3ea1cbc47feb411c69c/jraph/_src/utils.py#L343).
+    """
+    maxs = jax.ops.segment_max(
+        logits,
+        segment_ids,
+        num_segments,
+        indices_are_sorted=True,
+    )
+    logits = jnp.exp(logits - maxs[segment_ids])
+    normalizers = jax.ops.segment_sum(
+        logits,
+        segment_ids,
+        num_segments,
+        indices_are_sorted=True,
+        bucket_size=bucket_size,
+    )
+    normalizers = normalizers[segment_ids]
+    softmax = logits / normalizers
+    return softmax
 
 
 # TODO(danj): can make this more efficient by doing (QK^T)V -> Q(K^TV)

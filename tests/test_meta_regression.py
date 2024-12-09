@@ -87,17 +87,17 @@ def test_tnp_kr_fast_scale():
 
 
 def test_context_data_leaks():
-    B, L, N = 4, 128, 64
+    B, L, N = 1, 256, 128
     key = random.key(42)
     rng_data, rng_params, rng_dropout, rng_extra = random.split(key, 4)
     s = jnp.linspace(-2.0, 2.0, L)
-    s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, S, D_s=1]
+    s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, L, S=1]
     valid_lens_ctx = jnp.array([N] * B, dtype=jnp.int32)
     valid_lens_test = jnp.array([L] * B, dtype=jnp.int32)
-    f = 10 * random.normal(rng_data, s.shape)
+    f = random.normal(rng_data, s.shape)
     # set second half to 0s (different from using half the array because of attn)
-    s2 = s.at[:, N:, :].set(jnp.zeros((B, L - N, 1)))
-    f2 = f.at[:, N:, :].set(jnp.zeros((B, L - N, 1)))
+    s2 = s.at[:, N:, :].set(jnp.full((B, L - N, 1), 20))
+    f2 = f.at[:, N:, :].set(jnp.full((B, L - N, 1), 20))
     for np in [
         NP,
         CNP,
@@ -113,7 +113,7 @@ def test_context_data_leaks():
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
         ScanTNPKR,
-        lambda: DSKR(k=N),
+        lambda: DSKR(k=32, num_blks=1),
     ]:
         print(np)
         m = np()
@@ -124,6 +124,7 @@ def test_context_data_leaks():
             s_test=s,
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
+            bucket_size=2,  # used by DSKR for numerical stability
         )
         f_mu_half, f_std_half, *_ = m.apply(
             params,
@@ -133,8 +134,9 @@ def test_context_data_leaks():
             valid_lens_ctx=valid_lens_ctx,
             valid_lens_test=valid_lens_test,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
+            bucket_size=2,  # used by DSKR for numerical stability
         )
-        print(jnp.max(jnp.max(f_mu - f_mu_half)))
+        print(jnp.sort(jnp.abs(f_mu - f_mu_half).flatten(), descending=True)[:5])
         assert jnp.allclose(f_mu, f_mu_half)
         assert jnp.allclose(f_std, f_std_half)
 

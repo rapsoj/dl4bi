@@ -6,14 +6,9 @@ from typing import Optional
 
 import flax.linen as nn
 import jax
-import jax.numpy as jnp
-import jraph
-from einops import rearrange
-from jax import jit
 from jraph import GraphsTuple
 
 from .attention import MultiHeadAttention, MultiHeadGraphAttention
-from .bias import TISABias
 from .mlp import MLP
 
 

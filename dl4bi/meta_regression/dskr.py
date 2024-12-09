@@ -15,13 +15,13 @@ from ..core import MLP, GraphKRBlock, TISABias, mask_from_valid_lens
 
 @partial(jit, static_argnames=("k", "dist"))
 def custom_k_nearest_senders(
-    rx: jax.Array,
-    tx: jax.Array,
+    r: jax.Array,
+    s: jax.Array,
     k: int,
     dist: Callable = l2_dist,
 ):
     """Retrieves k-nearest senders, but uses a $O(n^2)$ memory."""
-    d = dist(rx, tx)
+    d = dist(r, s)
     idx = jnp.argsort(d, axis=-1)
     d = jnp.take_along_axis(d, idx, axis=-1)
     return idx[:, :k].flatten(), d[:, :k].flatten()
@@ -101,7 +101,7 @@ class DSKR(nn.Module):
         (s_cc, d_cc), (s_ct, d_ct) = knn(s_ctx, s_send), knn(s_test, s_send)
         s_cc = s_cc.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_c * K)
         s_ct = s_ct.flatten() + jnp.repeat(jnp.arange(B) * N_c, N_t * K)
-        nodes = jnp.vstack([x_ctx, x_test]).reshape(B * (N_c + N_t), -1)
+        nodes = jnp.vstack([x_ctx.reshape(B * N_c, -1), x_test.reshape(B * N_t, -1)])
         edges = stack(d_cc.flatten(), d_ct.flatten())
         g = GraphsTuple(
             nodes,
@@ -116,7 +116,10 @@ class DSKR(nn.Module):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
                 bias = self.bias.copy()(edges[:, None, None]).squeeze()
-                g = blk(g, training, bias=bias)
+                # NOTE: bucket_size is for numerical stability in
+                # jax.ops.segment_* calls; this is typically only needed for
+                # testing implementation correctness
+                g = blk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
         x_t = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         f_dist = self.head(x_t, training)
         f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
