@@ -5,6 +5,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax import jit, vmap
 from jraph import GraphsTuple
 from scipy.spatial import KDTree
@@ -14,13 +15,13 @@ from ..core import MLP, GraphKRBlock, TISABias, mask_from_valid_lens
 
 
 @partial(jit, static_argnames=("k", "dist"))
-def custom_k_nearest_senders(
+def k_nearest_senders(
     r: jax.Array,
     s: jax.Array,
     k: int,
     dist: Callable = l2_dist,
 ):
-    """Retrieves k-nearest senders, but uses a $O(n^2)$ memory."""
+    r"""Faster than scipy's `KDTree`, but uses a $O(n^2)$ memory."""
     d = dist(r, s)
     idx = jnp.argsort(d, axis=-1)
     d = jnp.take_along_axis(d, idx, axis=-1)
@@ -29,9 +30,10 @@ def custom_k_nearest_senders(
 
 @partial(jit, static_argnames=("k",))
 def scipy_k_nearest_senders(r: jax.Array, s: jax.Array, k: int):
+    r"""Slower than JAX O(n^2) implementation, but scales in $O(N\log N)$."""
     d_shape = jax.ShapeDtypeStruct((r.shape[0], k), jnp.float32)
     idx_shape = jax.ShapeDtypeStruct((r.shape[0], k), jnp.int32)
-    f = lambda r, s, k: KDTree(s).query(r, k)
+    f = lambda r, s, k: KDTree(np.array(s)).query(np.array(r), int(k))
     d, idx = jax.pure_callback(f, (d_shape, idx_shape), r, s, k)
     return idx.flatten(), d.flatten()
 
@@ -64,7 +66,7 @@ class DSKR(nn.Module):
     """
 
     k: int = 10
-    k_nearest_senders: Callable = scipy_k_nearest_senders
+    k_nearest_senders: Callable = k_nearest_senders
     num_blks: int = 6
     num_reps: int = 1
     min_std: float = 0.0
@@ -93,7 +95,7 @@ class DSKR(nn.Module):
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(N_c, B)
         mask = mask_from_valid_lens(N_c, valid_lens_ctx)
-        s_send = jnp.where(mask, s_ctx, jnp.inf)  # masked values = far away for kNN
+        s_send = jnp.where(mask, s_ctx, 1e6)  # masked values = far away for kNN
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
         unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)

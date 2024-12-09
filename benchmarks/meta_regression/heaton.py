@@ -114,6 +114,7 @@ def build_dataloaders(
     del df  # save memory
     L_obs, L_unobs = s_obs.shape[0], s_unobs.shape[0]
     L_train = jnp.prod(jnp.array([dim.num for dim in data.s]))
+    num_ctx_max = int((1 - data.max_masked_pct) * L_train)
     permute_idx = random.choice(rng, L_obs, (L_obs,), replace=False)
     s_obs, f_obs = s_obs[permute_idx], f_obs[permute_idx]
     B, D = data.batch_size, len(data.s)
@@ -160,8 +161,8 @@ def build_dataloaders(
             s_ord, f_ord = jnp.vstack(ss), jnp.vstack(fs)
             f_ord_noisy = f_ord + data.obs_noise * random.normal(rng_eps, f_ord.shape)
             return (
-                s_ord,
-                f_ord_noisy,
+                s_ord[:, :num_ctx_max, :],
+                f_ord_noisy[:, :num_ctx_max, :],
                 valid_lens_ctx,
                 s_ord,
                 f_ord,

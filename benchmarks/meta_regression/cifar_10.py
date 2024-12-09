@@ -108,8 +108,8 @@ def build_dataloaders(
                     num_ctx_max,
                 )
                 yield (
-                    s_test_permuted,  # s_ctx (permuted)
-                    f_test_permuted,  # f_ctx (permuted)
+                    s_test_permuted[:, :num_ctx_max, :],  # s_ctx (permuted)
+                    f_test_permuted[:, :num_ctx_max, :],  # f_ctx (permuted)
                     valid_lens_ctx,  # only the first valid lens are used/observed
                     s_test_permuted,  # s_test (permuted)
                     f_test_permuted,  # f_test (permuted)
