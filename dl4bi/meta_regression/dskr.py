@@ -30,7 +30,7 @@ def k_nearest_senders(
 
 @partial(jit, static_argnames=("k",))
 def scipy_k_nearest_senders(r: jax.Array, s: jax.Array, k: int):
-    r"""Slower than JAX O(n^2) implementation, but scales in $O(N\log N)$."""
+    r"""Slower than JAX's O(n^2) implementation, but scales in $O(N\log N)$."""
     d_shape = jax.ShapeDtypeStruct((r.shape[0], k), jnp.float32)
     idx_shape = jax.ShapeDtypeStruct((r.shape[0], k), jnp.int32)
     f = lambda r, s, k: KDTree(np.array(s)).query(np.array(r), int(k))
