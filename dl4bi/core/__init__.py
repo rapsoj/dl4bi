@@ -1,3 +1,5 @@
+from dl4bi.core.dist import scipy_k_nearest_senders
+
 from .attention import (
     AdditiveScorer,
     Attention,
@@ -36,6 +38,10 @@ from .conv import (
     SimpleConv,
     TransitionBlock,
     UNet,
+)
+from .dist import (
+    k_nearest_senders,
+    scipy_k_nearest_senders,
 )
 from .embed import (
     FixedSinusoidalEmbedding,
