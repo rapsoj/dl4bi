@@ -197,7 +197,14 @@ def build_dataloaders(
             valid_lens_ctx = random.randint(
                 rng_valid, (B,), data.num_ctx.min, data.num_ctx.max
             )
-            yield s, f, valid_lens_ctx, s, f, valid_lens_test
+            yield (
+                s[:, :num_ctx_max, :],
+                f[:, :num_ctx_max, :],
+                valid_lens_ctx,
+                s,
+                f,
+                valid_lens_test,
+            )
 
     def test_dataloader(rng: jax.Array):
         yield (
