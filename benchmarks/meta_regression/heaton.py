@@ -141,6 +141,7 @@ def build_dataloaders(
             s = random_subgrid(rng_s, data.s, data.min_axes_pct, data.max_axes_pct)
             s = s.reshape(-1, D)
             f, *_ = gp.simulate(rng_f, s, mB)  # f: [mB, L_train, 1]
+            # TODO(danj): save rngs for successful runs
             # resample when any sample doesn't meet masking criteria
             while jnp.logical_or(
                 pct_masked(f) < data.min_masked_pct,
