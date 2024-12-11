@@ -127,28 +127,13 @@ def build_dataloaders(
 
     def build_train_dataloader():
         """Generates batches of random subgrids."""
-        gp = instantiate(kernel)
         valid_lens_test = jnp.repeat(L_train, B)
-        mask_threshold = norm.ppf(
-            1 - data.mask_pct,
-            loc=0,
-            scale=kernel.kwargs.var.kwargs.kwargs.mu,
-        )
-        pct_masked = jit(lambda f: (f > mask_threshold).sum(axis=(1, 2)) / L_train)
+        var = kernel.kwargs.var.kwargs.kwargs.mu
+        mask_threshold = norm.ppf(1 - data.mask_pct, loc=0, scale=var)
 
         def gen_batch(rng: jax.Array):
-            rng_s, rng_f, rng_eps = random.split(rng, 3)
-            s = random_subgrid(rng_s, data.s, data.min_axes_pct, data.max_axes_pct)
-            s = s.reshape(-1, D)
-            f, *_ = gp.simulate(rng_f, s, mB)  # f: [mB, L_train, 1]
-            # TODO(danj): save rngs for successful runs
-            # resample when any sample doesn't meet masking criteria
-            while jnp.logical_or(
-                pct_masked(f) < data.min_masked_pct,
-                pct_masked(f) > data.max_masked_pct,
-            ).any():
-                rng_re, rng_f = random.split(rng_f)
-                f, *_ = gp.simulate(rng_re, s, mB)  # f: [mB, L_train, 1]
+            rng, s, f = sample_constrained_s_f(rng, kernel, data)
+            rng_eps, _ = random.split(rng)
             # use the next image in the batch to mask the previous
             rot_idx = jnp.arange(1, mB + 1).at[-1].set(0)
             f_mask = f[rot_idx] > mask_threshold
@@ -163,7 +148,7 @@ def build_dataloaders(
                 fs += [jnp.stack([f[i, sort_idx[i], :]] * N_r)]
             s_ord, f_ord = jnp.vstack(ss), jnp.vstack(fs)
             f_ord_noisy = f_ord + data.obs_noise * random.normal(rng_eps, f_ord.shape)
-            return (
+            return rng, (
                 s_ord[:, :num_ctx_max, :],
                 f_ord_noisy[:, :num_ctx_max, :],
                 valid_lens_ctx,
@@ -179,7 +164,9 @@ def build_dataloaders(
         def dataloader(rng: jax.Array):
             while True:
                 rng_batch, rng = random.split(rng)
-                yield gen_batch(rng_batch)
+                # TODO(danj): Save & load rng_used to reproduce this...
+                rng_used, batch = gen_batch(rng_batch)
+                yield batch
 
         return dataloader
 
@@ -237,6 +224,32 @@ def split_observed(df: pd.DataFrame):
         jnp.float16(s_unobs),
         jnp.float16(f_unobs),
     )
+
+
+@partial(jit, static_argnums=(1, 2, 3))
+def sample_constrained_s_f(rng: jax.Array, kernel: DictConfig, data: DictConfig):
+    valid_pct, var = 1 - data.mask_pct, kernel.kwargs.var.kwargs.kwargs.mu
+    threshold = norm.ppf(valid_pct, loc=0, scale=var)
+    s, f = sample_s_f(rng)
+    pct_masked = (f > threshold).mean(axis=(1, 2))
+    while jnp.logical_or(
+        pct_masked < data.min_masked_pct,
+        pct_masked > data.max_masked_pct,
+    ):
+        rng, _ = random.split(rng)
+        s, f = sample_s_f(rng, kernel, data)
+        pct_masked = (f > threshold).mean(axis=(1, 2))
+    return rng, s, f
+
+
+@partial(jit, static_argnums=(1, 2))
+def sample_s_f(rng: jax.Array, kernel: DictConfig, data: DictConfig):
+    rng_s, rng_f = random.split(rng)
+    s = random_subgrid(rng_s, data.s, data.min_axes_pct, data.max_axes_pct)
+    s = s.reshape(-1, s.shape[-1])
+    gp = instantiate(kernel)
+    f, *_ = gp.simulate(rng_f, s, data.batch_size // 4)  # reflections
+    return s, f
 
 
 def log_test_results(rng: jax.Array, state: TrainState, test_dataloader: Callable):
