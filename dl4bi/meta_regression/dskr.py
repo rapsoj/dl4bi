@@ -11,19 +11,14 @@ from ..core import MLP, GraphKRBlock, TISABias, k_nearest_senders, mask_from_val
 
 
 # TODO(danj): include global vnode conditioning
+# TODO(danj): add masks for when k < num_ctx
 class DSKR(nn.Module):
     """DSKR
 
     .. note::
-        Fixed effects can be embedded with `embed_s`, i.e. if the "index"
-        consists of [fixed effects, space, time], `embed_s` could be a Flax
-        module that embeds fixed effects, space, and time separately and
-        concatenates the output.
-
-    .. note::
         When the index set, `s`, includes fixed effects or features that
         do not factor into calculating the k-nearest neighbors, you
-        can override `k_nearest_senders`.
+        can override `k_nearest_senders` and `embed_s`.
 
     .. warning::
         `min(valid_lens_ctx)` and `min(valid_lens_test)` must both
