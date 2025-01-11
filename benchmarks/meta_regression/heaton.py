@@ -239,7 +239,8 @@ def generate_train_rngs(
     data: DictConfig,
 ):
     rngs = []
-    pbar = tqdm(range(1, num_batches + 1), unit=" batches", dynamic_ncols=True)
+    # NOTE: add an extra 10, in case dataloader is used to initialize model, etc
+    pbar = tqdm(range(1, num_batches + 11), unit=" batches", dynamic_ncols=True)
     for i in pbar:
         rng_i, rng = random.split(rng)
         rng, *_ = sample_constrained_s_f(rng, kernel, data)
