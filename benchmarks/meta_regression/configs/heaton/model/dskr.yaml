@@ -1,1 +1,6 @@
 cls: DSKR
+kwargs:
+  knn:
+    cls: kNN
+    kwargs:
+      k: 128
