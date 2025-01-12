@@ -10,6 +10,7 @@ import wandb
 from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 from ucimlrepo import fetch_ucirepo
 
 from dl4bi.core import Whitener
@@ -89,11 +90,12 @@ def build_dataloaders(
     df_train = df[:N_train]
     df_valid = df[N_train:-N_test]
     df_test = df[-N_test:]
-    whitener, standardizer = Whitener(), StandardScaler()
+    # TODO(danj): verify this process
+    whitener = Pipeline([("whitener", Whitener()), ("standardizer", StandardScaler())])
+    standardizer = StandardScaler()
     s_train = whitener.fit_transform(df_train[features].values)
     s_valid = whitener.transform(df_valid[features].values)
     s_test = whitener.transform(df_test[features].values)
-    # TODO(danj): should I whiten target column instead of standardizing?
     f_train = standardizer.fit_transform(df_train[[target]].values)
     f_valid = standardizer.transform(df_valid[[target]].values)
     f_test = standardizer.transform(df_test[[target]].values)
