@@ -72,26 +72,10 @@ def main(cfg: DictConfig):
 
 
 def build_dataloaders(rng: jax.Array, data: DictConfig, kernel: DictConfig):
-    df, target = load_dataset(data.name)
-    features = list(set(df.columns) - {target})
-    N, B, D = df.shape[0], data.batch_size, len(features)
-    N_train, N_test = int(N * 4 / 9), int(N * 3 / 9)  # same as 1M GP paper
-    N_valid = N - N_train - N_test
-    permute_idx = random.choice(rng, N, (N,), replace=False)
-    df = df.iloc[permute_idx]
-    df_train = df[:N_train]
-    df_valid = df[N_train:-N_test]
-    df_test = df[-N_test:]
-    whitener = Pipeline([("whitener", Whitener()), ("standardizer", StandardScaler())])
-    standardizer = StandardScaler()
-    s_train = whitener.fit_transform(df_train[features].values)
-    s_valid = whitener.transform(df_valid[features].values)
-    s_test = whitener.transform(df_test[features].values)
-    f_train = standardizer.fit_transform(df_train[[target]].values)
-    f_valid = standardizer.transform(df_valid[[target]].values)
-    f_test = standardizer.transform(df_test[[target]].values)
+    s_train, f_train, s_test, f_test = load_dataset(rng, data.name)
+    N_train, N_test = s_train.shape[0], s_test.shape[0]
 
-    def train_dataloader(rng: jax.Array):
+    def dataloader(rng: jax.Array):
         L_batch = data.num_ctx.max + data.num_test
         valid_lens_test = jnp.repeat(L_batch, B)
         gp = instantiate(kernel)
@@ -108,16 +92,6 @@ def build_dataloaders(rng: jax.Array, data: DictConfig, kernel: DictConfig):
             )
             yield (s, f, valid_lens_ctx, s, f, valid_lens_test)
 
-    def valid_dataloader(rng: jax.Array):
-        yield (
-            s_train[None, ...],
-            f_train[None, ...],
-            jnp.array([N_train]),
-            s_valid[None, ...],
-            f_valid[None, ...],
-            jnp.array([N_valid]),
-        )
-
     def test_dataloader(rng: jax.Array):
         yield (
             s_train[None, ...],
@@ -128,10 +102,10 @@ def build_dataloaders(rng: jax.Array, data: DictConfig, kernel: DictConfig):
             jnp.array([N_test]),
         )
 
-    return train_dataloader, valid_dataloader, test_dataloader
+    return dataloader, dataloader, test_dataloader
 
 
-def load_dataset(name: str):
+def load_dataset(rng: jax.Array, name: str):
     target = {"bike": "count"}[name]
     path = Path(f"cache/uci/{name}.csv")
     if path.exists():
@@ -145,8 +119,26 @@ def load_dataset(name: str):
             df["count"] = data.data.targets["cnt"]
         case _:
             raise Exception(f"Invalid dataset {name}!")
-    df.to_csv(path, index=False)
-    return df, target
+    if not path.exists():
+        df.to_csv(f"cache/uci/{name}.csv", index=False)
+    return preprocess(rng, df, target)
+
+
+def preprocess(rng: jax.Array, df: pd.DataFrame, target: str):
+    """Whitens and standardizes the data."""
+    N = df.shape[0]
+    features = list(set(df.columns) - {target})
+    N_train = int(N * 6 / 9)  # see 1M GP paper
+    permute_idx = random.choice(rng, N, (N,), replace=False)
+    df = df.iloc[permute_idx]
+    df_train, df_test = df[:N_train], df[N_train:]
+    whitener = Pipeline([("whitener", Whitener()), ("standardizer", StandardScaler())])
+    standardizer = StandardScaler()
+    s_train = whitener.fit_transform(df_train[features].values)
+    s_test = whitener.transform(df_test[features].values)
+    f_train = standardizer.fit_transform(df_train[[target]].values)
+    f_test = standardizer.transform(df_test[[target]].values)
+    return s_train, f_train, s_test, f_test
 
 
 if __name__ == "__main__":
