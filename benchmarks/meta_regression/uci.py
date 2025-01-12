@@ -9,8 +9,8 @@ import pandas as pd
 import wandb
 from jax import random
 from omegaconf import DictConfig, OmegaConf
-from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from ucimlrepo import fetch_ucirepo
 
 from dl4bi.core import Whitener
@@ -24,6 +24,8 @@ from dl4bi.meta_regression.train_utils import (
 )
 
 
+# TODO(danj): verify data prep
+# TODO(danj): determine matern_3_2 priors for each dataset
 @hydra.main("configs/uci", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
@@ -39,11 +41,8 @@ def main(cfg: DictConfig):
     rng_dataloaders, rng_train, rng_test = random.split(rng, 3)
     train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(
         rng_dataloaders,
-        cfg.data.name,
-        cfg.data.batch_size,
-        cfg.data.num_ctx.min,
-        cfg.data.num_ctx.max,
-        cfg.data.num_test,
+        cfg.data,
+        cfg.kernel,
     )
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
@@ -72,17 +71,10 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def build_dataloaders(
-    rng: jax.Array,
-    name: str,
-    batch_size: int,
-    num_ctx_min: int,
-    num_ctx_max: int,
-    num_test: int,
-):
-    df, target = load_dataset(name)
+def build_dataloaders(rng: jax.Array, data: DictConfig, kernel: DictConfig):
+    df, target = load_dataset(data.name)
     features = list(set(df.columns) - {target})
-    N, B = df.shape[0], batch_size
+    N, B, D = df.shape[0], data.batch_size, len(features)
     N_train, N_test = int(N * 4 / 9), int(N * 3 / 9)  # same as 1M GP paper
     N_valid = N - N_train - N_test
     permute_idx = random.choice(rng, N, (N,), replace=False)
@@ -90,7 +82,6 @@ def build_dataloaders(
     df_train = df[:N_train]
     df_valid = df[N_train:-N_test]
     df_test = df[-N_test:]
-    # TODO(danj): verify this process
     whitener = Pipeline([("whitener", Whitener()), ("standardizer", StandardScaler())])
     standardizer = StandardScaler()
     s_train = whitener.fit_transform(df_train[features].values)
@@ -101,31 +92,21 @@ def build_dataloaders(
     f_test = standardizer.transform(df_test[[target]].values)
 
     def train_dataloader(rng: jax.Array):
-        L = s_train.shape[0]
-        L_batch = num_ctx_max + num_test
+        L_batch = data.num_ctx.max + data.num_test
         valid_lens_test = jnp.repeat(L_batch, B)
-        batchify = lambda x: jnp.repeat(x[None, ...], B, axis=0)
+        gp = instantiate(kernel)
         while True:
-            rng_permute, rng_valid, rng = random.split(rng, 3)
-            permute_idx = random.choice(rng_permute, L, (L,), replace=False)
-            s_perm, f_perm = s_train[permute_idx], f_train[permute_idx]
-            s_test, f_test = s_perm[:L_batch], f_perm[:L_batch]
-            s_test, f_test = batchify(s_test), batchify(f_test)
-            # permute the order and select the first valid_lens_ctx for context
+            rng_s, rng_gp, rng_valid, rng = random.split(rng, 4)
+            s = random.normal(rng_s, (L_batch, D))
+            f, *_ = gp.simulate(rng_gp, s, B)
+            s = jnp.repeat(s[None, ...], B, axis=0)
             valid_lens_ctx = random.randint(
                 rng_valid,
                 (B,),
-                num_ctx_min,
-                num_ctx_max,
+                data.num_ctx.min,
+                data.num_ctx.max,
             )
-            yield (
-                s_test,
-                f_test,
-                valid_lens_ctx,
-                s_test,
-                f_test,
-                valid_lens_test,
-            )
+            yield (s, f, valid_lens_ctx, s, f, valid_lens_test)
 
     def valid_dataloader(rng: jax.Array):
         yield (
