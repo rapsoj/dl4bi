@@ -74,6 +74,7 @@ def main(cfg: DictConfig):
 def build_dataloaders(rng: jax.Array, data: DictConfig, kernel: DictConfig):
     s_train, f_train, s_test, f_test = load_dataset(rng, data.name)
     N_train, N_test = s_train.shape[0], s_test.shape[0]
+    B, D = data.batch_size, s_train.shape[-1]
 
     def dataloader(rng: jax.Array):
         L_batch = data.num_ctx.max + data.num_test
