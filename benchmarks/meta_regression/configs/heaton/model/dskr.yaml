@@ -4,3 +4,4 @@ kwargs:
     cls: kNN
     kwargs:
       k: 128
+      num_q_parallel: 512
