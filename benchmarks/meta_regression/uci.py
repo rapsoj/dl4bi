@@ -83,56 +83,69 @@ def build_dataloaders(
     features = list(set(df.columns) - {target})
     N, B = df.shape[0], batch_size
     N_train, N_test = int(N * 4 / 9), int(N * 3 / 9)  # same as 1M GP paper
+    N_valid = N - N_train - N_test
     permute_idx = random.choice(rng, N, (N,), replace=False)
     df = df.iloc[permute_idx]
     df_train = df[:N_train]
     df_valid = df[N_train:-N_test]
     df_test = df[-N_test:]
     whitener, standardizer = Whitener(), StandardScaler()
-    df_train[features] = whitener.fit_transform(df_train[features])
-    df_valid[features] = whitener.transform(df_valid[features])
-    df_test[features] = whitener.transform(df_test[features])
+    s_train = whitener.fit_transform(df_train[features].values)
+    s_valid = whitener.transform(df_valid[features].values)
+    s_test = whitener.transform(df_test[features].values)
     # TODO(danj): should I whiten target column instead of standardizing?
-    df_train[target] = standardizer.fit_transform(df_train[target])
-    df_valid[target] = standardizer.transform(df_valid[target])
-    df_test[target] = standardizer.transform(df_test[target])
+    f_train = standardizer.fit_transform(df_train[[target]].values)
+    f_valid = standardizer.transform(df_valid[[target]].values)
+    f_test = standardizer.transform(df_test[[target]].values)
 
-    def build_dataloader(df):
-        L = df.shape[0]
-        valid_lens_test = jnp.repeat(num_ctx_max + num_test, B)
+    def train_dataloader(rng: jax.Array):
+        L = s_train.shape[0]
+        L_batch = num_ctx_max + num_test
+        valid_lens_test = jnp.repeat(L_batch, B)
+        batchify = lambda x: jnp.repeat(x[None, ...], B, axis=0)
+        while True:
+            rng_permute, rng_valid, rng = random.split(rng, 3)
+            permute_idx = random.choice(rng_permute, L, (L,), replace=False)
+            s_perm, f_perm = s_train[permute_idx], f_train[permute_idx]
+            s_test, f_test = s_perm[:L_batch], f_perm[:L_batch]
+            s_test, f_test = batchify(s_test), batchify(f_test)
+            # permute the order and select the first valid_lens_ctx for context
+            valid_lens_ctx = random.randint(
+                rng_valid,
+                (B,),
+                num_ctx_min,
+                num_ctx_max,
+            )
+            yield (
+                s_test,
+                f_test,
+                valid_lens_ctx,
+                s_test,
+                f_test,
+                valid_lens_test,
+            )
 
-        def dataloader(rng: jax.Array):
-            while True:
-                rng_permute, rng_valid, rng = random.split(rng, 3)
-                permute_idx = random.choice(rng_permute, L, (L,), replace=False)
-                dft = df.iloc[permute_idx][: num_ctx_max + num_test]
-                s_test = jnp.array(dft[features].values)[None, ...]
-                f_test = jnp.array(dft[target].values)[None, :, None]
-                s_test = jnp.repeat(s_test, B, axis=0)
-                f_test = jnp.repeat(f_test, B, axis=0)
-                # permute the order and select the first valid_lens_ctx for context
-                valid_lens_ctx = random.randint(
-                    rng_valid,
-                    (B,),
-                    num_ctx_min,
-                    num_ctx_max,
-                )
-                yield (
-                    s_test,
-                    f_test,
-                    valid_lens_ctx,
-                    s_test,
-                    f_test,
-                    valid_lens_test,
-                )
+    def valid_dataloader(rng: jax.Array):
+        yield (
+            s_train[None, ...],
+            f_train[None, ...],
+            jnp.array([N_train]),
+            s_valid[None, ...],
+            f_valid[None, ...],
+            jnp.array([N_valid]),
+        )
 
-        return dataloader
+    def test_dataloader(rng: jax.Array):
+        yield (
+            s_train[None, ...],
+            f_train[None, ...],
+            jnp.array([N_train]),
+            s_test[None, ...],
+            f_test[None, ...],
+            jnp.array([N_test]),
+        )
 
-    return (
-        build_dataloader(df_train),
-        build_dataloader(df_valid),
-        build_dataloader(df_test),
-    )
+    return train_dataloader, valid_dataloader, test_dataloader
 
 
 def load_dataset(name: str):
