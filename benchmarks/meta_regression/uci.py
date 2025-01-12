@@ -108,10 +108,10 @@ def build_dataloaders(rng: jax.Array, data: DictConfig, kernel: DictConfig):
 def load_dataset(rng: jax.Array, name: str):
     target = {"bike": "count"}[name]
     path = Path(f"cache/uci/{name}.csv")
+    path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         df = pd.read_csv(path)
-        return df, target
-    path.parent.mkdir(parents=True, exist_ok=True)
+        return preprocess(rng, df, target)
     match name:
         case "bike":
             data = fetch_ucirepo(id=275)
@@ -119,8 +119,7 @@ def load_dataset(rng: jax.Array, name: str):
             df["count"] = data.data.targets["cnt"]
         case _:
             raise Exception(f"Invalid dataset {name}!")
-    if not path.exists():
-        df.to_csv(f"cache/uci/{name}.csv", index=False)
+    df.to_csv(f"cache/uci/{name}.csv", index=False)
     return preprocess(rng, df, target)
 
 

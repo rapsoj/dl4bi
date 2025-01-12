@@ -26,11 +26,11 @@ def main(cfg: DictConfig):
     for _ in range(num_restarts):
         rng_idx, rng = random.split(rng)
         idx = random.choice(rng_idx, num_samples, (num_samples,), replace=False)
-        var, ls, eps = gp_mle_sgd(s_obs[idx], f_obs[idx], matern_1_2)
-        print(f"var {var:0.4f}, ls {ls:0.4f}, eps: {eps: 0.4f}")
-        thetas += [[var, ls, eps]]
-    var_mu, ls_mu, eps_mu = jnp.array(thetas).mean(axis=0)
-    print(f"Average: var {var_mu:0.4f}, ls {ls_mu:0.4f}, eps: {eps_mu:0.4f}")
+        var, ls, noise = gp_mle_sgd(s_obs[idx], f_obs[idx], matern_1_2)
+        print(f"var {var:0.4f}, ls {ls:0.4f}, noise: {noise: 0.4f}")
+        thetas += [[var, ls, noise]]
+    var_mu, ls_mu, noise_mu = jnp.array(thetas).mean(axis=0)
+    print(f"Average: var {var_mu:0.4f}, ls {ls_mu:0.4f}, noise: {noise_mu:0.4f}")
 
 
 if __name__ == "__main__":
