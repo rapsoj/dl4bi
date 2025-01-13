@@ -49,7 +49,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         "convcnp",
     ]
     exclude_2d = ["bnp", "banp", "convcnp"]
-    include_2d = ["convcnp_2d"]
+    include_2d = ["convcnp_2d_xl"]
     models_2d = [m for m in models if m not in exclude_2d] + include_2d
     gp_benchmark(
         seeds,
