@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import matplotlib as mpl
 import optax
 import wandb
-from jax import jit, random
+from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
@@ -38,7 +38,7 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    dataloader = build_dataloader(cfg.data, cfg.priors)
+    dataloader = build_dataloader(cfg.data, cfg.sim)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -52,7 +52,7 @@ def main(cfg: DictConfig):
     cmap = mpl.colormaps.get_cmap("grey")
     cmap.set_bad("blue")
     norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
-    dims = [dim.num for dim in data.s]
+    dims = [dim.num for dim in cfg.data.s]
     clbk = partial(log_img_plots, shape=(*dims, 1), cmap=cmap, norm=norm)
     state = train(
         rng_train,
@@ -76,17 +76,16 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
     """A 2D Lattice SI dataloader."""
     si = instantiate(priors)
     dims, D_s = [dim.num for dim in data.s], len(data.s)
-    Nc_min, Nc_max, Nt = data.num_ctx.min, data.num_ctx.max, data.num_test
+    Lc_min, Lc_max = data.num_ctx.min, data.num_ctx.max
     L, B, N = math.prod(dims), data.batch_size, data.num_steps
     s_grid = build_grid(data.s).reshape(-1, D_s)  # flatten spatial dims
     s = jnp.repeat(s_grid[None, ...], B, axis=0)
-    valid_lens_test = jnp.repeat(Nt, B)
-    simulate_outbreak = jit(lambda rng: si.simulate(rng, dims, N))
+    valid_lens_test = jnp.repeat(L - Lc_max, B)
 
     def dataloader(rng: jax.Array):
         while True:
             rng_si, rng_eps, rng_valid, rng_permute, rng = random.split(rng, 5)
-            steps, *_ = simulate_outbreak(rng_si)  # f: [N, *dims]
+            steps, *_ = si.simulate(rng_si, dims, N)  # f: [N, *dims]
             i, step = -1, steps[-1]
             while (step == 1.0).all():
                 i -= 1
@@ -97,18 +96,18 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
             steps = steps[permute_idx]
             rng_permute, rng = random.split(rng)
             for i in range(N_sim // B):
-                steps_i = steps[i * B : (i + 1) * B]
+                steps_i = steps[i * B : (i + 1) * B].reshape(B, L, 1)
                 permute_idx = random.choice(rng_permute, L, (L,), replace=False)
                 inv_permute_idx = jnp.argsort(permute_idx)
-                valid_lens_ctx = random.randint(rng_valid, (B,), Nc_min, Nc_max)
+                valid_lens_ctx = random.randint(rng_valid, (B,), Lc_min, Lc_max)
                 s_perm = s[:, permute_idx, :]
                 f_perm = steps_i[:, permute_idx, :]
                 yield (
-                    s_perm[:, :Nc_max, :],
-                    f_perm[:, :Nc_max, :],
+                    s_perm[:, :Lc_max, :],
+                    f_perm[:, :Lc_max, :],
                     valid_lens_ctx,
-                    s_perm[:, Nc_max:, :],
-                    f_perm[:, Nc_max:, :],
+                    s_perm[:, Lc_max:, :],
+                    f_perm[:, Lc_max:, :],
                     valid_lens_test,
                     s,  # add full originals for use in callbacks, e.g. log_plots
                     steps_i,
