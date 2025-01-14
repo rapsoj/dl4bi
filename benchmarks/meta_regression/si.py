@@ -53,7 +53,13 @@ def main(cfg: DictConfig):
     cmap.set_bad("blue")
     norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
     dims = [dim.num for dim in cfg.data.s]
-    clbk = partial(log_img_plots, shape=(*dims, 1), cmap=cmap, norm=norm)
+    cbk = partial(
+        log_img_plots,
+        shape=(*dims, 1),
+        num_plots=cfg.data.batch_size,
+        cmap=cmap,
+        norm=norm,
+    )
     state = train(
         rng_train,
         model,
@@ -63,7 +69,7 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        callbacks=[Callback(clbk, cfg.plot_interval)],
+        callbacks=[Callback(cbk, cfg.plot_interval)],
     )
     metrics = evaluate(rng_test, state, dataloader, cfg.valid_num_steps)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
