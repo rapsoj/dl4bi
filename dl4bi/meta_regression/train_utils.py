@@ -34,6 +34,7 @@ from sps.kernels import (
     rbf,
 )
 from sps.priors import Prior
+from sps.si import LatticeSI
 from sps.utils import build_grid
 from tqdm import tqdm
 

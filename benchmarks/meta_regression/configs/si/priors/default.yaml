@@ -1,0 +1,16 @@
+cls: LatticeSI
+kwargs: 
+  beta:
+    cls: Prior
+    kwargs:
+      dist: beta
+      kwargs:
+        a: 2.0
+        b: 18.0
+  num_init:
+    cls: Prior
+    kwargs:
+      dist: uniform
+      kwargs:
+        minval: 1.0
+        maxval: 5.0

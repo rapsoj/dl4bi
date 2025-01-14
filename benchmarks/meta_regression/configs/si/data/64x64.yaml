@@ -1,0 +1,13 @@
+name: 64x64
+s:
+  - start: -2
+    stop: 2
+    num: 64
+  - start: -2
+    stop: 2
+    num: 64
+num_ctx:
+  min: 205
+  max: 2048
+num_steps: 100
+batch_size: 8
