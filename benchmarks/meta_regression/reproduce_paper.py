@@ -85,22 +85,22 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         overrides,
         "_ICML_ TNP-KR - MNIST",
     )
-    # img_benchmark(
-    #     seeds,
-    #     "configs/celeba",
-    #     models,
-    #     celeba_main,
-    #     overrides,
-    #     "_ICML_ TNP-KR - CelebA",
-    # )
-    # img_benchmark(
-    #     seeds,
-    #     "configs/cifar_10",
-    #     models,
-    #     cifar_10_main,
-    #     overrides,
-    #     "_ICML_ TNP-KR - Cifar 10",
-    # )
+    img_benchmark(
+        seeds,
+        "configs/celeba",
+        models,
+        celeba_main,
+        overrides,
+        "_ICML_ TNP-KR - CelebA",
+    )
+    img_benchmark(
+        seeds,
+        "configs/cifar_10",
+        models,
+        cifar_10_main,
+        overrides,
+        "_ICML_ TNP-KR - Cifar 10",
+    )
 
 
 def lore_paper(seeds: jax.Array, dry_run: bool = False):
