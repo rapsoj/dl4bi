@@ -85,22 +85,22 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         overrides,
         "_ICML_ TNP-KR - MNIST",
     )
-    img_benchmark(
-        seeds,
-        "configs/celeba",
-        models,
-        celeba_main,
-        overrides,
-        "_ICML_ TNP-KR - CelebA",
-    )
-    img_benchmark(
-        seeds,
-        "configs/cifar_10",
-        models,
-        cifar_10_main,
-        overrides,
-        "_ICML_ TNP-KR - Cifar 10",
-    )
+    # img_benchmark(
+    #     seeds,
+    #     "configs/celeba",
+    #     models,
+    #     celeba_main,
+    #     overrides,
+    #     "_ICML_ TNP-KR - CelebA",
+    # )
+    # img_benchmark(
+    #     seeds,
+    #     "configs/cifar_10",
+    #     models,
+    #     cifar_10_main,
+    #     overrides,
+    #     "_ICML_ TNP-KR - Cifar 10",
+    # )
 
 
 def lore_paper(seeds: jax.Array, dry_run: bool = False):
@@ -252,7 +252,8 @@ def parse_args(argv):
 
 if __name__ == "__main__":
     args = parse_args(sys.argv)
-    seeds = random.randint(random.key(args.seed), (args.num_runs,), 0, 100)
+    rng = random.key(args.seed)
+    seeds = random.choice(rng, 100, (args.num_runs,), replace=False)
     match args.paper:
         case "tnp_kr":
             tnp_kr_paper(seeds, args.dry_run)
