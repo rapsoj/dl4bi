@@ -35,7 +35,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     overrides = [overrides]  # expects list[list[str]]
     gp_kernels_1d = ["periodic", "rbf", "matern_3_2"]
     gp_kernels_2d = ["rbf"]
-    models_1d = [
+    models = [
         "convcnp",
         "tnp_d",
         "tnp_kr_scan",
@@ -48,59 +48,58 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         "canp",
         "banp",
     ]
-    models_2d = [m for m in models_1d]
-    models_2d[models_2d.index("convcnp")] = "convcnp_xl"
+    models = [f"icml/{m}" for m in models]
     gp_benchmark(
         seeds,
         "1d",
         gp_kernels_1d,
-        [f"1d/{m}" for m in models_1d],
+        [f"1d/{m}" for m in models],
         gp_main,
         overrides,
-        "TNP-KR (ICML) - Gaussian Processes",
+        "_ICML_ TNP-KR - Gaussian Processes",
     )
     gp_benchmark(
         seeds,
         "1d",
         gp_kernels_1d,
-        [f"1d/{m}" for m in models_1d],
+        [f"1d/{m}" for m in models],
         bayes_opt_main,
         overrides,
-        "TNP-KR (ICML) - Bayesian Optimization",
-        "TNP-KR (ICML) - Gaussian Processes",
+        "_ICML_ TNP-KR - Bayesian Optimization",
+        "_ICML_ TNP-KR - Gaussian Processes",
     )
     gp_benchmark(
         seeds,
         "2d",
         gp_kernels_2d,
-        [f"2d/{m}" for m in models_1d],
+        [f"2d/{m}" for m in models],
         gp_main,
         overrides,
-        "TNP-KR (ICML) - Gaussian Processes",
+        "_ICML_ TNP-KR - Gaussian Processes",
     )
     img_benchmark(
         seeds,
         "configs/mnist",
-        models_2d,
+        models,
         mnist_main,
         overrides,
-        "TNP-KR (ICML) - MNIST",
+        "_ICML_ TNP-KR - MNIST",
     )
     img_benchmark(
         seeds,
         "configs/celeba",
-        models_2d,
+        models,
         celeba_main,
         overrides,
-        "TNP-KR (ICML) - CelebA",
+        "_ICML_ TNP-KR - CelebA",
     )
     img_benchmark(
         seeds,
         "configs/cifar_10",
-        models_2d,
+        models,
         cifar_10_main,
         overrides,
-        "TNP-KR (ICML) - Cifar 10",
+        "_ICML_ TNP-KR - Cifar 10",
     )
 
 
@@ -165,16 +164,16 @@ def gp_benchmark(
     seeds: jax.Array,
     data: str = "1d",
     kernels: list[str] = ["rbf", "periodic", "tnp_kr"],
-    models: list[str] = ["tnp_kr_fast"],
+    models: list[str] = ["1d/tnp_kr_scan"],
     main_fn: Callable = gp_main,
     overrides: list[list[str]] = [[]],
     project: str = "",
-    project_parent: str = "",
+    project_parent: str = "None",
 ):
     for kernel in kernels:
         for seed in seeds:
             for model in models:
-                for _overrides in overrides:
+                for overrides_i in overrides:
                     with initialize(config_path="configs/gp", version_base=None):
                         cfg = compose(
                             "default",
@@ -186,7 +185,7 @@ def gp_benchmark(
                                 f"seed={seed}",
                                 f"+project_parent={project_parent}",
                             ]
-                            + _overrides,
+                            + overrides_i,
                         )
                         print("=" * 100)
                         main_fn(cfg)
@@ -202,7 +201,7 @@ def img_benchmark(
 ):
     for seed in seeds:
         for model in models:
-            for _overrides in overrides:
+            for overrides_i in overrides:
                 with initialize(config_path=cfg_dir, version_base=None):
                     cfg = compose(
                         "default",
@@ -211,7 +210,7 @@ def img_benchmark(
                             f"model={model}",
                             f"seed={seed}",
                         ]
-                        + _overrides,
+                        + overrides_i,
                     )
                     print("=" * 100)
                     main_fn(cfg)
