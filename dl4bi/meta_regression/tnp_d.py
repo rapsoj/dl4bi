@@ -1,10 +1,11 @@
-from typing import Optional
+from typing import Callable, Optional
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
 from ..core import MLP, TransformerEncoder
+from .transform import diagonal_mvn
 
 
 class TNPD(nn.Module):
@@ -13,8 +14,9 @@ class TNPD(nn.Module):
     Args:
         embed_s_f: A module that embeds positions and function values.
         enc: An encoder module for observed points.
-        head: A prediction head for decoded output.
-        min_std: Minimum pointwise standard deviation.
+        head: Transforms the tokens into model output.
+        output_fn: A function that transforms the model output into
+            a form that can be consumed by loss functions.
 
     Returns:
         An instance of the `TNP-D` model.
@@ -23,7 +25,7 @@ class TNPD(nn.Module):
     embed_s_f: nn.Module = MLP([64] * 4)
     enc: nn.Module = TransformerEncoder()
     head: nn.Module = MLP([128, 2], nn.relu)
-    min_std: float = 0.0
+    output_fn: Callable = diagonal_mvn
 
     @nn.compact
     def __call__(
@@ -70,9 +72,4 @@ class TNPD(nn.Module):
         s_f_enc = self.enc(s_f_embed, valid_lens_ctx, training, **kwargs)
         s_f_test_enc = s_f_enc[:, -L_test:, ...]
         f_dist = self.head(s_f_test_enc, training)
-        f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-        if self.min_std:
-            f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
-        else:
-            f_std = jnp.exp(f_std)
-        return f_mu, f_std
+        return self.output_fn(f_dist)

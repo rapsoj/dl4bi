@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Callable, Optional
 
 import flax.linen as nn
 import jax
@@ -7,6 +7,7 @@ from jax import jit, random
 from jax.lax import stop_gradient as no_grad
 
 from ..core import MLP, MultiHeadAttention, bootstrap, mask_from_valid_lens
+from .transform import diagonal_mvn
 
 
 class BANP(nn.Module):
@@ -27,17 +28,22 @@ class BANP(nn.Module):
         setup where all projection matrices are single layer linear projections.
 
     Args:
+        num_samples: The number of samples to use for bootstrapping.
         embed_s: An embedding module for locations.
         enc_det: An encoder for the deterministic path.
         self_attn_det: A self attention module for the deterministic path.
-        dec: A decoder for test locations.
         cross_attn: A cross attention module used in decoding.
-        min_std: Bounds standard deviation, default 0.0 (original 0.1).
+        dec_hid: The first stage of decoding at test points.
+        dec_boot: A decoding module that integrates bootstrapped samples.
+        dec_dist: Decodes the hidden state into model output.
+        output_fn: A function that transforms the model output into
+            a form that can be consumed by loss functions.
 
     Returns:
         An instance of a `BANP`.
     """
 
+    num_samples: int = 4
     embed_s: nn.Module = MLP([128] * 2)
     enc_det: nn.Module = MLP([128] * 3)
     self_attn_det: nn.Module = MultiHeadAttention(
@@ -57,8 +63,7 @@ class BANP(nn.Module):
     dec_hid: nn.Module = MLP([128])
     dec_boot: nn.Module = MLP([128] * 2)
     dec_dist: nn.Module = MLP([128] * 3 + [2])
-    num_samples: int = 4
-    min_std: float = 0.0
+    output_fn: Callable = diagonal_mvn
 
     @nn.compact
     def __call__(
@@ -179,6 +184,4 @@ class BANP(nn.Module):
             )  # [B*K, L_test, d_ffn]
             h += self.dec_boot(r_boot, training)
         f_dist = self.dec_dist(h, training)
-        f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-        f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
-        return f_mu, f_std  # [B*K, L_test, d_f]
+        return self.output_fn(f_dist)  # [B*K, L_test, d_f]

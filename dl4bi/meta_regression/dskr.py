@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from jraph import GraphsTuple
 
 from ..core import MLP, GraphKRBlock, TISABias, kNN, mask_from_valid_lens
+from .transform import diagonal_mvn
 
 
 # TODO(danj): include global vnode conditioning
@@ -30,7 +31,7 @@ class DSKR(nn.Module):
     blk: nn.Module = GraphKRBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
-    min_std: float = 0.0
+    output_fn: Callable = diagonal_mvn
 
     @nn.compact
     def __call__(
@@ -78,7 +79,4 @@ class DSKR(nn.Module):
                 g = blk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
         x_t = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         f_dist = self.head(x_t, training)
-        f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
-        f_std = jnp.exp(f_log_var / 2)
-        f_std = self.min_std + (1 - self.min_std) * f_std
-        return f_mu, f_std
+        return self.output_fn(f_dist)

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Callable, Optional
 
 import flax.linen as nn
 import jax
@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from jax import random
 
 from ..core import MLP, MultiHeadAttention, mask_from_valid_lens
+from .transform import latent_diagonal_mvn
 
 
 class ANP(nn.Module):
@@ -39,7 +40,8 @@ class ANP(nn.Module):
         dec: A decoder for test locations.
         cross_attn: A cross attention module used in decoding.
         n_z: Number of latent `z` samples to use.
-        min_std: Bounds standard deviation, default 0.0 (original 0.1).
+        output_fn: A function that transforms the model output into
+            a form that can be consumed by loss functions.
 
     Returns:
         An instance of an `ANP`.
@@ -72,7 +74,7 @@ class ANP(nn.Module):
     )
     dec: nn.Module = MLP([128] * 4 + [2])
     n_z: int = 1
-    min_std: float = 0.0
+    output_fn: Callable = latent_diagonal_mvn
 
     @nn.compact
     def __call__(
@@ -166,6 +168,4 @@ class ANP(nn.Module):
         z = jnp.repeat(z[..., None, :], L_test, axis=-2)  # [B, n_z, L_test, d_z]
         q = jnp.concatenate([s, r, z], -1)  # [B, n_z, L_test, D_s + d_ffn + d_z]
         f_dist = self.dec(q, training)
-        f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-        f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
-        return f_mu.mean(axis=1), f_std.mean(axis=1)  # [B, L_test, d_f]
+        return self.output_fn(f_dist)

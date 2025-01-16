@@ -1,5 +1,5 @@
 from dataclasses import field
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import flax.linen as nn
 import jax
@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from sps.utils import build_grid
 
 from ..core import MLP, ConvCNPNet, ConvDeepSet
+from .transform import diagonal_mvn
 
 
 class ConvCNP(nn.Module):
@@ -23,9 +24,10 @@ class ConvCNP(nn.Module):
             on a grid.
         conv_net: A convolutional network used for the function representation
             on a grid.
-        dec_f_mu: A module that decodes `f_mu` from a grid at test locations.
-        dec_f_std: A module that decodes `f_std` from a grid at test locations.
-
+        dec: A module that decodes grid values to test locations.
+        head: Transforms the decoder output into model output.
+        output_fn: A function that transforms the model output into
+            a form that can be consumed by loss functions.
     Returns:
         An instance of `CNP`.
     """
@@ -33,11 +35,11 @@ class ConvCNP(nn.Module):
     s_lower: List[float] = field(default_factory=lambda: [-2.5])
     s_upper: List[float] = field(default_factory=lambda: [2.5])
     points_per_unit: int = 128
-    min_std: float = 0.0
     enc: nn.Module = ConvDeepSet()
     conv_net: nn.Module = ConvCNPNet()
     dec: nn.Module = ConvDeepSet()
     head: nn.Module = MLP([128] * 3 + [2])
+    output_fn: Callable = diagonal_mvn
 
     @nn.compact
     def __call__(
@@ -65,6 +67,4 @@ class ConvCNP(nn.Module):
         h = self.conv_net(h.reshape(conv_dims + (-1,)))  # [B, *P..., D]
         h = self.dec(s_vec, h.reshape(B, s_vec.shape[1], -1), s_test)  # [B, L_grid, D]
         f_dist = self.head(h)
-        f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-        f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
-        return f_mu, f_std
+        return self.output_fn(f_dist)

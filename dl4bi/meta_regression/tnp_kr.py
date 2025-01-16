@@ -9,11 +9,12 @@ from sps.kernels import l2_dist_sq
 
 from ..core import (
     MLP,
-    DistanceBias,
     KRBlock,
     MultiHeadAttention,
+    TISABias,
     TISABiasedScanAttention,
 )
+from .transform import diagonal_mvn
 
 
 class TNPKR(nn.Module):
@@ -22,7 +23,6 @@ class TNPKR(nn.Module):
     Args:
         num_blks: Number of `KRBlocks` to use.
         num_reps: Number of times to repeat each `KRBlock`.
-        min_std: Minimum pointwise standard deviation.
         embed_s: A module that embeds the index set prior to embedding with
             function values.
         embed_f: A module that embeds function values prior to embedding with
@@ -34,7 +34,9 @@ class TNPKR(nn.Module):
             two arrays.
         bias: A bias module that consumes pairwise distances.
         blk: A block to use for each layer and each repetition.
-        head: A prediction head.
+        head: Transforms the tokens into model output.
+        output_fn: A function that transforms the model output into
+            a form that can be consumed by loss functions.
 
     Returns:
         An instance of the `TNP-KR` model.
@@ -42,16 +44,16 @@ class TNPKR(nn.Module):
 
     num_blks: int = 6
     num_reps: int = 1
-    min_std: float = 0.0
     embed_s: Callable = lambda x: x
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
     dist: Optional[Callable] = l2_dist_sq
-    bias: Optional[nn.Module] = DistanceBias()
+    bias: Optional[nn.Module] = TISABias()
     blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
+    output_fn: Callable = diagonal_mvn
 
     @nn.compact
     def __call__(
@@ -110,10 +112,7 @@ class TNPKR(nn.Module):
                 qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)
         f_dist = self.head(qvs, training)
-        f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
-        f_std = jnp.exp(f_log_var / 2)
-        f_std = self.min_std + (1 - self.min_std) * f_std
-        return f_mu, f_std
+        return self.output_fn(f_dist)
 
 
 class ScanTNPKR(nn.Module):
@@ -123,7 +122,6 @@ class ScanTNPKR(nn.Module):
     Args:
         num_blks: Number of `KRBlocks` to use.
         num_reps: Number of times to repeat each `KRBlock`.
-        min_std: Minimum pointwise standard deviation.
         embed_s: A module that embeds the index set prior to embedding with
             function values.
         embed_f: A module that embeds function values prior to embedding with
@@ -133,7 +131,9 @@ class ScanTNPKR(nn.Module):
         embed_all: A module that jointly embeds `obs`, `s`, and `f` embeddings.
         blk: A block to use for each layer and each repetition.
         norm: A normalization module used in `KRBlocks`.
-        head: A prediction head.
+        head: Transforms the tokens into model output.
+        output_fn: A function that transforms the model output into
+            a form that can be consumed by loss functions.
 
     Returns:
         An instance of the `TNP-KR` model.
@@ -141,7 +141,6 @@ class ScanTNPKR(nn.Module):
 
     num_blks: int = 6
     num_reps: int = 1
-    min_std: float = 0.0
     embed_s: Callable = lambda x: x
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
@@ -149,6 +148,7 @@ class ScanTNPKR(nn.Module):
     blk: nn.Module = KRBlock(MultiHeadAttention(TISABiasedScanAttention()))
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
+    output_fn: Callable = diagonal_mvn
 
     @nn.compact
     def __call__(
@@ -199,7 +199,4 @@ class ScanTNPKR(nn.Module):
                 qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)
         f_dist = self.head(qvs, training)
-        f_mu, f_log_var = jnp.split(f_dist, 2, axis=-1)
-        f_std = jnp.exp(f_log_var / 2)
-        f_std = self.min_std + (1 - self.min_std) * f_std
-        return f_mu, f_std
+        return self.output_fn(f_dist)

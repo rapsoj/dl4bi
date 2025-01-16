@@ -1,10 +1,11 @@
-from typing import Optional
+from typing import Callable, Optional
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
 from ..core import MLP, MultiHeadAttention
+from .transform import diagonal_mvn
 
 
 class CANP(nn.Module):
@@ -28,9 +29,10 @@ class CANP(nn.Module):
         embed_s: An embedding module for locations.
         enc_det: An encoder for the deterministic path.
         self_attn_det: A self attention module for the deterministic path.
-        dec: A decoder for test locations.
         cross_attn: A cross attention module used in decoding.
-        min_std: Bounds standard deviation, default 0.0 (original 0.1).
+        dec: A decoder for test locations, aka a prediction head.
+        output_fn: A function that transforms the model output into
+            a form that can be consumed by loss functions.
 
     Returns:
         An instance of a `CANP`.
@@ -53,7 +55,7 @@ class CANP(nn.Module):
         num_heads=8,
     )
     dec: nn.Module = MLP([128] * 4 + [2])
-    min_std: float = 0.0
+    output_fn: Callable = diagonal_mvn
 
     @nn.compact
     def __call__(
@@ -111,6 +113,4 @@ class CANP(nn.Module):
         )  # [B, L_test, d_ffn]
         q = jnp.concatenate([r, s_test], -1)  # [B, L_test, d_ffn + D_s]
         f_dist = self.dec(q, training)
-        f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-        f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
-        return f_mu, f_std  # [B, L_test, d_f]
+        return self.output_fn(f_dist)

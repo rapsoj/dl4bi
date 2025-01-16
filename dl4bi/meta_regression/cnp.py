@@ -1,10 +1,11 @@
-from typing import Optional
+from typing import Callable, Optional
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
 from ..core import MLP, mask_from_valid_lens
+from .transform import diagonal_mvn
 
 
 class CNP(nn.Module):
@@ -20,7 +21,8 @@ class CNP(nn.Module):
     Args:
         enc: A module for encoding context points.
         dec: A module for decoding at test points.
-        min_std: Bounds standard deviation, default 0.0 (original 0.1).
+        output_fn: A function that transforms the model output into
+            a form that can be consumed by loss functions.
 
     Returns:
         An instance of `CNP`.
@@ -28,7 +30,7 @@ class CNP(nn.Module):
 
     enc_det: nn.Module = MLP([128] * 6)
     dec: nn.Module = MLP([128] * 4 + [2])
-    min_std: float = 0.0
+    output_fn: Callable = diagonal_mvn
 
     @nn.compact
     def __call__(
@@ -69,6 +71,4 @@ class CNP(nn.Module):
         r_ctx = jnp.repeat(r_ctx[:, None, :], L_test, axis=1)  # [B, L_test, d_ffn]
         q = jnp.concatenate([r_ctx, s_test], -1)  # [B, L_test, d_ffn + D_s]
         f_dist = self.dec(q, training)
-        f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-        f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
-        return f_mu, f_std  # [B, L_test, d_f]
+        return self.output_fn(f_dist)

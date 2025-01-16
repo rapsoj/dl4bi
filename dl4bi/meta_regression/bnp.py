@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Callable, Optional
 
 import flax.linen as nn
 import jax
@@ -7,6 +7,7 @@ from jax import jit, random
 from jax.lax import stop_gradient as no_grad
 
 from ..core import MLP, bootstrap, mask_from_valid_lens
+from .transform import diagonal_mvn
 
 
 class BNP(nn.Module):
@@ -19,23 +20,24 @@ class BNP(nn.Module):
     to keep comparisons among models consistent.
 
     Args:
+        num_samples: The number of samples to use for bootstrapping.
         enc_det: A module for encoding context points.
         dec_hid: The first stage of decoding at test points.
         dec_boot: A decoding module that integrates bootstrapped samples.
-        dec_dist: Decodes the hidden state into a distribution at test points.
-        num_samples: The number of samples to use for bootstrapping.
-        min_std: Bounds standard deviation, default 0.0 (original 0.1).
+        dec_dist: Decodes the hidden state into model output.
+        output_fn: A function that transforms the model output into
+            a form that can be consumed by loss functions.
 
     Returns:
         An instance of `BNP`.
     """
 
+    num_samples: int = 4
     enc_det: nn.Module = MLP([128] * 6)
     dec_hid: nn.Module = MLP([128])
     dec_boot: nn.Module = MLP([128] * 2)
     dec_dist: nn.Module = MLP([128] * 3 + [2])
-    num_samples: int = 4
-    min_std: float = 0.0
+    output_fn: Callable = diagonal_mvn
 
     @nn.compact
     def __call__(
@@ -131,6 +133,4 @@ class BNP(nn.Module):
             r_ctx_boot = jnp.repeat(r_ctx_boot[:, None, :], L_test, axis=1)
             h += self.dec_boot(r_ctx_boot, training)
         f_dist = self.dec_dist(h, training)
-        f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-        f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
-        return f_mu, f_std  # [B*K, L_test, d_f]
+        return self.output_fn(f_dist)  # [B*K, L_test, d_f]

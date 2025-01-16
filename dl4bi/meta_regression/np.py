@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Callable, Optional
 
 import flax.linen as nn
 import jax
@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from jax import random
 
 from ..core import MLP, mask_from_valid_lens
+from .transform import latent_diagonal_mvn
 
 
 class NP(nn.Module):
@@ -21,7 +22,8 @@ class NP(nn.Module):
         z_dist: A module that converts hidden representation to `z` mu and sigma.
         dec: A decoder for test locations.
         n_z: Number of latent `z` samples to use.
-        min_std: Bounds standard deviation, default 0.0 (original 0.1).
+        output_fn: A function that transforms the model output into
+            a form that can be consumed by loss functions.
 
     Returns:
         An instance of `NP`.
@@ -32,7 +34,7 @@ class NP(nn.Module):
     z_dist: nn.Module = MLP([128, 256])
     dec: nn.Module = MLP([128] * 4 + [2])
     n_z: int = 1
-    min_std: float = 0.0
+    output_fn: Callable = latent_diagonal_mvn
 
     @nn.compact
     def __call__(
@@ -102,6 +104,4 @@ class NP(nn.Module):
         s = jnp.repeat(s_test[:, None, ...], self.n_z, axis=1)  # [B, n_z, L_test, D_s]
         q = jnp.concatenate([r_ctx_z, s], -1)  # [B, n_z, L_test, d_ffn + d_z + D_s]
         f_dist = self.dec(q, training)
-        f_mu, f_std = jnp.split(f_dist, 2, axis=-1)
-        f_std = self.min_std + (1 - self.min_std) * nn.softplus(f_std)
-        return f_mu.mean(axis=1), f_std.mean(axis=1)  # [B, L_test, d_f]
+        return self.output_fn(f_dist)
