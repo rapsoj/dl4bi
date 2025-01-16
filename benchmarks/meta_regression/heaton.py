@@ -30,6 +30,7 @@ from dl4bi.meta_regression.train_utils import (
     load_ckpt,
     log_img_plots,
     save_ckpt,
+    select_train_step,
     train,
 )
 
@@ -74,10 +75,12 @@ def main(cfg: DictConfig):
         train_num_steps = cfg.finetune_num_steps
         if cfg.finetune_on_real:
             train_dataloader = valid_dataloader
+    train_step = select_train_step(model)
     state = train(
         rng_train,
         model,
         optimizer,
+        train_step,
         train_dataloader,
         valid_dataloader,
         train_num_steps,

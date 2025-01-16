@@ -22,6 +22,7 @@ from dl4bi.meta_regression.train_utils import (
     instantiate,
     log_img_plots,
     save_ckpt,
+    select_train_step,
     train,
 )
 
@@ -50,6 +51,7 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
+    train_step = select_train_step(model)
     cmap = mpl.colormaps.get_cmap("grey")
     cmap.set_bad("blue")
     norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
@@ -57,6 +59,7 @@ def main(cfg: DictConfig):
         rng_train,
         model,
         optimizer,
+        train_step,
         train_dataloader,
         valid_dataloader,
         cfg.train_num_steps,

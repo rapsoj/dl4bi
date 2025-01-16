@@ -34,7 +34,7 @@ from sps.kernels import (
     rbf,
 )
 from sps.priors import Prior
-from sps.si import LatticeSI
+from sps.sir import LatticeSIR
 from sps.utils import build_grid
 from tqdm import tqdm
 
@@ -69,6 +69,7 @@ def train(
     rng: jax.Array,
     model: nn.Module,
     optimizer: optax.GradientTransformation,
+    train_step: Callable,
     train_dataloader: Callable,
     valid_dataloader: Callable,
     train_num_steps: int = 100000,
@@ -100,13 +101,6 @@ def train(
         kwargs=kwargs if state is None else state.kwargs,
         tx=optimizer,
     )
-    train_step = vanilla_train_step
-    if isinstance(model, (NP, ANP)):
-        train_step = npf_elbo_train_step
-    elif isinstance(model, (BNP, BANP)):
-        train_step = bootstrap_train_step
-    elif isinstance(model, (TNPND,)):
-        train_step = tril_cov_train_step
     losses = []
     patience = 0
     best_state = state
@@ -141,6 +135,19 @@ def train(
             {"Train NLL": f"{train_nll:.3f}", "Valid NLL": f"{valid_nll:.3f}"}
         )
     return best_state
+
+
+def select_train_step(model, is_categorical=False):
+    if is_categorical:
+        raise NotImplementedError("Not implemented!")
+    train_step = vanilla_train_step
+    if isinstance(model, (NP, ANP)):
+        train_step = npf_elbo_train_step
+    elif isinstance(model, (BNP, BANP)):
+        train_step = bootstrap_train_step
+    elif isinstance(model, (TNPND,)):
+        train_step = tril_cov_train_step
+    return train_step
 
 
 def evaluate(

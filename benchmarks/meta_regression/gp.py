@@ -18,6 +18,7 @@ from dl4bi.meta_regression.train_utils import (
     log_2d_grid_gp_plots,
     log_posterior_predictive_plots,
     save_ckpt,
+    select_train_step,
     train,
 )
 
@@ -55,10 +56,12 @@ def main(cfg: DictConfig):
             data=cfg.data,
             kernel=cfg.kernel,
         )
+    train_step = select_train_step(model)
     state = train(
         rng_train,
         model,
         optimizer,
+        train_step,
         dataloader,
         dataloader,
         cfg.train_num_steps,

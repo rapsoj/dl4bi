@@ -1,12 +1,19 @@
-cls: LatticeSI
+cls: LatticeSIR
 kwargs: 
   beta:
     cls: Prior
     kwargs:
       dist: beta
       kwargs:
-        a: 2.0
-        b: 18.0
+        a: 5.0
+        b: 10.0
+  gamma:
+    cls: Prior
+    kwargs:
+      dist: inverse_gamma
+      kwargs:
+        a: 5.0
+        b: 0.4
   num_init:
     cls: Prior
     kwargs:

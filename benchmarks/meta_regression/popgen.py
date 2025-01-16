@@ -20,6 +20,7 @@ from dl4bi.meta_regression.train_utils import (
     instantiate,
     log_img_plots,
     save_ckpt,
+    select_train_step,
     train,
 )
 
@@ -50,6 +51,7 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)  # TODO(danj): adapt for continue training
+    train_step = select_train_step(model)
     img_cbk = Callback(partial(log_img_plots, shape=(32, 32, 1)), cfg.plot_interval)
     save_cbk = Callback(
         lambda step, rng_step, state, *_: save_ckpt(
@@ -61,6 +63,7 @@ def main(cfg: DictConfig):
         rng_train,
         model,
         optimizer,
+        train_step,
         train_dataloader,
         valid_dataloader,
         cfg.train_num_steps,

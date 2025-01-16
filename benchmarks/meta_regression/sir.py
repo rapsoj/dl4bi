@@ -21,11 +21,12 @@ from dl4bi.meta_regression.train_utils import (
     instantiate,
     log_img_plots,
     save_ckpt,
+    select_train_step,
     train,
 )
 
 
-@hydra.main("configs/si", config_name="default", version_base=None)
+@hydra.main("configs/sir", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
     wandb.init(
@@ -49,6 +50,7 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
+    train_step = select_train_step(model, is_categorical=True)
     cmap = mpl.colormaps.get_cmap("grey")
     cmap.set_bad("blue")
     norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
@@ -64,6 +66,7 @@ def main(cfg: DictConfig):
         rng_train,
         model,
         optimizer,
+        train_step,
         dataloader,
         dataloader,
         cfg.train_num_steps,
@@ -79,7 +82,7 @@ def main(cfg: DictConfig):
 
 
 def build_dataloader(data: DictConfig, priors: DictConfig):
-    """A 2D Lattice SI dataloader."""
+    """A 2D Lattice SIR dataloader."""
     si = instantiate(priors)
     dims, D_s = [dim.num for dim in data.s], len(data.s)
     Lc_min, Lc_max = data.num_ctx.min, data.num_ctx.max
