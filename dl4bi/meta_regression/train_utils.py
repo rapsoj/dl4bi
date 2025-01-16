@@ -168,7 +168,7 @@ def evaluate(
         m = valid_step(rng_step, state, batch)
         for k, v in m.items():
             metrics[k] += [v]
-    return {k: jnp.mean(v) for k, v in metrics.items()}
+    return {k: np.mean(v) for k, v in metrics.items()}
 
 
 def select_steps(model, is_categorical=False):
@@ -238,6 +238,7 @@ def vanilla_valid_step(rng: jax.Array, state: TrainState, batch: tuple, **kwargs
         valid_lens_test,
         rngs={"extra": rng},
     )
+    B, L_test, _ = s_test.shape
     mask_test = mask_from_valid_lens(L_test, valid_lens_test)
     nll = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
     rmse = jnp.sqrt(jnp.square(f_test - f_mu).mean(where=mask_test))
