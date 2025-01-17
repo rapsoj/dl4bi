@@ -61,13 +61,20 @@ def main(cfg: DictConfig):
         model,
         optimizer,
         train_step,
+        valid_step,
         train_dataloader,
         valid_dataloader,
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
     )
-    metrics = evaluate(rng_test, state, test_dataloader, cfg.valid_num_steps)
+    metrics = evaluate(
+        rng_test,
+        state,
+        valid_step,
+        test_dataloader,
+        cfg.valid_num_steps,
+    )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
