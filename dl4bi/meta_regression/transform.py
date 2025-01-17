@@ -21,6 +21,11 @@ def latent_diagonal_mvn(f_dist: jax.Array, min_std: float = 0.0):
 
 
 @jit
+def identity(f_dist: jax.Array):
+    return f_dist
+
+
+@jit
 def pointwise_multinomial(f_dist: jax.Array):
     p = softmax(f_dist, axis=-1)
     return p, p * (1 - p)

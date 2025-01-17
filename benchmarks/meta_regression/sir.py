@@ -26,6 +26,7 @@ from dl4bi.meta_regression.train_utils import (
 )
 
 
+# TODO(danj): configure plotting cmap
 @hydra.main("configs/sir", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
@@ -55,7 +56,7 @@ def main(cfg: DictConfig):
     cmap.set_bad("blue")
     norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
     dims = [dim.num for dim in cfg.data.s]
-    cbk = partial(
+    clbk = partial(
         log_img_plots,
         shape=(*dims, 1),
         num_plots=cfg.data.batch_size,
@@ -73,7 +74,7 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        callbacks=[Callback(cbk, cfg.plot_interval)],
+        # callbacks=[Callback(clbk, cfg.plot_interval)],
     )
     metrics = evaluate(
         rng_test,
@@ -107,12 +108,13 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
                 i -= 1
                 step = steps[i]
             steps = steps[:i]  # remove steps that consist of all infected
+            steps = jax.nn.one_hot(steps + 1, 3)  # convert [-1, 0, 1] -> one hot
             N_sim = steps.shape[0]
             permute_idx = random.choice(rng_permute, N_sim, (N_sim,), replace=False)
             steps = steps[permute_idx]
             rng_permute, rng = random.split(rng)
             for i in range(N_sim // B):
-                steps_i = steps[i * B : (i + 1) * B].reshape(B, L, 1)
+                steps_i = steps[i * B : (i + 1) * B].reshape(B, L, 3)
                 permute_idx = random.choice(rng_permute, L, (L,), replace=False)
                 inv_permute_idx = jnp.argsort(permute_idx)
                 valid_lens_ctx = random.randint(rng_valid, (B,), Lc_min, Lc_max)

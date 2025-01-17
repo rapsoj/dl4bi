@@ -22,6 +22,7 @@ from jax import jit, random, vmap
 from jax.scipy.special import logsumexp
 from jax.scipy.stats import norm
 from omegaconf import DictConfig, OmegaConf
+from optax.losses import safe_softmax_cross_entropy
 from orbax.checkpoint import PyTreeCheckpointer
 from sps.gp import GP
 from sps.kernels import (
@@ -50,6 +51,7 @@ from .np import NP
 from .tnp_d import TNPD
 from .tnp_kr import TNPKR, ScanTNPKR
 from .tnp_nd import TNPND
+from .transform import *
 
 
 @flax.struct.dataclass
@@ -172,15 +174,93 @@ def evaluate(
 
 
 def select_steps(model, is_categorical=False):
-    if is_categorical:
-        raise NotImplementedError("Not implemented!")
     if isinstance(model, (NP, ANP)):
+        if is_categorical:
+            raise NotImplementedError("Not implemented!")
         return npf_elbo_train_step, vanilla_valid_step
     elif isinstance(model, (BNP, BANP)):
+        if is_categorical:
+            raise NotImplementedError("Not implemented!")
         return bootstrap_train_step, bootstrap_valid_step
     elif isinstance(model, (TNPND,)):
+        if is_categorical:
+            raise NotImplementedError("Not implemented!")
         return tril_cov_train_step, tril_cov_valid_step
+    if is_categorical:
+        return vanilla_categorical_train_step, vanilla_categorical_valid_step
     return vanilla_train_step, vanilla_valid_step
+
+
+@jit
+def vanilla_categorical_train_step(
+    rng: jax.Array, state: TrainState, batch: tuple, **kwargs
+):
+    """Training step for meta-learning a pointwise categorical distribution.
+
+    Args:
+        rng: A PRNG key.
+        state: The current training state.
+        batch: Batch of data.
+
+    Returns:
+        `TrainState` with updated parameters.
+    """
+    rng_dropout, rng_extra = random.split(rng)
+
+    def loss_fn(params):
+        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
+        (B, L_test, _) = s_test.shape
+        if valid_lens_test is None:
+            valid_lens_test = jnp.repeat(L_test, B)
+        mask_test = mask_from_valid_lens(L_test, valid_lens_test).squeeze()
+        logits = state.apply_fn(
+            {"params": params, **state.kwargs},
+            s_ctx,
+            f_ctx,
+            s_test,
+            valid_lens_ctx,
+            valid_lens_test,
+            training=True,
+            rngs={"dropout": rng_dropout, "extra": rng_extra},
+        )
+        return safe_softmax_cross_entropy(logits, f_test).mean(where=mask_test)
+
+    nll, grads = jax.value_and_grad(loss_fn)(state.params)
+    return state.apply_gradients(grads=grads), nll
+
+
+@jit
+def vanilla_categorical_valid_step(
+    rng: jax.Array, state: TrainState, batch: tuple, **kwargs
+):
+    """Validation step for meta-learning a pointwise categorical distribution.
+
+    Args:
+        rng: A PRNG key.
+        state: The current training state.
+        batch: Batch of data.
+
+    Returns:
+        Loss metrics.
+    """
+    rng_dropout, rng_extra = random.split(rng)
+    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
+    (B, L_test, _) = s_test.shape
+    if valid_lens_test is None:
+        valid_lens_test = jnp.repeat(L_test, B)
+    mask_test = mask_from_valid_lens(L_test, valid_lens_test)
+    logits = state.apply_fn(
+        {"params": state.params, **state.kwargs},
+        s_ctx,
+        f_ctx,
+        s_test,
+        valid_lens_ctx,
+        valid_lens_test,
+        training=True,
+        rngs={"dropout": rng_dropout, "extra": rng_extra},
+    )
+    nll = safe_softmax_cross_entropy(logits, f_test).mean(where=mask_test)
+    return {"NLL": nll}
 
 
 @jit
