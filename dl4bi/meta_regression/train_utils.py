@@ -248,7 +248,7 @@ def vanilla_categorical_valid_step(
     (B, L_test, _) = s_test.shape
     if valid_lens_test is None:
         valid_lens_test = jnp.repeat(L_test, B)
-    mask_test = mask_from_valid_lens(L_test, valid_lens_test)
+    mask_test = mask_from_valid_lens(L_test, valid_lens_test).squeeze()
     logits = state.apply_fn(
         {"params": state.params, **state.kwargs},
         s_ctx,

@@ -93,11 +93,11 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
     """A 2D Lattice SIR dataloader."""
     si = instantiate(priors)
     dims, D_s = [dim.num for dim in data.s], len(data.s)
-    Lc_min, Lc_max = data.num_ctx.min, data.num_ctx.max
+    Lc_min, Lc_max, Lt = data.num_ctx.min, data.num_ctx.max, data.num_test
     L, B, N = math.prod(dims), data.batch_size, data.num_steps
     s_grid = build_grid(data.s).reshape(-1, D_s)  # flatten spatial dims
     s = jnp.repeat(s_grid[None, ...], B, axis=0)
-    valid_lens_test = jnp.repeat(L - Lc_max, B)
+    valid_lens_test = jnp.repeat(Lt, B)
 
     def dataloader(rng: jax.Array):
         while True:
@@ -124,8 +124,8 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
                     s_perm[:, :Lc_max, :],
                     f_perm[:, :Lc_max, :],
                     valid_lens_ctx,
-                    s_perm[:, Lc_max:, :],
-                    f_perm[:, Lc_max:, :],
+                    s_perm[:, Lc_max : Lc_max + Lt, :],
+                    f_perm[:, Lc_max : Lc_max + Lt, :],
                     valid_lens_test,
                     s,  # add full originals for use in callbacks, e.g. log_plots
                     steps_i,
