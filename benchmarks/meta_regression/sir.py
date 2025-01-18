@@ -122,8 +122,8 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
                     s_perm[:, :Lc_max, :],
                     f_perm[:, :Lc_max, :],
                     valid_lens_ctx,
-                    s_perm[:, Lc_max : Lc_max + Lt, :],
-                    f_perm[:, Lc_max : Lc_max + Lt, :],
+                    s_perm[:, :Lt, :],
+                    f_perm[:, :Lt, :],
                     valid_lens_test,
                     s,  # add full originals for use in callbacks, e.g. log_plots
                     steps_i,
