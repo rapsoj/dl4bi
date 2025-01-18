@@ -88,7 +88,7 @@ def main(cfg: DictConfig):
 
 def build_dataloader(data: DictConfig, priors: DictConfig):
     """A 2D Lattice SIR dataloader."""
-    si = instantiate(priors)
+    sir = instantiate(priors)
     dims, D_s = [dim.num for dim in data.s], len(data.s)
     Lc_min, Lc_max, Lt = data.num_ctx.min, data.num_ctx.max, data.num_test
     L, B, N = math.prod(dims), data.batch_size, data.num_steps
@@ -98,21 +98,16 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
 
     def dataloader(rng: jax.Array):
         while True:
-            rng_si, rng_eps, rng_valid, rng_permute, rng = random.split(rng, 5)
-            steps, *_ = si.simulate(rng_si, dims, N)  # f: [N, *dims]
-            i, step = -1, steps[-1]
-            while (step == 1.0).all():
-                i -= 1
-                step = steps[i]
-            steps = steps[:i]  # remove steps that consist of all infected
-            # convert RSI categories to GBR (RGB) one-hot color vectors
+            rng_si, rng_eps, rng_valid, rng_permute_steps, rng = random.split(rng, 5)
+            steps, *_ = sir.simulate(rng_si, dims, N)  # f: [N, *dims]
+            # convert RSI categories to GBR (RGB) one-hot color vectors;
+            # serves dual purpose of one-hot encoding and easier plotting
             steps = rsi_to_rgb(steps)
-            N_sim = steps.shape[0]
-            permute_idx = random.choice(rng_permute, N_sim, (N_sim,), replace=False)
-            steps = steps[permute_idx]
-            rng_permute, rng = random.split(rng)
-            for i in range(N_sim // B):
+            permute_steps_idx = random.choice(rng_permute_steps, N, (N,), replace=False)
+            steps = steps[permute_steps_idx]
+            for i in range(N // B):
                 steps_i = steps[i * B : (i + 1) * B].reshape(B, L, 3)
+                rng_permute, rng = random.split(rng)
                 permute_idx = random.choice(rng_permute, L, (L,), replace=False)
                 inv_permute_idx = jnp.argsort(permute_idx)
                 valid_lens_ctx = random.randint(rng_valid, (B,), Lc_min, Lc_max)
