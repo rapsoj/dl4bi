@@ -6,10 +6,10 @@ from pathlib import Path
 import hydra
 import jax
 import jax.numpy as jnp
-import matplotlib as mpl
+import matplotlib.pyplot as plt
 import optax
 import wandb
-from jax import random
+from jax import jit, random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
@@ -53,14 +53,12 @@ def main(cfg: DictConfig):
     )
     model = instantiate(cfg.model)
     train_step, valid_step = select_steps(model, is_categorical=True)
-    cmap = mpl.colormaps.get_cmap("Spectral_r")
-    cmap.set_bad("grey")
     dims = [dim.num for dim in cfg.data.s]
     clbk = partial(
         log_img_plots,
         shape=(*dims, 3),
-        num_plots=16,
-        cmap=cmap,
+        num_plots=cfg.data.batch_size,
+        remap_colors=remap_colors,
         transform_model_output=pointwise_multinomial,
     )
     state = train(
@@ -108,7 +106,8 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
                 i -= 1
                 step = steps[i]
             steps = steps[:i]  # remove steps that consist of all infected
-            steps = jax.nn.one_hot(steps + 1, 3)  # convert [-1, 0, 1] -> one hot
+            # convert RSI categories to GBR (RGB) one-hot color vectors
+            steps = rsi_to_rgb(steps)
             N_sim = steps.shape[0]
             permute_idx = random.choice(rng_permute, N_sim, (N_sim,), replace=False)
             steps = steps[permute_idx]
@@ -133,6 +132,31 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
                 )
 
     return dataloader
+
+
+@jit
+def rsi_to_rgb(steps: jax.Array):
+    steps += 1  # [-1, 0, 1] -> [0, 1, 2]
+    # 0 (recovered) => 1 (green)
+    # 1 (susceptible) => 2 (blue)
+    # 2 (infected) => 0 (red)
+    mapping = jnp.array([1, 2, 0])
+    rgb_cat = mapping[jnp.int32(steps)]
+    # convert RGB categories to one-hot vectors
+    return jax.nn.one_hot(rgb_cat, 3)
+
+
+@jit
+def remap_colors(x: jax.Array):
+    # colors from https://davidmathlogic.com/colorblind
+    mapping = [
+        [216 / 255, 27 / 255, 96 / 255],  # new red
+        [0 / 255, 77 / 255, 64 / 255],  # new green
+        [30 / 255, 136 / 255, 229 / 255],  # new blue
+    ]
+    mapping = jnp.array(mapping).sum(axis=0)
+    mapping /= jnp.max(mapping)  # to ensure values are in [0, 1]
+    return x * mapping
 
 
 if __name__ == "__main__":

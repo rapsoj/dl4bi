@@ -996,6 +996,7 @@ def log_img_plots(
     cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
     norm=None,
     norm_std=None,
+    remap_colors: Callable = lambda x: x,
     transform_model_output: Callable = lambda x: x,
 ):
     """Logs `num_plots` from the given batch."""
@@ -1049,12 +1050,19 @@ def log_img_plots(
             cmap_std=cmap_std,
             norm=norm,
             norm_std=norm_std,
+            remap_colors=remap_colors,
         )
         paths += [f"/tmp/{datetime.now().isoformat()} - sample {i}.png"]
         fig.savefig(paths[-1], dpi=125)
         plt.clf()
         plt.close(fig)
     wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
+
+
+def regression_to_rgb(output: tuple):
+    f_mu, f_std, *_ = output
+    f_mu_rgb = jnp.clip(f_mu / 2 + 0.5, 0, 1)  # [-1, 1] => [0, 1]
+    return f_mu_rgb, f_std
 
 
 def plot_img(
@@ -1070,15 +1078,22 @@ def plot_img(
     cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
     norm=None,
     norm_std=None,
+    remap_colors: Callable = lambda x: x,
 ):
     """Plots a triptych of [task, uncertainty, pred, truth]."""
     task = f_ctx_to_img_task(shape, f_ctx, inv_permute_idx)
-    task_pred = f_to_img_task(shape, f_mu)
-    task_std = f_std_to_img_task(shape, f_std)
-    task_true = f_to_img_task(shape, f_test)
+    task_pred = f_mu.reshape(shape).squeeze()  # [H, W] or [H, W, D]
+    task_true = f_test.reshape(shape).squeeze()
+    task_std = f_std.reshape(shape).squeeze()
+    if shape[-1] > 1:
+        task_std = task_std.mean(axis=-1)
     if axs is None:
         _, axs = plt.subplots(1, 4, figsize=(20, 5))
-    # NOTE: cmap is ignored when images has RGB channels
+    # NOTE: cmap and norm are ignored when images have RGB channels;
+    # transform_rgb is a hack to get around this
+    task = remap_colors(task)
+    task_pred = remap_colors(task_pred)
+    task_true = remap_colors(task_true)
     axs[0].set_title("Task")
     axs[0].imshow(task, cmap=cmap, norm=norm, interpolation="none")
     axs[1].set_title("Uncertainty")
@@ -1099,30 +1114,9 @@ def f_ctx_to_img_task(
     H, W, D = shape
     L, L_ctx = H * W, f_ctx.shape[0]
     task = jnp.pad(f_ctx, ((0, L - L_ctx), (0, 0)))  # [L_ctx, 1] -> [L, 1]
-    if D == 1:  # single channel color
-        task = task.at[L_ctx:, 0].set(jnp.nan)  # will use cmap "bad" color
-    else:  # RGB
-        task = task / 2 + 0.5  # [-1, 1] -> [0, 1]
-        task = task.at[L_ctx:, :].set(jnp.array([0, 0, 1]))  # set to RGB blue
+    task = task.at[L_ctx:, :].set(jnp.nan)  # will use cmap "bad" color
     task = task[inv_permute_idx, :]  # permute back to original ordering
-    return task.reshape(shape).squeeze()  # [H, W] or # [H, W, RGB=3]
-
-
-def f_to_img_task(shape: tuple[int, int, int], f: jax.Array):
-    D = shape[-1]
-    task = f.reshape(shape).squeeze()  # [H, W] or [H, W, RGB=3]
-    if D > 1:
-        task = task / 2 + 0.5  # [-1, 1] -> [0, 1]
-        task = jnp.clip(task, 0, 1)  # avoid matplotlib warnings
-    return task
-
-
-def f_std_to_img_task(shape: tuple[int, int, int], f_std: jax.Array):
-    D = shape[-1]
-    task = f_std.reshape(shape).squeeze()  # [H, W] or [H, W, RGB=3]
-    if D > 1:
-        task = task.mean(axis=-1)
-    return task
+    return task.reshape(shape).squeeze()  # [H, W] or # [H, W, D]
 
 
 def log_wandb_line(vec: jax.Array, title: str):

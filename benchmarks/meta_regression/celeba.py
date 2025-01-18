@@ -8,6 +8,7 @@ from urllib import request
 import hydra
 import jax
 import jax.numpy as jnp
+import matplotlib as mpl
 import numpy as np
 import optax
 import pandas as pd
@@ -25,6 +26,7 @@ from dl4bi.meta_regression.train_utils import (
     evaluate,
     instantiate,
     log_img_plots,
+    regression_to_rgb,
     save_ckpt,
     select_steps,
     train,
@@ -56,6 +58,14 @@ def main(cfg: DictConfig):
     )
     model = instantiate(cfg.model)
     train_step, valid_step = select_steps(model)
+    cmap = mpl.colormaps.get_cmap("grey")
+    cmap.set_bad("blue")
+    clbk = partial(
+        log_img_plots,
+        shape=(32, 32, 3),
+        cmap=cmap,
+        transform_model_output=regression_to_rgb,
+    )
     state = train(
         rng_train,
         model,
@@ -67,9 +77,7 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        callbacks=[
-            Callback(partial(log_img_plots, shape=(32, 32, 3)), cfg.plot_interval)
-        ],
+        callbacks=[Callback(clbk, cfg.plot_interval)],
     )
     metrics = evaluate(
         rng_test,
