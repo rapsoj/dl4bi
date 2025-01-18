@@ -6,7 +6,6 @@ from pathlib import Path
 import hydra
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import optax
 import wandb
 from jax import jit, random
@@ -148,15 +147,10 @@ def rsi_to_rgb(steps: jax.Array):
 
 @jit
 def remap_colors(x: jax.Array):
-    # colors from https://davidmathlogic.com/colorblind
-    mapping = [
-        [216 / 255, 27 / 255, 96 / 255],  # new red
-        [0 / 255, 77 / 255, 64 / 255],  # new green
-        [30 / 255, 136 / 255, 229 / 255],  # new blue
-    ]
-    mapping = jnp.array(mapping).sum(axis=0)
-    mapping /= jnp.max(mapping)  # to ensure values are in [0, 1]
-    return x * mapping
+    # palette from https://davidmathlogic.com/colorblind
+    C = jnp.array([[216, 27, 96], [0, 77, 64], [30, 136, 229]]) / 255.0
+    C = C[None, None, ...]
+    return (C * x[..., None]).sum(axis=-2)
 
 
 if __name__ == "__main__":

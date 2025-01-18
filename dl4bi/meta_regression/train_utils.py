@@ -1089,8 +1089,8 @@ def plot_img(
         task_std = task_std.mean(axis=-1)
     if axs is None:
         _, axs = plt.subplots(1, 4, figsize=(20, 5))
-    # NOTE: cmap and norm are ignored when images have RGB channels;
-    # transform_rgb is a hack to get around this
+    # NOTE: cmap and norm are ignored when the data has 3 channels, which it
+    # assumes are RGB values; transform_rgb is a hack to get around this
     task = remap_colors(task)
     task_pred = remap_colors(task_pred)
     task_true = remap_colors(task_true)
