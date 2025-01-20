@@ -8,7 +8,6 @@ from urllib import request
 import hydra
 import jax
 import jax.numpy as jnp
-import matplotlib as mpl
 import numpy as np
 import optax
 import pandas as pd
@@ -58,12 +57,9 @@ def main(cfg: DictConfig):
     )
     model = instantiate(cfg.model)
     train_step, valid_step = select_steps(model)
-    cmap = mpl.colormaps.get_cmap("grey")
-    cmap.set_bad("blue")
     clbk = partial(
         log_img_plots,
         shape=(32, 32, 3),
-        cmap=cmap,
         transform_model_output=regression_to_rgb,
     )
     state = train(

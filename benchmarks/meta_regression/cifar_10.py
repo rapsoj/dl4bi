@@ -56,7 +56,6 @@ def main(cfg: DictConfig):
     clbk = partial(
         log_img_plots,
         shape=(32, 32, 3),
-        cmap=cmap,
         transform_model_output=regression_to_rgb,
     )
     state = train(
