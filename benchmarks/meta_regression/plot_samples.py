@@ -17,6 +17,7 @@ from dl4bi.meta_regression.train_utils import (
     load_ckpts,
     plot_img,
     plot_posterior_predictive,
+    regression_to_rgb,
 )
 
 
@@ -36,7 +37,6 @@ def main(cfg: DictConfig):
             return plot_1d_gp_samples(cfg, ckpts, num_ctx, num_samples, results_dir)
         return plot_2d_img_samples(cfg, ckpts, num_ctx, num_samples, results_dir)
     elif img_tasks.match(cfg.project):
-        print("IMG!")
         results_dir /= f"{cfg.seed}"
         ckpts = load_ckpts(results_dir, only_regex, exclude_regex)
         return plot_2d_img_samples(cfg, ckpts, num_ctx, num_samples, results_dir)
@@ -107,7 +107,7 @@ def plot_2d_img_samples(
     num_samples: int = 16,
     results_dir: Path = Path("."),
 ):
-    build_dataloaders, shape, cmap, cmap_std = project_parameters(cfg)
+    build_dataloaders, shape, cmap, cmap_std, remap_colors = project_parameters(cfg)
     H, W, C = shape
     if build_dataloaders == build_2d_grid_gp_dataloader:
         cfg.data.update({"batch_size": 1, "num_ctx": {"max": num_ctx, "min": num_ctx}})
@@ -171,6 +171,7 @@ def plot_2d_img_samples(
                 cmap=cmap,
                 cmap_std=cmap_std,
                 norm_std=norm_std,
+                remap_colors=remap_colors,
             )
             # NOTE: unset titles by row, unless its the first row
             for col_idx in range(num_cols):
@@ -193,6 +194,7 @@ def project_parameters(cfg: DictConfig):
     shape = (32, 32, 3)
     # example project names include "TNP-KR - MNIST", "MNIST", etc, so match
     matches = lambda pattern: re.match(pattern, cfg.project, re.IGNORECASE)
+    remap_colors = lambda x: x
     match cfg.project:
         case _ if matches(".*Gaussian Processes.*"):
             build_dataloaders = build_2d_grid_gp_dataloader
@@ -206,11 +208,13 @@ def project_parameters(cfg: DictConfig):
             cmap.set_bad("blue")
         case _ if matches(".*CelebA.*"):
             build_dataloaders = build_dataloaders_celeba
+            remap_colors = regression_to_rgb
         case _ if matches(".*Cifar.*"):
             build_dataloaders = build_dataloaders_cifar_10
+            remap_colors = regression_to_rgb
         case _:
             raise Exception(f"No dataloader defined for {cfg.project}!")
-    return build_dataloaders, shape, cmap, cmap_std
+    return build_dataloaders, shape, cmap, cmap_std, remap_colors
 
 
 if __name__ == "__main__":

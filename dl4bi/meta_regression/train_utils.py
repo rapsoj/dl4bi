@@ -1059,10 +1059,8 @@ def log_img_plots(
     wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
 
 
-def regression_to_rgb(output: tuple):
-    f_mu, f_std, *_ = output
-    f_mu_rgb = jnp.clip(f_mu / 2 + 0.5, 0, 1)  # [-1, 1] => [0, 1]
-    return f_mu_rgb, f_std
+def regression_to_rgb(f: jax.Array):
+    return jnp.clip(f / 2 + 0.5, 0, 1)  # [-1, 1] => [0, 1]
 
 
 def plot_img(
