@@ -2,6 +2,7 @@
 import math
 from functools import partial
 from pathlib import Path
+from time import time
 
 import hydra
 import jax
@@ -18,6 +19,7 @@ from dl4bi.meta_regression.train_utils import (
     cosine_annealing_lr,
     evaluate,
     instantiate,
+    load_ckpt,
     log_img_plots,
     save_ckpt,
     select_steps,
@@ -25,8 +27,16 @@ from dl4bi.meta_regression.train_utils import (
 )
 from dl4bi.meta_regression.transform import pointwise_multinomial
 
+# Example command to evaluate only:
+# python sir.py \
+#   model=icml/tnp_kr_scan \
+#   data=128x128 \
+#   data.batch_size=1 \
+#   valid_num_steps=1 \
+#   wandb=False \
+#   +evaluate=True
 
-# TODO(danj): configure plotting cmap
+
 @hydra.main("configs/sir", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
@@ -37,6 +47,7 @@ def main(cfg: DictConfig):
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
     )
+    path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
@@ -52,6 +63,21 @@ def main(cfg: DictConfig):
     )
     model = instantiate(cfg.model)
     train_step, valid_step = select_steps(model, is_categorical=True)
+    if cfg.evaluate:
+        state, _ = load_ckpt(path.with_suffix(".ckpt"))
+        # run once to compile
+        evaluate(rng_test, state, valid_step, dataloader, cfg.valid_num_steps)
+        start = time()
+        metrics = evaluate(
+            rng_test,
+            state,
+            valid_step,
+            dataloader,
+            cfg.valid_num_steps,
+        )
+        end = time()
+        metrics["time_elapsed_s"] = end - start
+        return print(metrics)
     dims = [dim.num for dim in cfg.data.s]
     clbk = partial(
         log_img_plots,
@@ -81,7 +107,6 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
