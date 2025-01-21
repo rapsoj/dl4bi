@@ -66,7 +66,7 @@ def main(cfg: DictConfig):
     if cfg.evaluate_only:
         state, _ = load_ckpt(path.with_suffix(".ckpt"))
         # run once to compile
-        evaluate(rng_test, state, valid_step, dataloader, cfg.valid_num_steps)
+        evaluate(rng_test, state, valid_step, dataloader, num_steps=1)
         start = time()
         metrics = evaluate(
             rng_test,
