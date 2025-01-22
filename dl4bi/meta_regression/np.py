@@ -52,8 +52,8 @@ class NP(nn.Module):
         rng_z, z_shape = self.make_rng("extra"), (self.n_z, *z_mu_ctx.shape)
         z = z_mu_ctx + z_std_ctx * random.normal(rng_z, z_shape)  # [n_z, B, d_z]
         z = z.swapaxes(0, 1)  # [B, n_z, d_z]
-        f_mu, f_std = self.decode(r, z, s_test, training)  # [B, L_test, d_f]
-        return f_mu, f_std, z_mu_ctx, z_std_ctx
+        output = self.decode(r, z, s_test, training)  # [B, L_test, d_f]
+        return output, (z_mu_ctx, z_std_ctx)
 
     def encode_deterministic(
         self,

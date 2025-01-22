@@ -4,6 +4,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Optional, Union
 
@@ -174,100 +175,27 @@ def evaluate(
 
 
 def select_steps(model, is_categorical=False):
+    train_step, valid_step = vanilla_train_step, vanilla_valid_step
     if isinstance(model, (NP, ANP)):
-        if is_categorical:
-            raise NotImplementedError("Not implemented!")
-        return npf_elbo_train_step, vanilla_valid_step
+        train_step = npf_elbo_train_step
     elif isinstance(model, (BNP, BANP)):
-        if is_categorical:
-            raise NotImplementedError("Not implemented!")
-        return bootstrap_train_step, bootstrap_valid_step
+        train_step, valid_step = bootstrap_train_step, bootstrap_valid_step
     elif isinstance(model, (TNPND,)):
         if is_categorical:
             raise NotImplementedError("Not implemented!")
-        return tril_cov_train_step, tril_cov_valid_step
+        train_step, valid_step = tril_cov_train_step, tril_cov_valid_step
     if is_categorical:
-        return vanilla_categorical_train_step, vanilla_categorical_valid_step
-    return vanilla_train_step, vanilla_valid_step
+        train_step = partial(train_step, is_categorical=True)
+        valid_step = partial(valid_step, is_categorical=True)
+    return train_step, valid_step
 
 
-@jit
-def vanilla_categorical_train_step(
-    rng: jax.Array, state: TrainState, batch: tuple, **kwargs
-):
-    """Training step for meta-learning a pointwise categorical distribution.
-
-    Args:
-        rng: A PRNG key.
-        state: The current training state.
-        batch: Batch of data.
-
-    Returns:
-        `TrainState` with updated parameters.
-    """
-    rng_dropout, rng_extra = random.split(rng)
-
-    def loss_fn(params):
-        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
-        (B, L_test, _) = s_test.shape
-        if valid_lens_test is None:
-            valid_lens_test = jnp.repeat(L_test, B)
-        mask_test = mask_from_valid_lens(L_test, valid_lens_test).squeeze()
-        logits = state.apply_fn(
-            {"params": params, **state.kwargs},
-            s_ctx,
-            f_ctx,
-            s_test,
-            valid_lens_ctx,
-            valid_lens_test,
-            training=True,
-            rngs={"dropout": rng_dropout, "extra": rng_extra},
-        )
-        return safe_softmax_cross_entropy(logits, f_test).mean(where=mask_test)
-
-    nll, grads = jax.value_and_grad(loss_fn)(state.params)
-    return state.apply_gradients(grads=grads), nll
-
-
-@jit
-def vanilla_categorical_valid_step(
-    rng: jax.Array, state: TrainState, batch: tuple, **kwargs
-):
-    """Validation step for meta-learning a pointwise categorical distribution.
-
-    Args:
-        rng: A PRNG key.
-        state: The current training state.
-        batch: Batch of data.
-
-    Returns:
-        Loss metrics.
-    """
-    rng_dropout, rng_extra = random.split(rng)
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
-    (B, L_test, _) = s_test.shape
-    if valid_lens_test is None:
-        valid_lens_test = jnp.repeat(L_test, B)
-    mask_test = mask_from_valid_lens(L_test, valid_lens_test).squeeze()
-    logits = state.apply_fn(
-        {"params": state.params, **state.kwargs},
-        s_ctx,
-        f_ctx,
-        s_test,
-        valid_lens_ctx,
-        valid_lens_test,
-        training=True,
-        rngs={"dropout": rng_dropout, "extra": rng_extra},
-    )
-    nll = safe_softmax_cross_entropy(logits, f_test).mean(where=mask_test)
-    return {"NLL": nll}
-
-
-@jit
+@partial(jit, static_argnames=("is_categorical",))
 def vanilla_train_step(
     rng: jax.Array,
     state: TrainState,
     batch: tuple,
+    is_categorical: bool = False,
     **kwargs,
 ):
     """Training step for meta regression with diagonal covariances.
@@ -288,7 +216,7 @@ def vanilla_train_step(
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(L_test, B)
         mask_test = mask_from_valid_lens(L_test, valid_lens_test)
-        f_mu, f_std = state.apply_fn(
+        output = state.apply_fn(
             {"params": params, **state.kwargs},
             s_ctx,
             f_ctx,
@@ -298,18 +226,27 @@ def vanilla_train_step(
             training=True,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
         )
+        if is_categorical:
+            return safe_softmax_cross_entropy(output, f_test).mean(where=mask_test)
+        f_mu, f_std = output
         return -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
 
     nll, grads = jax.value_and_grad(loss_fn)(state.params)
     return state.apply_gradients(grads=grads), nll
 
 
-@jit
-def vanilla_valid_step(rng: jax.Array, state: TrainState, batch: tuple, **kwargs):
+@partial(jit, static_argnames=("is_categorical",))
+def vanilla_valid_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: tuple,
+    is_categorical: bool = False,
+    **kwargs,
+):
     hdi_prob = kwargs.get("hdi_prob", 0.95)
     z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
-    f_mu, f_std, *_ = jit(state.apply_fn)(
+    output, *_ = jit(state.apply_fn)(
         {"params": state.params, **state.kwargs},
         s_ctx,
         f_ctx,
@@ -319,7 +256,13 @@ def vanilla_valid_step(rng: jax.Array, state: TrainState, batch: tuple, **kwargs
         rngs={"extra": rng},
     )
     B, L_test, _ = s_test.shape
+    if valid_lens_test is None:
+        valid_lens_test = jnp.repeat(L_test, B)
     mask_test = mask_from_valid_lens(L_test, valid_lens_test)
+    if is_categorical:
+        nll = safe_softmax_cross_entropy(output, f_test).mean(where=mask_test)
+        return {"NLL": nll}
+    f_mu, f_std = output
     nll = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
     rmse = jnp.sqrt(jnp.square(f_test - f_mu).mean(where=mask_test))
     mae = jnp.abs(f_test - f_mu).mean(where=mask_test)
@@ -328,11 +271,80 @@ def vanilla_valid_step(rng: jax.Array, state: TrainState, batch: tuple, **kwargs
     return {"NLL": nll, "RMSE": rmse, "MAE": mae, "Coverage": cvg}
 
 
-@jit
+@partial(jit, static_argnames=("is_categorical",))
+def npf_elbo_train_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: tuple,
+    is_categorical: bool = False,
+    **kwargs,
+):
+    """Training step for meta regression with latents and diagonal covariances.
+
+    Args:
+        rng: A PRNG key.
+        state: The current training state.
+        batch: Batch of data.
+
+    Returns:
+        `TrainState` with updated parameters.
+    """
+    rng_dropout, rng_extra = random.split(rng)
+
+    def loss_fn(params):
+        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
+        (B, L_test, _) = s_test.shape
+        if valid_lens_test is None:
+            valid_lens_test = jnp.repeat(L_test, B)
+        mask_test = mask_from_valid_lens(L_test, valid_lens_test)
+        output, (z_mu_ctx, z_std_ctx) = state.apply_fn(
+            {"params": params, **state.kwargs},
+            s_ctx,
+            f_ctx,
+            s_test,
+            valid_lens_ctx,
+            valid_lens_test,
+            training=True,
+            rngs={"dropout": rng_dropout, "extra": rng_extra},
+        )
+        # used by NP family only during training for KL-div loss term
+        _, (z_mu_test, z_std_test) = state.apply_fn(
+            {"params": params, **state.kwargs},
+            s_test,
+            f_test,
+            s_test,
+            valid_lens_test,
+            valid_lens_test,
+            training=True,
+            rngs={"dropout": rng_dropout, "extra": rng_extra},
+        )
+        # KL divergence and NLL assume diagonal covariance, i.e. pointwise.
+        # Wikipedia's formulas for MVN KL-div: https://tinyurl.com/wiki-kl-div
+        # Tensorflow's diagonal MVN KL-div impl (used here): https://tinyurl.com/diag-kl-div
+        # KL( z_dist_test (p) || z_dist_ctx (q) ) =
+        diff_log_scale = jnp.log(z_std_test) - jnp.log(z_std_ctx)
+        kl_div = (
+            0.5 * ((z_mu_test - z_mu_ctx) / z_std_ctx) ** 2
+            + 0.5 * jnp.expm1(2 * diff_log_scale)
+            - diff_log_scale
+        ).sum(axis=-1) / valid_lens_test  # [B] <- avg KL per valid test loc
+        if is_categorical:
+            nll = safe_softmax_cross_entropy(output, f_test).mean(where=mask_test)
+        else:
+            f_mu, f_std = output
+            nll = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
+        return nll + kl_div.mean()
+
+    elbo, grads = jax.value_and_grad(loss_fn)(state.params)
+    return state.apply_gradients(grads=grads), elbo
+
+
+@partial(jit, static_argnames=("is_categorical",))
 def bootstrap_train_step(
     rng: jax.Array,
     state: TrainState,
     batch: tuple,
+    is_categorical: bool = False,
     **kwargs,
 ):
     """Training step for meta regression with diagonal covariances.
@@ -353,7 +365,7 @@ def bootstrap_train_step(
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(L_test, B)
         mask_test = mask_from_valid_lens(L_test, valid_lens_test)
-        f_mu_boot, f_std_boot, f_mu, f_std = state.apply_fn(
+        output_boot, output = state.apply_fn(
             {"params": params, **state.kwargs},
             s_ctx,
             f_ctx,
@@ -363,7 +375,17 @@ def bootstrap_train_step(
             training=True,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
         )
-        K = f_mu_boot.shape[0] // f_mu.shape[0]
+        if is_categorical:
+            K = output_boot.shape[0] // B
+            f_test_boot = jnp.repeat(f_test, K, axis=0)
+            nll_boot = safe_softmax_cross_entropy(output_boot, f_test_boot)
+            nll_boot = logsumexp(nll_boot.reshape(B, K, L_test, -1)) - jnp.log(K)
+            nll_boot = nll_boot.mean(where=mask_test)
+            nll = safe_softmax_cross_entropy(output, f_test).mean(where=mask_test)
+            # take average so it is on the scale as other train_step losses
+            return (nll_boot + nll) / 2
+        (f_mu_boot, f_std_boot), (f_mu, f_std) = output_boot, output
+        K = f_mu_boot.shape[0] // B
         f_test_boot = jnp.repeat(f_test, K, axis=0)
         ll_boot = norm.logpdf(f_test_boot, f_mu_boot, f_std_boot)
         # log of likelihood averaged over K bootstrapped samples
@@ -377,12 +399,20 @@ def bootstrap_train_step(
     return state.apply_gradients(grads=grads), nll
 
 
-@jit
-def bootstrap_valid_step(rng: jax.Array, state: TrainState, batch: tuple, **kwargs):
+@partial(jit, static_argnames=("is_categorical",))
+def bootstrap_valid_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: tuple,
+    is_categorical: bool = False,
+    **kwargs,
+):
     hdi_prob = kwargs.get("hdi_prob", 0.95)
     z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
-    f_mu, f_std, *_ = jit(state.apply_fn)(
+    # at prediction time, bootstrapped output is used
+    # at training time, standard output is also used
+    output_boot, *_ = jit(state.apply_fn)(
         {"params": state.params, **state.kwargs},
         s_ctx,
         f_ctx,
@@ -392,25 +422,36 @@ def bootstrap_valid_step(rng: jax.Array, state: TrainState, batch: tuple, **kwar
         rngs={"extra": rng},
     )
     B, L_test, _ = s_test.shape
-    K = f_mu.shape[0] // f_ctx.shape[0]
+    if valid_lens_test is None:
+        valid_lens_test = jnp.repeat(L_test, B)
+    mask_test = mask_from_valid_lens(L_test, valid_lens_test)
+    if is_categorical:
+        K = output_boot.shape[0] // B
+        f_test_boot = jnp.repeat(f_test, K, axis=0)
+        nll_boot = safe_softmax_cross_entropy(output_boot, f_test_boot)
+        nll_boot = logsumexp(nll_boot.reshape(B, K, L_test, -1)) - jnp.log(K)
+        nll_boot = nll_boot.mean(where=mask_test)
+        return {"NLL": nll_boot}
+    f_mu_boot, f_std_boot = output_boot
+    K = f_mu_boot.shape[0] // B
     f_test_boot = jnp.repeat(f_test, K, axis=0)
-    ll_boot = norm.logpdf(f_test_boot, f_mu, f_std)
+    ll_boot = norm.logpdf(f_test_boot, f_mu_boot, f_std_boot)
     # log of likelihood averaged over K bootstrapped samples
     # NOTE: this is how BNP averages log-likelihood
     ll_boot = logsumexp(ll_boot.reshape(B, K, L_test, -1), axis=1) - jnp.log(K)
-    mask_test = mask_from_valid_lens(L_test, valid_lens_test)
     nll = -ll_boot.mean(where=mask_test)
     rmse = jnp.sqrt(
-        jnp.square(f_test_boot - f_mu)
+        jnp.square(f_test_boot - f_mu_boot)
         .reshape(B, K, L_test, -1)
         .mean(axis=2, where=mask_test[:, None, ...])
     ).mean()  # average over [B, K]
     mae = (
-        jnp.abs(f_test_boot - f_mu)
+        jnp.abs(f_test_boot - f_mu_boot)
         .reshape(B, K, L_test, -1)
         .mean(axis=2, where=mask_test[:, None, ...])
     ).mean()  # average over [B, K]
-    f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
+    f_lower = f_mu_boot - z_score * f_std_boot
+    f_upper = f_mu_boot + z_score * f_std_boot
     cvg = (
         ((f_test_boot >= f_lower) & (f_test_boot <= f_upper))
         .reshape(B, K, L_test, -1)
@@ -498,11 +539,12 @@ def tril_cov_valid_step(rng: jax.Array, state: TrainState, batch: tuple, **kwarg
     return {"NLL": nll, "RMSE": rmse, "MAE": mae, "Coverage": cvg}
 
 
-@jit
+@partial(jit, static_argnames=("is_categorical",))
 def fast_attention_train_step(
     rng: jax.Array,
     state: TrainState,
     batch: tuple,
+    is_categorical: bool = False,
     redraw_random_features: bool = False,
     **kwargs,
 ):
@@ -526,7 +568,7 @@ def fast_attention_train_step(
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(L_test, B)
         mask_test = mask_from_valid_lens(L_test, valid_lens_test)
-        (f_mu, f_std), updated_state = state.apply_fn(
+        output, updated_state = state.apply_fn(
             {"params": params, **state.kwargs},
             s_ctx,
             f_ctx,
@@ -538,75 +580,15 @@ def fast_attention_train_step(
             rngs={"dropout": rng_dropout, "extra": rng_extra},
             mutable=["projections"],
         )
-        return -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test), updated_state
+        if is_categorical:
+            return safe_softmax_cross_entropy(output, f_test).mean(where=mask_test)
+        f_mu, f_std = output
+        return -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
 
     (nll, updated_state), grads = jax.value_and_grad(loss_fn, has_aux=True)(
         state.params
     )
     return state.apply_gradients(grads=grads, kwargs=updated_state), nll
-
-
-@jit
-def npf_elbo_train_step(
-    rng: jax.Array,
-    state: TrainState,
-    batch: tuple,
-    **kwargs,
-):
-    """Training step for meta regression with latents and diagonal covariances.
-
-    Args:
-        rng: A PRNG key.
-        state: The current training state.
-        batch: Batch of data.
-
-    Returns:
-        `TrainState` with updated parameters.
-    """
-    rng_dropout, rng_extra = random.split(rng)
-
-    def loss_fn(params):
-        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
-        (B, L_test, _) = s_test.shape
-        if valid_lens_test is None:
-            valid_lens_test = jnp.repeat(L_test, B)
-        mask_test = mask_from_valid_lens(L_test, valid_lens_test)
-        f_mu, f_std, z_mu_ctx, z_std_ctx = state.apply_fn(
-            {"params": params, **state.kwargs},
-            s_ctx,
-            f_ctx,
-            s_test,
-            valid_lens_ctx,
-            valid_lens_test,
-            training=True,
-            rngs={"dropout": rng_dropout, "extra": rng_extra},
-        )
-        # used by NP family only during training for KL-div loss term
-        _, _, z_mu_test, z_std_test = state.apply_fn(
-            {"params": params, **state.kwargs},
-            s_test,
-            f_test,
-            s_test,
-            valid_lens_test,
-            valid_lens_test,
-            training=True,
-            rngs={"dropout": rng_dropout, "extra": rng_extra},
-        )
-        # KL divergence and NLL assume diagonal covariance, i.e. pointwise.
-        # Wikipedia's formulas for MVN KL-div: https://tinyurl.com/wiki-kl-div
-        # Tensorflow's diagonal MVN KL-div impl (used here): https://tinyurl.com/diag-kl-div
-        # KL( z_dist_test (p) || z_dist_ctx (q) ) =
-        diff_log_scale = jnp.log(z_std_test) - jnp.log(z_std_ctx)
-        kl_div = (
-            0.5 * ((z_mu_test - z_mu_ctx) / z_std_ctx) ** 2
-            + 0.5 * jnp.expm1(2 * diff_log_scale)
-            - diff_log_scale
-        ).sum(axis=-1) / valid_lens_test  # [B] <- avg KL per valid test loc
-        nll = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
-        return nll + kl_div.mean()
-
-    elbo, grads = jax.value_and_grad(loss_fn)(state.params)
-    return state.apply_gradients(grads=grads), elbo
 
 
 def cfg_to_run_name(cfg: DictConfig):

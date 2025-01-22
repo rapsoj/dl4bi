@@ -92,7 +92,7 @@ class ANP(nn.Module):
         rng_z, z_shape = self.make_rng("extra"), (self.n_z, *z_mu_ctx.shape)
         z = z_mu_ctx + z_std_ctx * random.normal(rng_z, z_shape)  # [n_z, B, d_z]
         z = z.swapaxes(0, 1)  # [B, n_z, d_z]
-        f_mu, f_std = self.decode(
+        output = self.decode(
             r,
             z,
             s_ctx,
@@ -100,7 +100,7 @@ class ANP(nn.Module):
             valid_lens_ctx,
             training,
         )
-        return f_mu, f_std, z_mu_ctx, z_std_ctx
+        return output, (z_mu_ctx, z_std_ctx)
 
     def encode_deterministic(
         self,
