@@ -19,6 +19,9 @@ class BNP(nn.Module):
     [Attentive Neural Processes](https://arxiv.org/abs/1901.05761)
     to keep comparisons among models consistent.
 
+    .. note::
+        Currently `BNP` only works with regression.
+
     Args:
         num_samples: The number of samples to use for bootstrapping.
         enc_det: A module for encoding context points.
@@ -91,6 +94,7 @@ class BNP(nn.Module):
         )
         s_ctx_rep = rep(s_ctx)
         f_ctx_mu_boot, f_ctx_std_boot = self.decode(r_ctx_boot, s_ctx_rep)
+        # TODO(danj): update residual sampling to work with categorical dists
         res = (rep(f_ctx) - f_ctx_mu_boot) / f_ctx_std_boot
         res_boot, _ = bootstrap(rng_res_boot, res, valid_lens_ctx_boot)
         mask = mask_from_valid_lens(L, valid_lens_ctx_boot)

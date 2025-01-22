@@ -228,7 +228,8 @@ def vanilla_train_step(
             rngs={"dropout": rng_dropout, "extra": rng_extra},
         )
         if is_categorical:
-            return safe_softmax_cross_entropy(output, f_test).mean(where=mask_test)
+            nll = safe_softmax_cross_entropy(output, f_test)
+            return nll.mean(where=mask_test.squeeze())
         f_mu, f_std = output
         return -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
 
@@ -261,7 +262,8 @@ def vanilla_valid_step(
         valid_lens_test = jnp.repeat(L_test, B)
     mask_test = mask_from_valid_lens(L_test, valid_lens_test)
     if is_categorical:
-        nll = safe_softmax_cross_entropy(output, f_test).mean(where=mask_test)
+        nll = safe_softmax_cross_entropy(output, f_test)
+        nll = nll.mean(where=mask_test.squeeze())
         return {"NLL": nll}
     hdi_prob = kwargs.get("hdi_prob", 0.95)
     z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
@@ -333,7 +335,8 @@ def npf_elbo_train_step(
             - diff_log_scale
         ).sum(axis=-1) / valid_lens_test  # [B] <- avg KL per valid test loc
         if is_categorical:
-            nll = safe_softmax_cross_entropy(output, f_test).mean(where=mask_test)
+            nll = safe_softmax_cross_entropy(output, f_test)
+            nll = nll.mean(where=mask_test.squeeze())
         else:
             f_mu, f_std = output
             nll = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
@@ -382,6 +385,7 @@ def bootstrap_train_step(
         )
         if is_categorical:
             K = output_boot.shape[0] // B
+            mask_test = mask_test.squeeze()
             f_test_boot = jnp.repeat(f_test, K, axis=0)
             nll_boot = safe_softmax_cross_entropy(output_boot, f_test_boot)
             nll_boot = logsumexp(nll_boot.reshape(B, K, L_test, -1)) - jnp.log(K)
@@ -433,7 +437,7 @@ def bootstrap_valid_step(
         f_test_boot = jnp.repeat(f_test, K, axis=0)
         nll_boot = safe_softmax_cross_entropy(output_boot, f_test_boot)
         nll_boot = logsumexp(nll_boot.reshape(B, K, L_test, -1)) - jnp.log(K)
-        nll_boot = nll_boot.mean(where=mask_test)
+        nll_boot = nll_boot.mean(where=mask_test.squeeze())
         return {"NLL": nll_boot}
     hdi_prob = kwargs.get("hdi_prob", 0.95)
     z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
@@ -587,7 +591,8 @@ def fast_attention_train_step(
             mutable=["projections"],
         )
         if is_categorical:
-            return safe_softmax_cross_entropy(output, f_test).mean(where=mask_test)
+            nll = safe_softmax_cross_entropy(output, f_test)
+            return nll.mean(where=mask_test.squeeze())
         f_mu, f_std = output
         return -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
 
@@ -830,7 +835,7 @@ def sample(
     for i in range(L_test):
         rng_extra, rng_eps, rng = random.split(rng, 3)
         output = apply(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
-        if isinstance(output[0], tuple):  # latent or bootstrapped
+        if isinstance(output[1], tuple):  # latent or bootstrapped
             output, _ = output  # throw away latent / base samples
         f_mu, f_std = output
         f_mu_i, f_std_i = f_mu[:, i, :], f_std[:, i, :]
@@ -932,7 +937,7 @@ def log_posterior_predictive_plots(
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls, period = (
         batch
     )
-    f_mu, f_std, *_ = state.apply_fn(
+    output = state.apply_fn(
         {"params": state.params, **state.kwargs},
         s_ctx,
         f_ctx,
@@ -941,6 +946,9 @@ def log_posterior_predictive_plots(
         valid_lens_test,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
+    if isinstance(output[1], tuple):  # latent or bootstrapped
+        output, _ = output  # throw away latent / base samples
+    f_mu, f_std = output
     paths = plot_posterior_predictives(
         s_ctx,
         f_ctx,
@@ -1012,7 +1020,9 @@ def log_img_plots(
         valid_lens_test=None,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
-    f_mu, f_std, *_ = transform_model_output(output)
+    if isinstance(output[1], tuple):  # latent or bootstrapped
+        output, _ = output  # throw away latent / base samples
+    f_mu, f_std = transform_model_output(output)
     paths = []
     for i in range(num_plots):
         inv_idx_i = inv_permute_idx

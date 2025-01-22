@@ -27,6 +27,9 @@ class BANP(nn.Module):
         for values or outputs. Here, we follow the standard MultiHeadAttention
         setup where all projection matrices are single layer linear projections.
 
+    .. note::
+        Currently `BANP` only works with regression.
+
     Args:
         num_samples: The number of samples to use for bootstrapping.
         embed_s: An embedding module for locations.
@@ -123,6 +126,7 @@ class BANP(nn.Module):
             s_ctx_boot, f_ctx_boot, valid_lens_ctx_boot
         )
         s_ctx_rep = rep(s_ctx)
+        # TODO(danj): update residual sampling to work with categorical dists
         f_ctx_mu_boot, f_ctx_std_boot = self.decode(
             r_ctx_boot, s_ctx_rep, s_ctx_rep, valid_lens_ctx_boot
         )

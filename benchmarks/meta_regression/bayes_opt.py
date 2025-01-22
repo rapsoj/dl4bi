@@ -139,7 +139,10 @@ def optimize(
     B_idx = jnp.arange(B)
     for i in tqdm(range(budget), desc="Optimizing"):
         rng_extra, rng = random.split(rng)
-        f_mu, f_std, *_ = model_fn(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
+        output = model_fn(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
+        if isinstance(output[1], tuple):  # latent or bootstrapped
+            output, _ = output  # throw away latent zs / or "base" samples
+        f_mu, f_std = output
         if f_mu.shape != f_test.shape:  # bootstrapped
             K = f_mu.shape[0] // f_test.shape[0]
             f_mu = f_mu.reshape(B, K, L_test, 1)

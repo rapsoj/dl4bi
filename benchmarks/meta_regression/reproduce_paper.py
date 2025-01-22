@@ -42,11 +42,11 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         "tnp_kr_scan",
         "tnp_kr_dka",
         "tnp_kr_performer",
-        "np",  # TODO(danj): run in second wave
-        "bnp",
+        "np",
         "cnp",
         "anp",
         "canp",
+        "bnp",
         "banp",
     ]
     models = [f"icml/{m}" for m in models]
@@ -58,6 +58,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         gp_main,
         overrides,
         "_ICML_ TNP-KR - Gaussian Processes",
+        dry_run=dry_run,
     )
     gp_benchmark(
         seeds,
@@ -68,6 +69,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         overrides,
         "_ICML_ TNP-KR - Bayesian Optimization",
         "_ICML_ TNP-KR - Gaussian Processes",
+        dry_run=dry_run,
     )
     gp_benchmark(
         seeds,
@@ -77,6 +79,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         gp_main,
         overrides,
         "_ICML_ TNP-KR - Gaussian Processes",
+        dry_run=dry_run,
     )
     img_benchmark(
         seeds,
@@ -85,6 +88,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         mnist_main,
         overrides,
         "_ICML_ TNP-KR - MNIST",
+        dry_run=dry_run,
     )
     img_benchmark(
         seeds,
@@ -93,6 +97,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         celeba_main,
         overrides,
         "_ICML_ TNP-KR - CelebA",
+        dry_run=dry_run,
     )
     img_benchmark(
         seeds,
@@ -101,14 +106,18 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
         cifar_10_main,
         overrides,
         "_ICML_ TNP-KR - Cifar 10",
+        dry_run=dry_run,
     )
     img_benchmark(
         seeds,
         "configs/sir",
-        models,
+        # BNP & BANP use residual bootstrapping, which doesn't work
+        # for categorical data
+        [m for m in models if m not in ["icml/bnp", "icml/banp"]],
         sir_main,
         overrides,
         "_ICML_ TNP-KR - SIR",
+        dry_run=dry_run,
     )
 
 
@@ -118,7 +127,7 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
         seeds = seeds[:2]  # no need for more than 2 runs each in dry run
     gp_kernels_1d = ["rbf", "periodic", "matern_3_2"]
     gp_kernels_2d = ["rbf"]
-    models = ["tnp_kr_full"]
+    models = ["tnp_kr"]
     overrides = []
     nums = [1, 2, 3, 6]
     for num_blks, num_reps in it.product(nums, nums):
@@ -141,6 +150,7 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
         gp_main,
         overrides,
         "LoRe - Gaussian Processes",
+        dry_run=dry_run,
     )
     gp_benchmark(
         seeds,
@@ -150,6 +160,7 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
         gp_main,
         overrides,
         "LoRe - Gaussian Processes",
+        dry_run=dry_run,
     )
     img_benchmark(
         seeds,
@@ -158,6 +169,7 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
         mnist_main,
         overrides,
         "LoRe - MNIST",
+        dry_run=dry_run,
     )
     img_benchmark(
         seeds,
@@ -166,6 +178,7 @@ def lore_paper(seeds: jax.Array, dry_run: bool = False):
         celeba_main,
         overrides,
         "LoRe - CelebA",
+        dry_run=dry_run,
     )
 
 
@@ -178,7 +191,11 @@ def gp_benchmark(
     overrides: list[list[str]] = [[]],
     project: str = "",
     project_parent: str = "None",
+    dry_run: bool = False,
 ):
+    if dry_run:
+        project = "__DRY RUN__ " + project
+        project_parent = "__DRY RUN__ " + project_parent
     for kernel in kernels:
         for seed in seeds:
             for model in models:
@@ -207,7 +224,10 @@ def img_benchmark(
     main_fn: Callable = mnist_main,
     overrides: list[list[str]] = [[]],
     project: str = "",
+    dry_run: bool = False,
 ):
+    if dry_run:
+        project = "__DRY RUN__ " + project
     for seed in seeds:
         for model in models:
             for overrides_i in overrides:
