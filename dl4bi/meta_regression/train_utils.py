@@ -204,6 +204,7 @@ def vanilla_train_step(
         rng: A PRNG key.
         state: The current training state.
         batch: Batch of data.
+        is_categorical: Indicates whether the output is categorical.
 
     Returns:
         `TrainState` with updated parameters.
@@ -216,7 +217,7 @@ def vanilla_train_step(
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(L_test, B)
         mask_test = mask_from_valid_lens(L_test, valid_lens_test)
-        output = state.apply_fn(
+        output, *_ = state.apply_fn(
             {"params": params, **state.kwargs},
             s_ctx,
             f_ctx,
@@ -243,8 +244,6 @@ def vanilla_valid_step(
     is_categorical: bool = False,
     **kwargs,
 ):
-    hdi_prob = kwargs.get("hdi_prob", 0.95)
-    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
     output, *_ = jit(state.apply_fn)(
         {"params": state.params, **state.kwargs},
@@ -262,6 +261,8 @@ def vanilla_valid_step(
     if is_categorical:
         nll = safe_softmax_cross_entropy(output, f_test).mean(where=mask_test)
         return {"NLL": nll}
+    hdi_prob = kwargs.get("hdi_prob", 0.95)
+    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
     f_mu, f_std = output
     nll = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
     rmse = jnp.sqrt(jnp.square(f_test - f_mu).mean(where=mask_test))
@@ -285,6 +286,7 @@ def npf_elbo_train_step(
         rng: A PRNG key.
         state: The current training state.
         batch: Batch of data.
+        is_categorical: Indicates whether the output is categorical.
 
     Returns:
         `TrainState` with updated parameters.
@@ -297,7 +299,7 @@ def npf_elbo_train_step(
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(L_test, B)
         mask_test = mask_from_valid_lens(L_test, valid_lens_test)
-        output, (z_mu_ctx, z_std_ctx) = state.apply_fn(
+        output, (z_mu_ctx, z_std_ctx), *_ = state.apply_fn(
             {"params": params, **state.kwargs},
             s_ctx,
             f_ctx,
@@ -353,6 +355,7 @@ def bootstrap_train_step(
         rng: A PRNG key.
         state: The current training state.
         batch: Batch of data.
+        is_categorical: Indicates whether the output is categorical.
 
     Returns:
         `TrainState` with updated parameters.
@@ -365,7 +368,7 @@ def bootstrap_train_step(
         if valid_lens_test is None:
             valid_lens_test = jnp.repeat(L_test, B)
         mask_test = mask_from_valid_lens(L_test, valid_lens_test)
-        output_boot, output = state.apply_fn(
+        output_boot, output, *_ = state.apply_fn(
             {"params": params, **state.kwargs},
             s_ctx,
             f_ctx,
@@ -407,8 +410,6 @@ def bootstrap_valid_step(
     is_categorical: bool = False,
     **kwargs,
 ):
-    hdi_prob = kwargs.get("hdi_prob", 0.95)
-    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
     s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
     # at prediction time, bootstrapped output is used
     # at training time, standard output is also used
@@ -432,6 +433,8 @@ def bootstrap_valid_step(
         nll_boot = logsumexp(nll_boot.reshape(B, K, L_test, -1)) - jnp.log(K)
         nll_boot = nll_boot.mean(where=mask_test)
         return {"NLL": nll_boot}
+    hdi_prob = kwargs.get("hdi_prob", 0.95)
+    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
     f_mu_boot, f_std_boot = output_boot
     K = f_mu_boot.shape[0] // B
     f_test_boot = jnp.repeat(f_test, K, axis=0)
@@ -554,6 +557,7 @@ def fast_attention_train_step(
         rng: A PRNG key.
         state: The current training state.
         batch: Batch of data.
+        is_categorical: Indicates whether the output is categorical.
         rng_redraw_randoM_features: An optional PRNG key used for redrawing
             random features used in fast attention kernel.
 
