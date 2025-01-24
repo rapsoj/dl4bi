@@ -121,29 +121,40 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
     s = jnp.repeat(s_grid[None, ...], B, axis=0)
     valid_lens_test = jnp.repeat(Lt, B)
 
+    @jit
+    def transform_and_permute(rng: jax.Array, steps: jax.Array):
+        # convert RSI categories to GBR (RGB) one-hot color vectors;
+        # serves dual purpose of one-hot encoding and easier plotting
+        steps = rsi_to_rgb(steps)
+        permute_steps_idx = random.choice(rng, N, (N,), replace=False)
+        steps = steps[permute_steps_idx]
+        return steps
+
+    @jit
+    def create_batch(rng: jax.Array, steps: jax.Array):
+        rng_permute, rng_valid = random.split(rng)
+        permute_idx = random.choice(rng_permute, L, (L,), replace=False)
+        inv_permute_idx = jnp.argsort(permute_idx)
+        valid_lens_ctx = random.randint(rng_valid, (B,), Lc_min, Lc_max)
+        s_i = s[:, permute_idx, :]
+        f_i = steps[:, permute_idx, :]
+        return s_i[:, :Lt, :], f_i[:, :Lt, :], valid_lens_ctx, inv_permute_idx
+
     def dataloader(rng: jax.Array):
         while True:
-            rng_sir, rng_eps, rng_valid, rng_permute_steps, rng = random.split(rng, 5)
-            steps, *_ = sir.simulate(rng_sir, dims, N)  # f: [N, *dims]
-            # convert RSI categories to GBR (RGB) one-hot color vectors;
-            # serves dual purpose of one-hot encoding and easier plotting
-            steps = rsi_to_rgb(steps)
-            permute_steps_idx = random.choice(rng_permute_steps, N, (N,), replace=False)
-            steps = steps[permute_steps_idx]
+            rng_sim, rng_tx_pre, rng = random.split(rng, 3)
+            steps, *_ = sir.simulate(rng_sim, dims, N)
+            steps = transform_and_permute(rng_tx_pre, steps)
             for i in range(N // B):
+                rng_i, rng = random.split(rng)
                 steps_i = steps[i * B : (i + 1) * B].reshape(B, L, 3)
-                rng_permute, rng = random.split(rng)
-                permute_idx = random.choice(rng_permute, L, (L,), replace=False)
-                inv_permute_idx = jnp.argsort(permute_idx)
-                valid_lens_ctx = random.randint(rng_valid, (B,), Lc_min, Lc_max)
-                s_perm = s[:, permute_idx, :]
-                f_perm = steps_i[:, permute_idx, :]
+                s_i, f_i, valid_lens_ctx, inv_permute_idx = create_batch(rng_i, steps_i)
                 yield (
-                    s_perm[:, :Lc_max, :],
-                    f_perm[:, :Lc_max, :],
+                    s_i[:, :Lc_max, :],
+                    f_i[:, :Lc_max, :],
                     valid_lens_ctx,
-                    s_perm[:, :Lt, :],
-                    f_perm[:, :Lt, :],
+                    s_i,
+                    f_i,
                     valid_lens_test,
                     s,  # add full originals for use in callbacks, e.g. log_plots
                     steps_i,
