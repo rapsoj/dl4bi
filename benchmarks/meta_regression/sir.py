@@ -142,6 +142,7 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
 
     def dataloader(rng: jax.Array):
         while True:
+            steps = None  # signal garbage collect
             rng_sim, rng_tx_pre, rng = random.split(rng, 3)
             steps, *_ = sir.simulate(rng_sim, dims, N)
             steps = transform_and_permute(rng_tx_pre, steps)
