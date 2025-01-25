@@ -21,6 +21,7 @@ from dl4bi.meta_regression.train_utils import (
     evaluate,
     instantiate,
     log_img_plots,
+    regression_to_rgb,
     save_ckpt,
     select_steps,
     train,
@@ -54,7 +55,12 @@ def main(cfg: DictConfig):
     train_step, valid_step = select_steps(model)
     cmap = mpl.colormaps.get_cmap("grey")
     cmap.set_bad("blue")
-    norm = mpl.colors.Normalize(vmin=0, vmax=1, clip=True)
+    clbk = partial(
+        log_img_plots,
+        shape=(28, 28, 1),
+        cmap=cmap,
+        remap_colors=regression_to_rgb,
+    )
     state = train(
         rng_train,
         model,
@@ -66,12 +72,7 @@ def main(cfg: DictConfig):
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
-        callbacks=[
-            Callback(
-                partial(log_img_plots, shape=(28, 28, 1), cmap=cmap, norm=norm),
-                cfg.plot_interval,
-            )
-        ],
+        callbacks=[Callback(clbk, cfg.plot_interval)],
     )
     metrics = evaluate(
         rng_test,
@@ -89,9 +90,9 @@ def main(cfg: DictConfig):
 def build_dataloaders(
     batch_size: int = 32,
     buffer_size: int = 1024,
-    num_ctx_min: int = 3,
-    num_ctx_max: int = 100,
-    num_test_max: int = 200,
+    num_ctx_min: int = 16,
+    num_ctx_max: int = 128,
+    num_test_max: int = 256,
 ):
     B, L = batch_size, 28 * 28
     normalize = lambda sample: 2 * (
