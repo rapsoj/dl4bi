@@ -37,11 +37,11 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     gp_kernels_1d = ["periodic", "rbf", "matern_3_2"]
     gp_kernels_2d = ["rbf"]
     models = [
-        "convcnp",
         "tnp_d",
         "tnp_kr_scan",
         "tnp_kr_dka",
         "tnp_kr_performer",
+        "convcnp",
         "np",
         "cnp",
         "anp",
