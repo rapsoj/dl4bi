@@ -182,10 +182,10 @@ def select_steps(model, is_categorical=False):
     elif isinstance(model, (BNP, BANP)):
         train_step, valid_step = bootstrap_train_step, bootstrap_valid_step
     elif isinstance(model, (TNPND,)):
-        if is_categorical:
-            raise NotImplementedError("Not implemented!")
         train_step, valid_step = tril_cov_train_step, tril_cov_valid_step
     if is_categorical:
+        if isinstance(model, (BNP, BANP, TNPND)):
+            raise NotImplementedError("Model does not support categorical loss!")
         train_step = partial(train_step, is_categorical=True)
         valid_step = partial(valid_step, is_categorical=True)
     return train_step, valid_step
