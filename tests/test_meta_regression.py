@@ -50,6 +50,10 @@ def test_models():
         TNPD,
         TNPND,
         TNPKR,
+        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
+        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FusedAttention()))),
+        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
+        lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
         ScanTNPKR,
         ConvCNP,
     ]:
