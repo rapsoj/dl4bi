@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -9,7 +10,7 @@ from omegaconf import DictConfig
 from sir import build_dataloader, instantiate, select_steps
 from tqdm import tqdm
 
-from dl4bi.meta_regression.train_utils import load_ckpt
+from dl4bi.meta_regression.train_utils import TrainState, load_ckpt
 
 
 @hydra.main("configs/sir", config_name="default", version_base=None)
@@ -17,13 +18,31 @@ def main(cfg: DictConfig):
     results_path = Path(f"results/{cfg.project}/{cfg.seed}")
     rng_data, rng_valid = random.split(random.key(cfg.seed))
     dataloader = build_dataloader(cfg.data, cfg.sim)
-    model = instantiate(cfg.model)
-    _, valid_step = select_steps(model, is_categorical=True)
     for path in results_path.rglob("*.ckpt"):
         rng = rng_valid
-        batches = dataloader(rng_data)
+        state, m_cfg = load_ckpt(path)
         out_fn = path.parent / (path.stem + "_" + cfg.data.name)
-        state, _ = load_ckpt(path)
+        # need to expand internal grid of ConvCNP
+        if path.stem == "ConvCNP":
+            if cfg.data.name == "128x128":
+                m_cfg.model.kwargs.s_lower = [-4.5, -4.5]
+                m_cfg.model.kwargs.s_upper = [4.5, 4.5]
+            elif cfg.data.name == "256x256":
+                m_cfg.model.kwargs.s_lower = [-8.5, -8.5]
+                m_cfg.model.kwargs.s_upper = [8.5, 8.5]
+            elif cfg.data.name == "1024x1024":
+                m_cfg.model.kwargs.s_lower = [-32.5, -32.5]
+                m_cfg.model.kwargs.s_upper = [32.5, 32.5]
+        model = instantiate(m_cfg.model)
+        if path.stem == "ConvCNP":
+            state = TrainState.create(
+                apply_fn=model.apply,
+                params=state.params,
+                kwargs=state.kwargs,
+                tx=state.tx,
+            )
+        _, valid_step = select_steps(model, is_categorical=True)
+        batches = dataloader(rng_data)
         batch = next(batches)
         try:
             valid_step(rng, state, batch)  # precompile
