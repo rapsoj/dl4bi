@@ -6,11 +6,10 @@ from time import time
 import hydra
 from jax import random
 from omegaconf import DictConfig
+from sir import build_dataloader, instantiate, select_steps
 from tqdm import tqdm
 
 from dl4bi.meta_regression.train_utils import load_ckpt
-
-from .sir import build_dataloader, instantiate, select_steps
 
 
 @hydra.main("configs/sir", config_name="default", version_base=None)
@@ -23,32 +22,33 @@ def main(cfg: DictConfig):
     for path in results_path.rglob("*.ckpt"):
         rng = rng_valid
         batches = dataloader(rng_data)
+        out_fn = path.parent / (path.stem + "_" + cfg.data.name)
         state, _ = load_ckpt(path)
         batch = next(batches)
-        valid_step(rng, state, batch)  # pre-compile
+        try:
+            valid_step(rng, state, batch)  # precompile
+        except Exception:
+            with open(out_fn.with_suffix(".txt"), "w") as f:
+                f.write("OOM\n")
+            continue
         pbar = tqdm(
             range(cfg.valid_num_steps),
             unit=" samples",
             leave=False,
-            dynamic_cols=True,
+            dynamic_ncols=True,
         )
         metrics = defaultdict(list)
         for i in pbar:
             rng_i, rng = random.split(rng)
             batch = next(batches)
             start = time()
-            try:
-                m = valid_step(rng_i, state, batch)
-            except Exception:
-                print("OOM!")
+            m = valid_step(rng_i, state, batch)
             end = time()
             m["s_elapsed"] = end - start
             for k, v in m.items():
-                metrics[k] += [v]
-        name = path.stem + "_" + cfg.data.name
-        out_path = (path.parent / name).with_suffix(".json")
-        with open(out_path, "w") as f:
-            json.dump(defaultdict, f, indent=2)
+                metrics[k] += [float(v)]
+        with open(out_fn.with_suffix(".json"), "w") as f:
+            json.dump(metrics, f, indent=2)
 
 
 if __name__ == "__main__":
