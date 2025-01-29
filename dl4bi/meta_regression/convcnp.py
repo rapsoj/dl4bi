@@ -29,7 +29,7 @@ class ConvCNP(nn.Module):
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
     Returns:
-        An instance of `CNP`.
+        An instance of `ConvCNP`.
     """
 
     s_lower: List[float] = field(default_factory=lambda: [-2.5])
