@@ -26,9 +26,8 @@ def identity(output: jax.Array):
 
 
 @jit
-def latent_logits(output: jax.Array):
-    logits, latents = output
-    return logits.mean(axis=1), latents  # average over n_z latent samples
+def latent_logits(logits: jax.Array):
+    return logits.mean(axis=1)  # average over n_z latent samples
 
 
 @jit
