@@ -21,6 +21,7 @@ def main():
         dfs += [df]
     df = pd.concat(dfs)
     df.columns = ["gp", "kernel", "seed", "model", "regret"]
+    df.to_csv("bayes_opt.csv", index=False)
     df = df.groupby(["gp", "kernel", "model"]).agg({"regret": ["mean", "sem"]})
     df.columns = ["mean", "stderr"]
     df = df.apply(lambda r: f"${r['mean']:0.3f}\\pm{r['stderr']:.3f}$", axis=1)

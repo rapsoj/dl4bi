@@ -13,16 +13,18 @@ def paired_t_test(
     statistic: str,
     filter: str,
     method: str = "less",
+    verbose: bool = False,
 ):
     # NOTE: this assumes that models appear in the same seed order
     if filter:
         df = df.query(filter)
     m1 = df[df.Name == model_1][statistic].values
     m2 = df[df.Name == model_2][statistic].values
-    diff = m1 - m2
-    print(f"{model_1}:\n{m1}")
-    print(f"\n{model_2}:\n{m2}")
-    print(f"\nDifferences:\n{diff}\n")
+    if verbose:
+        diff = m1 - m2
+        print(f"{model_1}:\n{m1}")
+        print(f"\n{model_2}:\n{m2}")
+        print(f"\nDifferences:\n{diff}\n")
     return ttest_rel(m1, m2, alternative=method)
 
 
@@ -53,6 +55,12 @@ def parse_args(argv):
         help="Which paired method.",
         choices=["less", "two-sided"],
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Verbose mode.",
+    )
     return parser.parse_args(argv[1:])
 
 
@@ -66,5 +74,6 @@ if __name__ == "__main__":
         args.statistic,
         args.filter,
         args.method,
+        args.verbose,
     )
     print(f"t-test ({args.method}) p-value: {result.pvalue:0.3f}")
