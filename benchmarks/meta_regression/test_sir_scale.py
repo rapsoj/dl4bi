@@ -44,6 +44,7 @@ def main(cfg: DictConfig):
                 m_cfg.model.kwargs.s_upper = [32.5, 32.5]
         model = instantiate(m_cfg.model)
         if path.stem == "ConvCNP":
+            print(model)
             state = TrainState.create(
                 apply_fn=model.apply,
                 params=state.params,

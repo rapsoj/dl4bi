@@ -14,8 +14,10 @@ from sir import build_dataloader as build_dataloader_sir
 from sir import remap_colors as remap_colors_sir
 
 from dl4bi.meta_regression.train_utils import (
+    TrainState,
     build_2d_grid_gp_dataloader,
     build_gp_dataloader,
+    instantiate,
     load_ckpts,
     plot_img,
     plot_posterior_predictive,
@@ -168,6 +170,8 @@ def plot_2d_img_samples(
         min_std, max_std = float("inf"), -float("inf")
         for row_idx, run_name in enumerate(sorted(ckpts)):
             state = ckpts[run_name]["state"]
+            if run_name == "ConvCNP":
+                state = update_convcnp_state(ckpts[run_name], shape)
             output = state.apply_fn(
                 {"params": state.params, **state.kwargs},
                 s_ctx,
@@ -246,11 +250,38 @@ def project_parameters(cfg: DictConfig):
         case _ if matches(".*SIR.*"):
             build_dataloaders = build_dataloader_sir
             remap_colors = remap_colors_sir
-            shape = (64, 64, 3)
+            shape = {
+                "64x64": (64, 64, 3),
+                "128x128": (128, 128, 3),
+                "256x256": (256, 256, 3),
+                "1024x1024": (1024, 1024, 3),
+            }[cfg.data.name]
             is_categorical = True
         case _:
             raise Exception(f"No dataloader defined for {cfg.project}!")
     return build_dataloaders, shape, cmap, cmap_std, remap_colors, is_categorical
+
+
+def update_convcnp_state(ckpt, shape):
+    state, cfg = ckpt["state"], ckpt["cfg"]
+    if shape[0] == 128:
+        cfg.model.kwargs.s_lower = [-4.5, -4.5]
+        cfg.model.kwargs.s_upper = [4.5, 4.5]
+    elif shape[0] == 256:
+        cfg.model.kwargs.s_lower = [-8.5, -8.5]
+        cfg.model.kwargs.s_upper = [8.5, 8.5]
+    elif shape[0] == 1024:
+        cfg.model.kwargs.s_lower = [-32.5, -32.5]
+        cfg.model.kwargs.s_upper = [32.5, 32.5]
+    model = instantiate(cfg.model)
+    print(model)
+    state = TrainState.create(
+        apply_fn=model.apply,
+        params=state.params,
+        kwargs=state.kwargs,
+        tx=state.tx,
+    )
+    return state
 
 
 if __name__ == "__main__":
