@@ -14,7 +14,7 @@ from jax.lax import scan
 from jax.nn import dot_product_attention
 from sps.kernels import outer_subtract
 
-from .bias import tisa_bias
+from .bias import scanned_rbf_network_bias, scanned_tisa_bias
 from .embed import RBFRandomFourierFeatures
 from .mlp import MLP
 from .utils import mask_attn, mask_from_valid_lens
@@ -497,6 +497,69 @@ def scan_ks(
     return os / row_sums
 
 
+class RBFNetworkBiasedScanAttention(nn.Module):
+    r"""Performs query-key-value attention with a scan and an RBF network bias
+        for reduced memory usage.
+
+    Args:
+        qs_chunk_size: Number of queries to process in each chunk of scan.
+        ks_chunk_size: Number of keys to process in each chunk of scan.
+        num_basis: Number of basis functions for TISA bias.
+
+    Returns:
+        A `ScanTISABiasedAttention` module.
+    """
+
+    qs_chunk_size: int = 1024
+    ks_chunk_size: int = 1024
+    num_basis: int = 5
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, H, D_QK_H]
+        ks: jax.Array,  # [B, K, H D_QK_H]
+        vs: jax.Array,  # [B, K, H, D_H]
+        valid_lens: Optional[jax.Array] = None,  # [B]
+        training: bool = False,
+        **kwargs,
+    ):
+        r"""Performs forward pass of network.
+
+        Args:
+            qs: Queries of dimension $\mathbb{R}^{B\times Q\times H\times D_QK_H}$
+            ks: Keys of dimension $\mathbb{R}^{B\times K\times H\times D_QK_H}$
+            vs: Values of dimension $\mathbb{R}^{B\times K\times H\times  D_V_H}$
+            qs_locs: Query locations of dimension $\mathbb{R}^{B\times Q\times S}$
+            ks_locs: Key locations of dimension $\mathbb{R}^{B\times K\times S}$
+            valid_lens: Mask consisting of valid length per sequence of dimension
+                $\mathbb{R}^B$.
+            training: Boolean indicating whether currently training.
+
+        Returns:
+            `ctx` and `attn`, the updated values and None, respectively,
+            since scanned attention never materializes the attention matrix.
+        """
+        K, H, F = ks.shape[1], qs.shape[2], self.num_basis
+        a = self.param("a", init.constant(1), (H, F))
+        b = self.param("b", init.constant(1), (H, F))
+        ks_mask = None
+        if valid_lens is not None:
+            ks_mask = mask_from_valid_lens(K, valid_lens)[..., 0]
+        return biased_scan_attention(
+            qs,
+            ks,
+            vs,
+            kwargs["qs_s"],  # [B, Q, S]
+            kwargs["ks_s"],  # [B, Q, S]
+            ks_mask,
+            self.qs_chunk_size,
+            self.ks_chunk_size,
+            bias_func=scanned_rbf_network_bias,
+            bias_kwargs={"a": a, "b": b},
+        ), None
+
+
 class TISABiasedScanAttention(nn.Module):
     r"""Performs query-key-value attention with a scan and TISA bias for reduced
         memory usage.
@@ -556,7 +619,7 @@ class TISABiasedScanAttention(nn.Module):
             ks_mask,
             self.qs_chunk_size,
             self.ks_chunk_size,
-            bias_func=tisa_bias,
+            bias_func=scanned_tisa_bias,
             bias_kwargs={"a": a, "b": b, "c": c},
         ), None
 
@@ -571,7 +634,7 @@ def biased_scan_attention(
     ks_mask: Optional[jax.Array] = None,  # [B, K]
     qs_chunk_size: int = 1024,
     ks_chunk_size: int = 1024,
-    bias_func: Callable = tisa_bias,  # (q_meta, k_meta, **bias_kwargs) -> bias
+    bias_func: Callable = scanned_tisa_bias,  # (q_meta, k_meta, **bias_kwargs) -> bias
     bias_kwargs: dict = {},
 ):
     (B, Q, H, D), M = qs.shape, qs_meta.shape[-1]
@@ -638,7 +701,7 @@ def biased_scan_ks(
     ks_meta: jax.Array,  # [K, B, M]
     ks_mask: Optional[jax.Array] = None,  # [K, B]
     ks_chunk_size: int = 1024,
-    bias_func: Callable = tisa_bias,  # (q_meta, k_meta, **bias_kwargs) -> bias
+    bias_func: Callable = scanned_tisa_bias,  # (q_meta, k_meta, **bias_kwargs) -> bias
     bias_kwargs: dict = {},
 ):
     (Q_c, B, H, D), (K, _, M) = qs_chunk.shape, ks_meta.shape

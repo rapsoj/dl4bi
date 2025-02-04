@@ -102,13 +102,14 @@ class TNPKR(nn.Module):
         if self.dist is not None:
             vdist = vmap(self.dist)
             d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
+            d_qk_mask, d_kk_mask = jnp.isfinite(d_qk), jnp.isfinite(d_kk)
         for _ in range(self.num_blks):
             blk = self.blk.copy()  # new bias for every blk & rep
             for _ in range(self.num_reps):
                 if self.bias is not None:
                     bias = self.bias.copy()
-                    qk_kwargs["bias"] = bias(d_qk)
-                    kk_kwargs["bias"] = bias(d_kk)
+                    qk_kwargs["bias"] = bias(d_qk, d_qk_mask)
+                    kk_kwargs["bias"] = bias(d_kk, d_kk_mask)
                 qvs, kvs = blk(qvs, kvs, valid_lens_ctx, training, qk_kwargs, kk_kwargs)
         qvs = self.norm.copy()(qvs)
         f_dist = self.head(qvs, training)

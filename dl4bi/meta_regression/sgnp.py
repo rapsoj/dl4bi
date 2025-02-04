@@ -6,12 +6,11 @@ import jax
 import jax.numpy as jnp
 from jraph import GraphsTuple
 
-from ..core import MLP, GraphKRBlock, TISABias, kNN, mask_from_valid_lens
+from ..core import MLP, GraphKRBlock, RBFNetworkBias, kNN, mask_from_valid_lens
 from .transform import diagonal_mvn
 
 
-# TODO(danj): include global vnode conditioning
-# TODO(danj): add masks for when k < num_ctx
+# TODO(danj): add masks for when distances are non-finite, e.g. temporal causality
 class SGNP(nn.Module):
     """SGNP
 
@@ -27,7 +26,7 @@ class SGNP(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    bias: nn.Module = TISABias()
+    bias: nn.Module = RBFNetworkBias()
     blk: nn.Module = GraphKRBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
@@ -49,7 +48,7 @@ class SGNP(nn.Module):
         if valid_lens_ctx is None:
             valid_lens_ctx = jnp.repeat(N_c, B)
         mask = mask_from_valid_lens(N_c, valid_lens_ctx)
-        s_send = jnp.where(mask, s_ctx, 1e6)  # masked values = far away for kNN
+        s_send = jnp.where(mask, s_ctx, jnp.inf)  # masked values = far away for kNN
         f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
         unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
@@ -69,10 +68,11 @@ class SGNP(nn.Module):
             n_edge=jnp.array([B * (N_c + N_t) * K]),
             globals=None,
         )
+        edges_mask = jnp.isfinite(g.edges)[:, None, None]
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
-                bias = self.bias.copy()(g.edges[:, None, None]).squeeze()
+                bias = self.bias.copy()(g.edges[:, None, None], edges_mask).squeeze()
                 # NOTE: bucket_size is for numerical stability in
                 # jax.ops.segment_* calls; this is typically only needed for
                 # testing implementation correctness
