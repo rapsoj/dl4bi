@@ -90,7 +90,6 @@ def scipy_knn(q: jax.Array, r: jax.Array, k: int):
     return idx, d
 
 
-# TODO(danj): finish implementing
 @partial(jit, static_argnames=("k", "dist", "num_q_parallel"))
 def st_approx_knn(
     q: jax.Array,
@@ -104,7 +103,7 @@ def st_approx_knn(
 
     .. note::
         This assumes that the last dimension of `q` and `r`
-        is the temporal dimension, i.e. `q[..., -1]`.
+        is the temporal dimension, i.e. `{q,r}[..., -1]`.
 
     Args:
         q: Query points.
@@ -124,8 +123,8 @@ def st_approx_knn(
     def process_batch(q_i: jax.Array):
         # add leading dim to q_i since map processes each q_i individually,
         # even when batch_size is >= 1
-        d_s = dist(q_i[None, ...][..., :-1], r[..., :-1])
-        d_t = dist(q_i[None, ...][..., [-1]], r[..., [-1]])
+        d = dist(q_i[None, ...], r)
+        d = jnp.where(r[..., -1] <= q_i[-1], d, jnp.inf)  # enforce temporal causality
         d, idx = jax.lax.approx_min_k(d, k, recall_target=recall_target)
         return idx.flatten(), d
 
