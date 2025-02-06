@@ -237,7 +237,7 @@ class KRBlock(nn.Module):
 
 
 # TODO(danj): test conditioning on globals
-class GraphKRBlock(nn.Module):
+class GraphBlock(nn.Module):
     attn: nn.Module = MultiHeadGraphAttention()
     norm: nn.Module = nn.LayerNorm()
     ffn: nn.Module = MLP([256, 64], nn.gelu)

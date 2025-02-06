@@ -71,7 +71,7 @@ from .mle import gp_mle_bfgs, gp_mle_sgd
 from .mlp import MLP, MLPMixer, MLPMixerBlock
 from .preprocess import Whitener, condition_number
 from .transformer import (
-    GraphKRBlock,
+    GraphBlock,
     KRBlock,
     TransformerDecoder,
     TransformerDecoderBlock,

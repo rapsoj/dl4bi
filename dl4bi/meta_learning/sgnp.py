@@ -8,7 +8,7 @@ from jraph import GraphsTuple
 
 from ..core import (
     MLP,
-    GraphKRBlock,
+    GraphBlock,
     RBFNetworkBias,
     kNN,
     mask_from_valid_lens,
@@ -33,7 +33,7 @@ class SGNP(nn.Module):
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
     bias: nn.Module = RBFNetworkBias()
-    blk: nn.Module = GraphKRBlock()
+    blk: nn.Module = GraphBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
     output_fn: Callable = diagonal_mvn
