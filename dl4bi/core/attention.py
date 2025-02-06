@@ -1128,9 +1128,9 @@ def _graph_conv(
     nodes: jax.Array,
     attn: jax.Array,
     num_segments: int,
-    bucket_size: int,
+    bucket_size: Optional[int],
 ):
-    from_mh = jit(lambda n: rearrange(n, "N H D -> N (H D)"))
+    from_mh = lambda n: rearrange(n, "N H D -> N (H D)")
     messages = from_mh(attn[..., None] * nodes[senders])
     return jax.ops.segment_sum(
         messages,
