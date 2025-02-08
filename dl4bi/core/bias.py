@@ -1,3 +1,4 @@
+import operator
 from functools import partial
 from typing import Callable, Optional
 
@@ -6,43 +7,11 @@ import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
 from jax import jit, vmap
-from sps.kernels import l2_dist
 
-from .compose import ComposableModule
-
-
-@partial(jit, static_argnames=("causal_t",))
-def dist_spatiotemporal(
-    q: jax.Array,  # [Q, D]
-    r: jax.Array,  # [R, D]
-    causal_t: bool = False,
-):
-    """Returns a spatiotemporal distance matrix of shape `[Q, R, 2]`.
-
-    This assumes that the spatial dims of `q` and `r` are all  but the last,
-    i.e. `{q,r}[:, :-1]`, and the temporal dim is the last dim,
-    i.e. `{q,r}[:, -1]`.
-
-    The entries in `[Q, R, 0]` represent the L2 spatial distance.
-    The entries in `[Q, R, 1]` represent the signed L1 temporal distance.
-
-    For example, for `q[i] = [x=2, y=3, t=1]` and `r[j] = [x=1, y=0, t=0]`,
-    this will return `m[i, j] = [sqrt(10), -1]`.
-    """
-    d_s = dist_spatial(q[..., :-1], r[..., :-1])  # [Q, R] L2 dist
-    d_t = -q[..., [-1]] + r[..., [-1]].T  # [Q, R] L1 temporal dist
-    d = jnp.stack([d_s, d_t], axis=-1)  # [Q, R, 2]
-    if causal_t:  # set distances to inf for future timesteps
-        return jnp.where((d_t <= 0)[..., None], d, jnp.inf)
-    return d
+from .dist import dist_spatial
 
 
-@jit
-def dist_spatial(q: jax.Array, r: jax.Array):
-    return l2_dist(q, r)[..., None]  # [Q, R, D=1]
-
-
-class DistanceBias(ComposableModule):
+class DistanceBias(nn.Module):
     num_heads: int = 4
     channel: int = 0
 
@@ -78,7 +47,7 @@ def distance_bias(
     return d_a  # [B, H, Q, K]
 
 
-class RBFNetworkBias(ComposableModule):
+class RBFNetworkBias(nn.Module):
     num_heads: int = 4
     num_basis: int = 5
     channel: int = 0
@@ -135,7 +104,7 @@ def scanned_rbf_network_bias(
     return rbf_network_bias(d, mask, a, b)
 
 
-class TISABias(ComposableModule):
+class TISABias(nn.Module):
     """[Translation-Invariant Self-Attention (TISA)](https://arxiv.org/abs/2106.01950) Bias."""
 
     num_heads: int = 4
@@ -202,3 +171,17 @@ def scanned_tisa_bias(
 def zero_bias(qs_meta, ks_meta):
     (B, Q, _M), K = qs_meta.shape, ks_meta.shape[1]
     return jnp.zeros((B, 1, Q, K))  # [B, H, Q, K]
+
+
+class SpatioTemporalBias(nn.Module):
+    spatial_bias: nn.Module = RBFNetworkBias(channel=0)
+    temporal_bias: nn.Module = RBFNetworkBias(num_basis=1, channel=1)
+    op: Callable = operator.add
+
+    @nn.compact
+    def __call__(
+        self,
+        d: jax.Array,  # [B, Q, K, D] or [E, D]
+        mask: Optional[jax.Array] = None,  # None or [B, Q, K] or [E]
+    ):
+        return self.op(self.spatial_bias(d, mask), self.temporal_bias(d, mask))

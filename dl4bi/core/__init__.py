@@ -30,15 +30,12 @@ from .bias import (
     DistanceBias,
     RBFNetworkBias,
     TISABias,
-    dist_spatial,
-    dist_spatiotemporal,
     rbf_network_bias,
     scanned_rbf_network_bias,
     scanned_tisa_bias,
     tisa_bias,
     zero_bias,
 )
-from .compose import ComposableModule, ExpressionNode
 from .conv import (
     ConvCNPBlock,
     ConvCNPNet,
@@ -50,6 +47,10 @@ from .conv import (
     TransitionBlock,
     UNet,
 )
+from .dist import (
+    dist_spatial,
+    dist_spatiotemporal,
+)
 from .embed import (
     FixedSinusoidalEmbedding,
     GaussianFourierEmbedding,
@@ -59,9 +60,12 @@ from .embed import (
 )
 from .gnn import EdgeBiasedGAT, GraphAttentionBlock
 from .knn import (
+    STkNN,
     approx_knn,
     bf_knn,
     kNN,
+    st_approx_knn,
+    st_bf_knn,
 )
 from .metrics import (
     l2_dist_sq,
