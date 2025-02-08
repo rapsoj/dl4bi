@@ -42,7 +42,7 @@ def dist_spatial(q: jax.Array, r: jax.Array):
     return l2_dist(q, r)[..., None]  # [Q, R, D=1]
 
 
-class DistanceBias(nn.Module):
+class DistanceBias(ComposableModule):
     num_heads: int = 4
     channel: int = 0
 

@@ -64,17 +64,14 @@ class ComposableModule(nn.Module):
 
     expr: Optional[ExpressionNode] = None
 
+    @nn.compact
     def __call__(self, x):
         return self.expr.evaluate(x, self.variables)
 
     def _binary_op(self, other, op):
-        return ComposableModule(
-            expr=ExpressionNode(
-                self.expr if self.expr is not None else self,
-                op,
-                other.expr if isinstance(other, ComposableModule) else other,
-            )
-        )
+        left = self.expr if self.expr is not None else ExpressionNode(self)
+        right = other.expr if other.expr is not None else ExpressionNode(other)
+        return ComposableModule(expr=ExpressionNode(left, op, right))
 
     def __add__(self, other):
         return self._binary_op(other, operator.add)
