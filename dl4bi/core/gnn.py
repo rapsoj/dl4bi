@@ -1,5 +1,4 @@
 import flax.linen as nn
-import jax
 from jraph import GraphsTuple
 
 from .attention import MultiHeadGraphAttention
@@ -42,14 +41,13 @@ class EdgeBiasedGAT(nn.Module):
     def __call__(
         self,
         g: GraphsTuple,
-        edges_mask: jax.Array,
         training: bool = False,
         **kwargs,
     ):
         for _ in range(self.num_blks):
             blk = self.blk.copy()
             for _ in range(self.num_reps):
-                bias = self.bias.copy()(g.edges, edges_mask).squeeze()
+                bias = self.bias.copy()(g.edges, g.globals.get("edge_mask"))
                 # NOTE: bucket_size is for numerical stability in
                 # jax.ops.segment_* calls; this is typically only needed for
                 # testing implementation correctness

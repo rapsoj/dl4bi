@@ -36,6 +36,7 @@ from .bias import (
     tisa_bias,
     zero_bias,
 )
+from .compose import ComposableModule, ExpressionNode
 from .conv import (
     ConvCNPBlock,
     ConvCNPNet,
