@@ -97,7 +97,7 @@ class TNPKR(nn.Module):
         qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx}
         kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx}
         if self.dist is not None:
-            vdist = vmap(self.dist)
+            vdist = jit(vmap(self.dist))
             d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
             # NOTE: this assumes the sentinal for a masked value is an
             # infinite value in any entry of the last dim of `d`
