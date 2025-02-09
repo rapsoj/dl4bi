@@ -49,7 +49,7 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    if cfg.infer:
+    if cfg.compare_inference:
         model_path = path.with_suffix(".ckpt")
         return compare_inference(rng, model_path, cfg.data, cfg.infer)
     rng_train, rng_test = random.split(rng)
@@ -177,7 +177,8 @@ def numpyro_spatial_prior_pred_f(
 def numpyro_spatial_model(
     x: jax.Array,  # [L, D]
     s: jax.Array,  # [L, S]
-    f: Optional[jax.Array] = None,
+    f: Optional[jax.Array] = None,  # [L, 1]
+    num_f_obs: Optional[int] = None,
     jitter: float = 1e-5,
 ):
     """Generic Spatiotemporal model with random spatial effects.
@@ -194,8 +195,11 @@ def numpyro_spatial_model(
     beta = numpyro.sample("beta", dist.Normal(jnp.zeros(D), jnp.ones(D)))
     f_mu_x = x @ beta
     f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(jnp.zeros(L), k))
+    f_mu = f_mu_x + f_mu_s
     f_sigma = numpyro.sample("f_sigma", dist.HalfNormal(0.1))
-    numpyro.sample("f", dist.Normal(f_mu_x + f_mu_s, f_sigma))
+    mask = jnp.arange(L) < (num_f_obs or L)
+    with numpyro.handlers.mask(mask=mask):
+        numpyro.sample("f", dist.Normal(f_mu, f_sigma), obs=f)
 
 
 # TODO(danj): implement
@@ -206,34 +210,41 @@ def compare_inference(
     infer: DictConfig,
 ):
     Nc, S = infer.num_ctx, len(data.s)
-    rng_sample, rng_extra, rng_mcmc = random.split(rng, 3)
+    rng_sample, rng_extra, rng_mcmc, rng_pp = random.split(rng, 4)
     data.batch_size = 1  # only generate one sample
     dataloader = build_dataloader(numpyro_spatial_prior_pred_f, data)
     batches = dataloader(rng_sample)
     _, _, _, s, f, _ = next(batches)
     valid_lens_ctx = jnp.array([Nc])
     s_ctx, f_ctx, s_test, f_test = s[:, :Nc], f[:, :Nc], s[:, Nc:], f[:, Nc:]
-    state, _ = load_ckpt(model_path)
-    # compile in first run, time in second
-    for i in range(2):
-        start = time()
-        f_mu, f_std = jit(state.apply_fn)(
-            {"params": state.params, **state.kwargs},
-            s_ctx,
-            f_ctx,
-            s_test,
-            valid_lens_ctx,
-            valid_lens_test=None,
-            rngs={"extra": rng_extra},
-        )
-    print(f"Seconds elapsed for model inference: {time() - start}")
+    # state, _ = load_ckpt(model_path)
+    # # compile in first run, time in second
+    # for i in range(2):
+    #     start = time()
+    #     f_mu, f_std = jit(state.apply_fn)(
+    #         {"params": state.params, **state.kwargs},
+    #         s_ctx,
+    #         f_ctx,
+    #         s_test,
+    #         valid_lens_ctx,
+    #         valid_lens_test=None,
+    #         rngs={"extra": rng_extra},
+    #     )
+    # print(f"Seconds elapsed for model inference: {time() - start}")
     _x, _s, _f = s[0, :S], s[0, S:], f[0]
     # TODO(danj): need to mask f
     start = time()
-    mcmc = run_mcmc(rng_mcmc, numpyro_spatial_model, _x, _s, _f, infer)
+    mcmc = run_mcmc(rng_mcmc, numpyro_spatial_model, _x, _s, _f, Nc, infer.mcmc)
     print(f"Seconds elapsed for MCMC inference: {time() - start}")
     mcmc.print_summary()
-    post_pred = mcmc.get_samples()
+    post = mcmc.get_samples()
+    post_pred = Predictive(
+        numpyro_spatial_model,
+        post,
+        num_samples=infer.post_pred.num_samples,
+    )
+    post_pred_samples = jit(post_pred)(rng_pp, _x, _s, _f, Nc)
+    print(post_pred_samples["f"].shape)
     # 3. Run MCMC on it and extract posterior predictive samples, save them
     # 4. Calculate marginal posterior predictive for each sample by taking mean and var
     #  of posterior predictive
@@ -246,15 +257,16 @@ def run_mcmc(
     x: jax.Array,
     s: jax.Array,
     f: jax.Array,
-    infer: DictConfig,
+    num_f_obs: int,
+    mcmc: DictConfig,
 ):
     mcmc = MCMC(
         NUTS(model),
-        num_warmup=infer.mcmc.num_warmup,
-        num_samples=infer.mcmc.num_samples,
-        num_chains=infer.mcmc.num_chains,
+        num_warmup=mcmc.num_warmup,
+        num_samples=mcmc.num_samples,
+        num_chains=mcmc.num_chains,
     )
-    mcmc.run(rng, x, s, f)
+    mcmc.run(rng, x, s, f, num_f_obs)
     return mcmc
 
 
