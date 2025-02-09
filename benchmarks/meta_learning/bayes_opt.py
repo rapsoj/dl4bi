@@ -17,12 +17,12 @@ from tqdm import tqdm
 from dl4bi.core import mask_from_valid_lens
 from dl4bi.meta_learning.train_utils import (
     TrainState,
-    build_gp_dataloader,
     cfg_to_run_name,
     load_ckpt,
     log_wandb_line,
-    plot_posterior_predictive,
 )
+
+from .gp import build_gp_dataloader, plot_posterior_predictive
 
 
 # NOTE: use the same configs as the Gaussian Process (GP) models

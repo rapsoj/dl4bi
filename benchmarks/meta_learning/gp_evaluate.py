@@ -6,11 +6,12 @@ from jax import random
 from omegaconf import DictConfig
 
 from dl4bi.meta_learning.train_utils import (
-    build_gp_dataloader,
     cfg_to_run_name,
     evaluate,
     load_ckpt,
 )
+
+from .gp import build_gp_dataloader
 
 
 # NOTE: use the same configs as the Gaussian Process (GP) models
