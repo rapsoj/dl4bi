@@ -29,8 +29,11 @@ from dl4bi.meta_learning.train_utils import (
 
 # TODO:
 # 1. Add inference
-# 2. Add plots
-# 3. Can you use distance bias on covariates too??
+# 2. Get marginal predictions f_mu, f_sigma from posterior
+# 3. Add plots
+#
+# Can you use distance bias on covariates too??
+# Can we do House Electricity Consumption dataset?? (one million point GP paper)
 
 # mcmc = infer(rng_mcmc, args, numpyro_spatial_model, s, f)
 # mcmc.print_summary()
