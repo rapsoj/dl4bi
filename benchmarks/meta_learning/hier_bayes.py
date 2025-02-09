@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from functools import partial
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -51,15 +52,13 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
+    # NOTE: sampling from pure jax model since it only inverts the GP
+    # covariance matrix once per batch; this also means that each batch
+    # shares the same GP hyperparams, even though the samples are different;
+    # this is different from the numpyro model which samples new hyperparams
+    # and inverts a different covariance matrix for every element in the batch
     dataloader = build_dataloader(jax_spatial_prior_pred_f, cfg.data)
-    batches = dataloader(rng)
-    # from tqdm import tqdm
-    # import sys
-
-    # for _ in tqdm(range(1000)):
-    #     b = next(batches)
-
-    # sys.exit(0)
+    # dataloader = build_dataloader(numpyro_spatial_prior_pred_f, cfg.data)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -119,7 +118,7 @@ def build_dataloader(prior_pred: Callable, data: DictConfig):
         s = jnp.vstack([s_r, s_g])
         f = prior_pred(rng, x, s, B)  # x: [L, D], s: [L, S], f: [B, L, 1]
         x, s = batchify(x), batchify(s)  # x: [B, L, D], s: [B, L, S]
-        valid_lens_ctx = random.randint(rng_v, (B,), jnp.float32, Nc_min, Nc_max)
+        valid_lens_ctx = random.randint(rng_v, (B,), Nc_min, Nc_max)
         s = jnp.concatenate([s, x], axis=-1)  # [B, L, S + D]
         s_ctx = s[:, :Nc_max, :]
         f_ctx = f[:, :Nc_max, :]
@@ -163,7 +162,7 @@ def _jax_spatial_prior_pred_rest(rng: jax.Array, x: jax.Array, f_mu_s: jax.Array
     return f
 
 
-@jit
+@partial(jit, static_argnames=("batch_size",))
 def numpyro_spatial_prior_pred_f(
     rng: jax.Array,
     x: jax.Array,  # [L, D]
