@@ -4,16 +4,13 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax import vmap, jit
+from jax import jit, vmap
 
-from ..core import (
-    MLP,
-    KRBlock,
-    MultiHeadAttention,
-    RBFNetworkBias,
-    RBFNetworkBiasedScanAttention,
-    dist_spatial,
-)
+from ..core.attention import MultiHeadAttention, RBFNetworkBiasedScanAttention
+from ..core.bias import RBFNetworkBias
+from ..core.dist import dist_spatial
+from ..core.mlp import MLP
+from ..core.transformer import KRBlock
 from .transform import diagonal_mvn
 
 
@@ -100,7 +97,7 @@ class TNPKR(nn.Module):
         qk_kwargs = {"qs_s": s_test, "ks_s": s_ctx}
         kk_kwargs = {"qs_s": s_ctx, "ks_s": s_ctx}
         if self.dist is not None:
-            vdist = vmap(self.dist)
+            vdist = jit(vmap(self.dist))
             d_qk, d_kk = vdist(s_test, s_ctx), vdist(s_ctx, s_ctx)
             # NOTE: this assumes the sentinal for a masked value is an
             # infinite value in any entry of the last dim of `d`

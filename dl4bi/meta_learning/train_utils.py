@@ -25,6 +25,8 @@ from jax.scipy.stats import norm
 from omegaconf import DictConfig, OmegaConf
 from optax.losses import safe_softmax_cross_entropy
 from orbax.checkpoint import PyTreeCheckpointer
+
+# NOTE: needed by `instantiate` function
 from sps.gp import GP
 from sps.kernels import matern_1_2, matern_3_2, matern_5_2, periodic, rbf
 from sps.priors import Prior
@@ -32,7 +34,18 @@ from sps.sir import LatticeSIR
 from sps.utils import build_grid
 from tqdm import tqdm
 
-from ..core import *
+# NOTE: needed by `instantiate` function
+from ..core.attention import *
+from ..core.bias import *
+from ..core.conv import *
+from ..core.dist import *
+from ..core.embed import *
+from ..core.gnn import *
+from ..core.knn import *
+from ..core.metrics import *
+from ..core.mlp import *
+from ..core.preprocess import *
+from ..core.transformer import *
 from .anp import ANP
 from .banp import BANP
 from .bnp import BNP
@@ -58,6 +71,23 @@ class TrainState(train_state.TrainState):
 class Callback:
     fn: Callable  # (step, rng_step, state, batch) -> None
     interval: int  # apply every interval of train_num_steps
+
+
+def instantiate(d: Union[dict, DictConfig]):
+    """Convenience function to instantiate an object from a config."""
+    if isinstance(d, DictConfig):
+        d = OmegaConf.to_container(d, resolve=True)
+    if "cls" in d:
+        cls, kwargs = d["cls"], d.get("kwargs", {})
+        for k in kwargs:
+            if k == "act_fn":
+                kwargs[k] = getattr(nn, kwargs[k])
+            elif isinstance(kwargs[k], dict):
+                kwargs[k] = instantiate(kwargs[k])
+        return globals().get(cls, getattr(nn, cls, None))(**kwargs)
+    elif "func" in d:
+        return eval(d["func"])
+    return d
 
 
 def train(
@@ -611,118 +641,6 @@ def cfg_to_run_name(cfg: DictConfig):
     return name
 
 
-def instantiate(d: Union[dict, DictConfig]):
-    """Convenience function to instantiate an object from a config."""
-    if isinstance(d, DictConfig):
-        d = OmegaConf.to_container(d, resolve=True)
-    if "cls" in d:
-        cls, kwargs = d["cls"], d.get("kwargs", {})
-        for k in kwargs:
-            if k == "act_fn":
-                kwargs[k] = getattr(nn, kwargs[k])
-            elif isinstance(kwargs[k], dict):
-                kwargs[k] = instantiate(kwargs[k])
-        return globals().get(cls, getattr(nn, cls, None))(**kwargs)
-    elif "func" in d:
-        return eval(d["func"])
-    return d
-
-
-def build_gp_dataloader(data: DictConfig, kernel: DictConfig):
-    """Generates batches of GP samples."""
-    gp = instantiate(kernel)
-    s_dim = len(data.s)
-    s_grid = build_grid(data.s).reshape(-1, s_dim)  # flatten spatial dims
-    obs_noise, batch_size = data.obs_noise, data.batch_size
-    valid_lens_test = jnp.repeat(data.num_ctx.max + s_grid.shape[0], batch_size)
-    min_s = jnp.array([axis["start"] for axis in data.s])
-    max_s = jnp.array([axis["stop"] for axis in data.s])
-
-    @jit
-    def gen_s_random(rng: jax.Array):
-        return random.uniform(
-            rng, (data.num_ctx.max, s_dim), minval=min_s, maxval=max_s
-        )
-
-    def gen_batch(rng: jax.Array):
-        rng_s_random, rng_valid_lens_ctx, rng_gp, rng_eps, rng = random.split(rng, 5)
-        s_random = gen_s_random(rng_s_random)
-        s = jnp.vstack([s_random, s_grid])
-        f, var, ls, period, *_ = gp.simulate(rng_gp, s, batch_size)
-        valid_lens_ctx = random.randint(
-            rng_valid_lens_ctx,
-            (batch_size,),
-            data.num_ctx.min,
-            data.num_ctx.max,
-        )
-        s = jnp.repeat(s[None, ...], batch_size, axis=0)
-        s_ctx = s[:, : data.num_ctx.max, :]
-        f_ctx = f + obs_noise * random.normal(rng_eps, f.shape)
-        f_ctx = f_ctx[:, : data.num_ctx.max, :]
-        return s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, var, ls, period
-
-    def dataloader(rng: jax.Array):
-        while True:
-            rng_batch, rng = random.split(rng)
-            yield gen_batch(rng_batch)
-
-    return dataloader
-
-
-def build_2d_grid_gp_dataloader(data: DictConfig, kernel: DictConfig):
-    """A custom 2D GP dataloader in which generated context and test points
-        reside only on the 2d grid.
-
-    .. note::
-        The dataloader used for training and testing uses context points
-        on a continuous domain, while this only uses points on a grid for
-        visualization purposes.
-    """
-    gp = instantiate(kernel)
-    s_dim = len(data.s)
-    s_grid = build_grid(data.s).reshape(-1, s_dim)  # flatten spatial dims
-    s = jnp.repeat(s_grid[None, ...], data.batch_size, axis=0)
-    L = s.shape[1]
-    obs_noise, batch_size = data.obs_noise, data.batch_size
-    valid_lens_test = jnp.repeat(L, batch_size)
-
-    def gen_batch(rng: jax.Array):
-        rng_gp, rng_eps, rng_valid, rng_permute, rng = random.split(rng, 5)
-        f, var, ls, period, *_ = gp.simulate(rng_gp, s_grid, batch_size)
-        f_noisy = f + obs_noise * random.normal(rng_eps, f.shape)
-        valid_lens_ctx = random.randint(
-            rng_valid,
-            (batch_size,),
-            data.num_ctx.min,
-            data.num_ctx.max,
-        )
-        permute_idx = random.choice(rng_permute, L, (L,), replace=False)
-        inv_permute_idx = jnp.argsort(permute_idx)
-        s_permuted = s[:, permute_idx, :]
-        f_permuted = f[:, permute_idx, :]
-        f_noisy_permuted = f_noisy[:, permute_idx, :]
-        s_ctx = s_permuted[:, : data.num_ctx.max, :]
-        f_ctx = f_noisy_permuted[:, : data.num_ctx.max, :]
-        return (
-            s_ctx,
-            f_ctx,
-            valid_lens_ctx,
-            s_permuted,  # s_test
-            f_permuted,  # f_test
-            valid_lens_test,
-            s,  # add full original for plotting
-            f,
-            inv_permute_idx,
-        )
-
-    def dataloader(rng: jax.Array):
-        while True:
-            rng_batch, rng = random.split(rng)
-            yield gen_batch(rng_batch)
-
-    return dataloader
-
-
 def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
     "Save a checkpoint."
     shutil.rmtree(path, ignore_errors=True)
@@ -836,145 +754,6 @@ def sample(
         f_ctx = f_ctx.at[:, L_ctx + i, :].set(f_test_i)
         valid_lens_ctx += 1
     return s_ctx[:, L_ctx:, :], f_ctx[:, L_ctx:, :]  # only return test locations
-
-
-def plot_posterior_predictives(
-    s_ctx: jax.Array,
-    f_ctx: jax.Array,
-    valid_lens_ctx: jax.Array,
-    s_test: jax.Array,
-    f_test: jax.Array,
-    valid_lens_test: jax.Array,
-    var: jax.Array,
-    ls: jax.Array,
-    period: jax.Array | None,
-    f_mu: jax.Array,
-    f_std: jax.Array,
-    num_plots: int = 16,
-):
-    """Plots `num_plots` from the given batch."""
-    paths = []
-    for i in range(num_plots):
-        v_ctx = valid_lens_ctx[i]
-        s_ctx_i = s_ctx[i, :v_ctx].squeeze()
-        f_ctx_i = f_ctx[i, :v_ctx].squeeze()
-        v_test = valid_lens_test[i]
-        s_test_i = s_test[i, :v_test].squeeze()
-        f_test_i = f_test[i, :v_test].squeeze()
-        f_mu_i = f_mu[i, :v_test].squeeze()
-        f_std_i = f_std[i, :v_test].squeeze()
-        if f_mu[i].shape != f_std[i].shape:  # marginal from tril cov
-            f_std_i = jnp.diag(f_std[i]).squeeze()  # TODO(danj): is this valid?
-        if f_mu.shape != f_test.shape:  # bootstrapped
-            K = f_mu.shape[0] // f_test.shape[0]
-            s = i * K
-            f_mu_i = f_mu[s : s + K].squeeze()
-            f_std_i = f_std[s : s + K].squeeze()
-        title = f"Sample {i} (var: {var[i]:0.2f}, ls: {ls[i]:0.2f}"
-        title += f", period: {period[i]:0.2f})" if jnp.isfinite(period) else ")"
-        fig = plot_posterior_predictive(
-            s_ctx_i, f_ctx_i, s_test_i, f_test_i, f_mu_i, f_std_i
-        )
-        fig.suptitle(title)
-        paths += [f"/tmp/{datetime.now().isoformat()} - {title}.png"]
-        fig.savefig(paths[-1], dpi=125)
-        plt.clf()
-        plt.close(fig)
-    return paths
-
-
-def plot_posterior_predictive(
-    s_ctx: jax.Array,
-    f_ctx: jax.Array,
-    s_test: jax.Array,
-    f_test: jax.Array,
-    f_mu: jax.Array,
-    f_std: jax.Array,
-    hdi_prob: float = 0.95,
-):
-    """Plots the posterior predictive alongside true values."""
-    f_mu = f_mu[None, ...] if f_mu.ndim == 1 else f_mu
-    f_std = f_std[None, ...] if f_std.ndim == 1 else f_std
-    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
-    f_lower, f_upper = f_mu - z_score * f_std, f_mu + z_score * f_std
-    idx = jnp.argsort(s_test)
-    plt.plot(s_test[idx], f_test[idx], color="black")
-    plt.scatter(s_ctx, f_ctx, color="black", alpha=0.75)
-    K = f_mu.shape[0]
-    for i in range(K):
-        f_mu_i = f_mu[i]
-        plt.plot(s_test[idx], f_mu_i[idx], color="steelblue")
-        f_lower_i, f_upper_i = f_lower[i], f_upper[i]
-        plt.fill_between(
-            s_test[idx],
-            f_lower_i[idx],
-            f_upper_i[idx],
-            alpha=0.4 / K,
-            color="steelblue",
-            interpolate=True,
-        )
-    ax = plt.gca()
-    ax.set_xlabel("s")
-    ax.set_ylabel("f")
-    return plt.gcf()
-
-
-def log_posterior_predictive_plots(
-    step: int,
-    rng_step: int,
-    state: TrainState,
-    batch: tuple,
-    num_plots: int = 16,
-):
-    rng_dropout, rng_extra = random.split(rng_step)
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, var, ls, period = (
-        batch
-    )
-    output = state.apply_fn(
-        {"params": state.params, **state.kwargs},
-        s_ctx,
-        f_ctx,
-        s_test,
-        valid_lens_ctx,
-        valid_lens_test,
-        rngs={"dropout": rng_dropout, "extra": rng_extra},
-    )
-    if isinstance(output[1], tuple):  # latent or bootstrapped
-        output, _ = output  # throw away latent / base samples
-    f_mu, f_std = output
-    paths = plot_posterior_predictives(
-        s_ctx,
-        f_ctx,
-        valid_lens_ctx,
-        s_test,
-        f_test,
-        valid_lens_test,
-        var,
-        ls,
-        period,
-        f_mu,
-        f_std,
-        num_plots,
-    )
-    wandb.log({f"Step {step}": [wandb.Image(p) for p in paths]})
-
-
-def log_2d_grid_gp_plots(
-    step: int,
-    rng_step: int,
-    state: TrainState,
-    batch: tuple,
-    shape: tuple[int, int, int],
-    data: DictConfig,
-    kernel: DictConfig,
-    num_plots: int = 16,
-):
-    """Logs `num_plots` from the given batch for 2D GPs."""
-    rng_step, rng_batch = random.split(rng_step)
-    cmap = mpl.colormaps.get_cmap("Spectral_r")
-    cmap.set_bad("grey")
-    batch = next(build_2d_grid_gp_dataloader(data, kernel)(rng_batch))
-    log_img_plots(step, rng_step, state, batch, shape, cmap=cmap, num_plots=num_plots)
 
 
 def log_img_plots(

@@ -2,11 +2,11 @@
 from pathlib import Path
 
 import hydra
+from gp import build_gp_dataloader
 from jax import random
 from omegaconf import DictConfig
 
 from dl4bi.meta_learning.train_utils import (
-    build_gp_dataloader,
     cfg_to_run_name,
     evaluate,
     load_ckpt,
