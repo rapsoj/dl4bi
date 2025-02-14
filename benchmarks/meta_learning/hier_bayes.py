@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 import importlib
-import pickle
 from pathlib import Path
-from time import time
 from typing import Callable
 
 import hydra
@@ -11,7 +9,7 @@ import jax.numpy as jnp
 import optax
 import wandb
 from jax import jit, random
-from numpyro.infer import MCMC, NUTS, Predictive
+from numpyro.infer import MCMC, NUTS
 from omegaconf import DictConfig, OmegaConf
 
 from dl4bi.meta_learning.train_utils import (
@@ -27,7 +25,7 @@ from dl4bi.meta_learning.train_utils import (
 
 # TODO:
 # Plot comparison images - pointwise post pred
-# Do inference comparison
+# figure out good metrics to use
 # Can you use distance bias on covariates too??
 # Can we do House Electricity Consumption dataset?? (one million point GP paper)
 
@@ -46,22 +44,10 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    dataloader, *infer_funcs = collect_infer_funcs(cfg.inference_model, cfg.data)
     if cfg.compare_inference:
-        batch_to_infer_kwargs, numpyro_model, numpyro_pointwise_post_pred = infer_funcs
-        rng_sample, rng_mcmc, rng_post, rng = random.split(rng, 4)
-        batch = next(dataloader(rng_sample))
-        kwargs = batch_to_infer_kwargs(batch, cfg.data, cfg.infer)
-        mcmc = run_mcmc(rng_mcmc, numpyro_model, cfg.infer.mcmc, **kwargs)
-        mcmc.print_summary()
-        samples = mcmc.get_samples()
-        f_mu, f_std = numpyro_pointwise_post_pred(
-            rng_post,
-            **kwargs,
-            **samples,
-        )
-        print(f_mu.shape)
-        return
+        model_path = path.with_suffix(".ckpt")
+        return compare_inference(rng, model_path, cfg)
+    dataloader, *_ = collect_infer_funcs(cfg.inference_model, cfg.data)
     rng_train, rng_test = random.split(rng)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
@@ -109,65 +95,35 @@ def collect_infer_funcs(model_name: str, data: DictConfig):
     )
 
 
-def compare_inference(
-    rng: jax.Array,
-    inference_model_name: str,
-    model_path: Path,
-    data: DictConfig,
-    infer: DictConfig,
-):
-    Nc, S = infer.num_ctx, len(data.s)
-    rng_sample, rng_extra, rng_mcmc, rng_pp = random.split(rng, 4)
-    data.batch_size = 1  # only generate one sample
-    numpyro_model, dataloader = import_inference_functions(inference_model_name, data)
-    batches = dataloader(rng_sample)
-    _, _, _, s, f, _, ls, beta, f_obs_noise = next(batches)
-    valid_lens_ctx = jnp.array([Nc])
-    s_ctx, f_ctx = s[:, :Nc], f[:, :Nc]
+def compare_inference(rng: jax.Array, model_path: Path, cfg: DictConfig):
+    rng_sample, rng_extra, rng_mcmc, rng_post = random.split(rng, 4)
+    dataloader, *infer_funcs = collect_infer_funcs(cfg.inference_model, cfg.data)
     state, _ = load_ckpt(model_path)
-    # compile in first run, time in second
-    for i in range(2):
-        start = time()
-        f_mu_model, f_std_model = jit(state.apply_fn)(
-            {"params": state.params, **state.kwargs},
-            s_ctx,
-            f_ctx,
-            s,
-            valid_lens_ctx,
-            valid_lens_test=None,
-            rngs={"extra": rng_extra},
-        )
-    print(f"Seconds elapsed for model inference: {time() - start}")
-    # _s, _x, _f = s[0, :, :S].squeeze(), s[0, :, S:], f[0]
-    _s, _x, _f = s[0, :Nc, :S].squeeze(), s[0, :Nc, S:], f[0, :Nc]
-    start = time()
-    mcmc = run_mcmc(rng_mcmc, numpyro_model, _x, _s, _f, Nc, infer.mcmc)
-    print(f"Seconds elapsed for MCMC inference: {time() - start}")
-    mcmc.print_summary()
-    post = mcmc.get_samples()
-    post_pred = Predictive(numpyro_model, post)
-    post_pred_samples = jit(post_pred)(rng_pp, _x, _s)
-    f_pp = post_pred_samples["f"]
-    post.update(
-        {
-            "x": _x,
-            "s": _s,
-            "Nc": Nc,
-            "f_mu_model": f_mu_model.squeeze(),
-            "f_std_model": f_std_model.squeeze(),
-            "f_mu_mcmc": jnp.mean(f_pp, axis=0),
-            "f_std_mcmc": jnp.std(f_pp, axis=0),
-            "f_pp": f_pp,
-            "f_true": _f,
-            "ls_true": ls,
-            "beta_true": beta,
-            "f_obs_noise_true": f_obs_noise,
-        }
+    batch = next(dataloader(rng_sample))
+    s_ctx, f_ctx, _, s_test, f_test, *_ = batch
+    Nc = cfg.infer.num_ctx
+    f_mu_model, f_std_model = jit(state.apply_fn)(
+        {"params": state.params, **state.kwargs},
+        s_ctx[[0], :Nc],
+        f_ctx[[0], :Nc],
+        s_test[[0], Nc:],
+        jnp.array([cfg.infer.num_ctx]),
+        valid_lens_test=None,
+        rngs={"extra": rng_extra},
     )
-    with open("compare_inference.pkl", "wb") as f:
-        pickle.dump(post, f)
-    # TODO(danj): follow this tutorial to get predictive: https://num.pyro.ai/en/stable/examples/gp.html
-    # TODO(danj): calculate comparison metrics, LL under real data?
+    batch_to_infer_kwargs, numpyro_model, numpyro_pointwise_post_pred = infer_funcs
+    rng_sample, rng_mcmc, rng_post, rng = random.split(rng, 4)
+    batch = next(dataloader(rng_sample))
+    kwargs = batch_to_infer_kwargs(batch, cfg.data, cfg.infer)
+    mcmc = run_mcmc(rng_mcmc, numpyro_model, cfg.infer.mcmc, **kwargs)
+    mcmc.print_summary()
+    samples = mcmc.get_samples()
+    f_mu_pyro, f_std_pyro = numpyro_pointwise_post_pred(
+        rng_post,
+        **kwargs,
+        **samples,
+    )
+    print(f_mu_model.shape, f_mu_pyro.shape)
 
 
 def run_mcmc(rng: jax.Array, model: Callable, infer: DictConfig, **kwargs):
