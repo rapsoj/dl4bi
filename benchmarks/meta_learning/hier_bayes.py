@@ -1,23 +1,18 @@
 #!/usr/bin/env python
+import importlib
 import pickle
-from functools import partial
 from pathlib import Path
 from time import time
-from typing import Callable, Optional
+from typing import Callable
 
 import hydra
 import jax
 import jax.numpy as jnp
-import numpyro
-import numpyro.distributions as dist
 import optax
 import wandb
 from jax import jit, random
 from numpyro.infer import MCMC, NUTS, Predictive
 from omegaconf import DictConfig, OmegaConf
-from sps.gp import GP
-from sps.kernels import rbf
-from sps.utils import build_grid
 
 from dl4bi.meta_learning.train_utils import (
     cfg_to_run_name,
@@ -34,6 +29,7 @@ from dl4bi.meta_learning.train_utils import (
 # Do inference comparison
 # Can you use distance bias on covariates too??
 # Can we do House Electricity Consumption dataset?? (one million point GP paper)
+# Customize so inference models can use any kernel? similar to GP code
 
 
 @hydra.main("configs/hier_bayes", config_name="default", version_base=None)
@@ -52,15 +48,15 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     if cfg.compare_inference:
         model_path = path.with_suffix(".ckpt")
-        return compare_inference(rng, model_path, cfg.data, cfg.infer)
+        return compare_inference(
+            rng,
+            cfg.inference_model,
+            model_path,
+            cfg.data,
+            cfg.infer,
+        )
+    _, dataloader = import_inference_functions(cfg.inference_model, cfg.data)
     rng_train, rng_test = random.split(rng)
-    # NOTE: sampling from pure jax model since it only inverts the GP
-    # covariance matrix once per batch; this also means that each batch
-    # shares the same GP hyperparams, even though the samples are different;
-    # this is different from the numpyro model which samples new hyperparams
-    # and inverts a different covariance matrix for every element in the batch
-    dataloader = build_dataloader(jax_spatial_prior_pred_f, cfg.data)
-    # dataloader = build_dataloader(numpyro_spatial_prior_pred_f, cfg.data)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -96,116 +92,15 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def build_dataloader(prior_pred: Callable, data: DictConfig):
-    """Generates batches of model samples.
-
-    Args:
-        prior_pred: Callable of (x: [L, D], s: [L, S], batch_size) -> f: [B, L, 1]
-    """
-    B, S, D = data.batch_size, len(data.s), data.num_features
-    Nc_min, Nc_max = data.num_ctx.min, data.num_ctx.max
-    s_g = build_grid(data.s).reshape(-1, S)  # flatten spatial dims
-    L = Nc_max + s_g.shape[0]  # L = num_test or all points
-    valid_lens_test = jnp.repeat(L, B)
-    s_min = jnp.array([axis["start"] for axis in data.s])
-    s_max = jnp.array([axis["stop"] for axis in data.s])
-    batchify = lambda x: jnp.repeat(x[None, ...], B, axis=0)
-
-    def gen_batch(rng: jax.Array):
-        rng_s, rng_x, rng_v = random.split(rng, 3)
-        x = random.normal(rng_x, (L, D))  # features for every location
-        s_r = random.uniform(rng_s, (Nc_max, S), jnp.float32, s_min, s_max)
-        s = jnp.vstack([s_r, s_g])
-        f, *rest = prior_pred(rng, x, s, B)  # x: [L, D], s: [L, S], f: [B, L, 1]
-        x, s = batchify(x), batchify(s)  # x: [B, L, D], s: [B, L, S]
-        valid_lens_ctx = random.randint(rng_v, (B,), Nc_min, Nc_max)
-        s = jnp.concatenate([s, x], axis=-1)  # [B, L, S + D]
-        s_ctx = s[:, :Nc_max, :]
-        f_ctx = f[:, :Nc_max, :]
-        return s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, *rest
-
-    def dataloader(rng: jax.Array):
-        while True:
-            rng_i, rng = random.split(rng)
-            yield gen_batch(rng_i)
-
-    return dataloader
-
-
-def jax_spatial_prior_pred_f(
-    rng: jax.Array,
-    x: jax.Array,  # [L, D]
-    s: jax.Array,  # [L, S]
-    batch_size: int = 64,
-):
-    """A faster, pure JAX spatiotemporal model.
-
-    Technically this isn't the same model since the GP class samples
-    the GP priors once per batch in order to amortize the cost of
-    the Cholesky decomposition.
-    """
-    rng_gp, rng_rest = random.split(rng)
-    # NOTE: can't jit this; hlo lowering fails on cholesky?
-    f_mu_s, _, ls, *_ = GP(rbf).simulate(rng_gp, s, batch_size)
-    f, beta, f_sigma = _jax_spatial_prior_pred_rest(rng_rest, x, f_mu_s.squeeze())
-    return f[..., None], ls, beta, f_sigma  # f: [B, L, 1]
-
-
-@jit
-def _jax_spatial_prior_pred_rest(rng: jax.Array, x: jax.Array, f_mu_s: jax.Array):
-    B, (L, D) = f_mu_s.shape[0], x.shape
-    rng_beta, rng_sigma, rng_noise = random.split(rng, 3)
-    beta = random.normal(rng_beta, (B, D))
-    f_mu_x = beta @ x.T  # [B, L]
-    f_sigma = 0.1 * jnp.abs(random.normal(rng_sigma, (B,)))
-    f = f_mu_x + f_mu_s + f_sigma[:, None] * random.normal(rng_noise, (B, L))
-    return f, beta, f_sigma
-
-
-@partial(jit, static_argnames=("batch_size",))
-def numpyro_spatial_prior_pred_f(
-    rng: jax.Array,
-    x: jax.Array,  # [L, D]
-    s: jax.Array,  # [L, S]
-    batch_size: int = 64,
-):
-    B = batch_size
-    prior_pred = Predictive(numpyro_spatial_model, num_samples=B)
-    samples = prior_pred(rng, x=x, s=s)
-    return samples["f"][..., None], samples["ls"], samples["beta"], samples["f_sigma"]
-
-
-def numpyro_spatial_model(
-    x: jax.Array,  # [L, D]
-    s: jax.Array,  # [L, S]
-    f: Optional[jax.Array] = None,  # [L, 1]
-    num_f_obs: Optional[int] = None,
-    jitter: float = 1e-5,
-):
-    """Generic Spatiotemporal model with random spatial effects.
-
-    Args:
-        s: Array of input locations, `[S]`.
-        x: Array of input covariates, `[S, D]`.
-        f: Observed function values, `[S, 1]`.
-    """
-
-    L, D = x.shape
-    ls = numpyro.sample("ls", dist.Beta(3, 7))
-    k = rbf(s, s, var=1.0, ls=ls) + jitter * jnp.eye(L)
-    beta = numpyro.sample("beta", dist.Normal(jnp.zeros(D), jnp.ones(D)))
-    f_mu_x = x @ beta
-    f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(jnp.zeros(L), k))
-    f_mu = f_mu_x + f_mu_s
-    f_sigma = numpyro.sample("f_sigma", dist.HalfNormal(0.1))
-    numpyro.sample("f", dist.Normal(f_mu, f_sigma), obs=f)
-    # mask = jnp.arange(L) < (num_f_obs or L)
-    # with numpyro.handlers.mask(mask=mask):
-    #     numpyro.sample("f", dist.Normal(f_mu, f_sigma), obs=f)
+def import_inference_functions(model_name: str, data: DictConfig):
+    module = importlib.import_module(f"inference_models/{model_name}")
+    dataloader = module.build_dataloader(module.jax_prior_pred, data)
+    return module.numpyro_model, dataloader
 
 
 def compare_inference(
     rng: jax.Array,
+    inference_model_name: str,
     model_path: Path,
     data: DictConfig,
     infer: DictConfig,
@@ -213,9 +108,9 @@ def compare_inference(
     Nc, S = infer.num_ctx, len(data.s)
     rng_sample, rng_extra, rng_mcmc, rng_pp = random.split(rng, 4)
     data.batch_size = 1  # only generate one sample
-    dataloader = build_dataloader(numpyro_spatial_prior_pred_f, data)
+    numpyro_model, dataloader = import_inference_functions(inference_model_name, data)
     batches = dataloader(rng_sample)
-    _, _, _, s, f, _, ls, beta, f_sigma = next(batches)
+    _, _, _, s, f, _, ls, beta, f_obs_noise = next(batches)
     valid_lens_ctx = jnp.array([Nc])
     s_ctx, f_ctx = s[:, :Nc], f[:, :Nc]
     state, _ = load_ckpt(model_path)
@@ -235,11 +130,11 @@ def compare_inference(
     # _s, _x, _f = s[0, :, :S].squeeze(), s[0, :, S:], f[0]
     _s, _x, _f = s[0, :Nc, :S].squeeze(), s[0, :Nc, S:], f[0, :Nc]
     start = time()
-    mcmc = run_mcmc(rng_mcmc, numpyro_spatial_model, _x, _s, _f, Nc, infer.mcmc)
+    mcmc = run_mcmc(rng_mcmc, numpyro_model, _x, _s, _f, Nc, infer.mcmc)
     print(f"Seconds elapsed for MCMC inference: {time() - start}")
     mcmc.print_summary()
     post = mcmc.get_samples()
-    post_pred = Predictive(numpyro_spatial_model, post)
+    post_pred = Predictive(numpyro_model, post)
     post_pred_samples = jit(post_pred)(rng_pp, _x, _s)
     f_pp = post_pred_samples["f"]
     post.update(
@@ -255,7 +150,7 @@ def compare_inference(
             "f_true": _f,
             "ls_true": ls,
             "beta_true": beta,
-            "f_sigma_true": f_sigma,
+            "f_obs_noise_true": f_obs_noise,
         }
     )
     with open("compare_inference.pkl", "wb") as f:
@@ -266,23 +161,13 @@ def compare_inference(
     # TODO(danj): calculate comparison metrics, LL under real data?
 
 
-def run_mcmc(
-    rng: jax.Array,
-    model: Callable,
-    x: jax.Array,
-    s: jax.Array,
-    f: jax.Array,
-    num_f_obs: int,
-    cfg: DictConfig,
-):
-    mcmc = MCMC(
+def run_mcmc(rng: jax.Array, model: Callable, mcmc: DictConfig, *args):
+    return MCMC(
         NUTS(model),
-        num_warmup=cfg.num_warmup,
-        num_samples=cfg.num_samples,
-        num_chains=cfg.num_chains,
-    )
-    mcmc.run(rng, x, s, f, num_f_obs)
-    return mcmc
+        num_warmup=mcmc.num_warmup,
+        num_samples=mcmc.num_samples,
+        num_chains=mcmc.num_chains,
+    ).run(rng, *args)
 
 
 if __name__ == "__main__":

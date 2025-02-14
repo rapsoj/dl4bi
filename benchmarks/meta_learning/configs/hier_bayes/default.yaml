@@ -3,6 +3,7 @@ defaults:
   - data: 1d
   - infer: 1d
   - model: 1d/tnp_kr
+inference_model: spatial
 seed: 42
 wandb: True
 project: Hierarchical Bayes
