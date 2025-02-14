@@ -49,7 +49,11 @@ def numpyro_prior_pred(
     B = batch_size
     prior_pred = Predictive(numpyro_model, num_samples=B)
     samples = prior_pred(rng, s=s)
-    return samples["f"][..., None], samples["ls"], samples["beta"], samples["f_sigma"]
+    return (
+        samples["f"][..., None],
+        samples["ls"],
+        samples["f_obs_noise"],
+    )
 
 
 def jax_prior_pred(
@@ -69,19 +73,17 @@ def jax_prior_pred(
     ls = Prior("beta", {"a": 3.0, "b": 7.0})
     var = Prior("fixed", {"value": 1.0})
     f_mu_s, _, ls, *_ = GP(kernel, var, ls, jitter=1e-5).simulate(rng_gp, s, batch_size)
-    f, beta, f_obs_noise = _jax_helper(rng_rest, f_mu_s.squeeze())
-    return f[..., None], ls, beta, f_obs_noise  # f: [B, L, 1]
+    f, f_obs_noise = _jax_helper(rng_rest, f_mu_s.squeeze())
+    return f[..., None], ls, f_obs_noise  # f: [B, L, 1]
 
 
 @jit
-def _jax_helper(rng: jax.Array, x: jax.Array, f_mu_s: jax.Array):
-    B, (L, D) = f_mu_s.shape[0], x.shape
-    rng_beta, rng_sigma, rng_noise = random.split(rng, 3)
-    beta = random.normal(rng_beta, (B, D))
-    f_mu_x = beta @ x.T  # [B, L]
+def _jax_helper(rng: jax.Array, f_mu_s: jax.Array):
+    B, L = f_mu_s.shape
+    rng_sigma, rng_noise = random.split(rng)
     f_obs_noise = 0.1 * jnp.abs(random.normal(rng_sigma, (B,)))  # HalfNormal(0.1)
-    f = f_mu_x + f_mu_s + f_obs_noise[:, None] * random.normal(rng_noise, (B, L))
-    return f, beta, f_obs_noise
+    f = f_mu_s + f_obs_noise[:, None] * random.normal(rng_noise, (B, L))
+    return f, f_obs_noise
 
 
 def build_dataloader(prior_pred: Callable, data: DictConfig):

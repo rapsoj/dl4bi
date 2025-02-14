@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 from einops import rearrange
 from flax import linen as nn
-from jax.nn import initalizers as init
+from jax.nn import initializers as init
 
 
 class MLP(nn.Module):

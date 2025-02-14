@@ -93,7 +93,7 @@ def main(cfg: DictConfig):
 
 
 def import_inference_functions(model_name: str, data: DictConfig):
-    module = importlib.import_module(f"inference_models/{model_name}")
+    module = importlib.import_module(f"inference_models.{model_name}")
     dataloader = module.build_dataloader(module.jax_prior_pred, data)
     return module.numpyro_model, dataloader
 

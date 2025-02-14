@@ -54,7 +54,12 @@ def numpyro_prior_pred(
     B = batch_size
     prior_pred = Predictive(numpyro_model, num_samples=B)
     samples = prior_pred(rng, x=x, s=s)
-    return samples["f"][..., None], samples["ls"], samples["beta"], samples["f_sigma"]
+    return (
+        samples["f"][..., None],
+        samples["ls"],
+        samples["beta"],
+        samples["f_obs_noise"],
+    )
 
 
 def jax_prior_pred(
