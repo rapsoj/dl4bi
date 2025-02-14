@@ -40,7 +40,7 @@ def numpyro_model(
     f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(jnp.zeros(L), k))
     f_mu = f_mu_x + f_mu_s
     f_obs_noise = numpyro.sample("f_obs_noise", dist.HalfNormal(0.1))
-    with handlers.trace() if mask is None else handlers.mask(mask):
+    with handlers.trace() if mask is None else handlers.mask(mask=mask):
         numpyro.sample("f", dist.Normal(f_mu, f_obs_noise), obs=f)
 
 
@@ -129,3 +129,11 @@ def build_dataloader(prior_pred: Callable, data: DictConfig):
             yield gen_batch(rng_i)
 
     return dataloader
+
+
+def batch_to_infer_args(batch: tuple, data: DictConfig, infer: DictConfig):
+    S = len(data.s)
+    _, _, _, s, f, *_ = batch
+    s, x, f = s[0, :, :S], s[0, :, S:], f[0]
+    mask = jnp.arange(s.shape[1]) < infer.num_ctx
+    return x, s, f, mask

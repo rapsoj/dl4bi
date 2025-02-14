@@ -46,16 +46,15 @@ def main(cfg: DictConfig):
     )
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
-    if cfg.compare_inference:
-        model_path = path.with_suffix(".ckpt")
-        return compare_inference(
-            rng,
-            cfg.inference_model,
-            model_path,
-            cfg.data,
-            cfg.infer,
-        )
-    _, dataloader = import_inference_functions(cfg.inference_model, cfg.data)
+    numpyro_model, batch_to_infer_args, dataloader = import_inference_functions(
+        cfg.inference_model, cfg.data
+    )
+    if cfg.run_inference:
+        rng_sample, rng_mcmc, rng = random.split(rng, 3)
+        batch = next(dataloader(rng_sample))
+        args = batch_to_infer_args(batch, cfg.data, cfg.infer)
+        mcmc = run_mcmc(rng_mcmc, numpyro_model, cfg.infer.mcmc, *args)
+        mcmc.print_summary()
     rng_train, rng_test = random.split(rng)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
@@ -95,7 +94,7 @@ def main(cfg: DictConfig):
 def import_inference_functions(model_name: str, data: DictConfig):
     module = importlib.import_module(f"inference_models.{model_name}")
     dataloader = module.build_dataloader(module.jax_prior_pred, data)
-    return module.numpyro_model, dataloader
+    return module.numpyro_model, module.batch_to_infer_args, dataloader
 
 
 def compare_inference(
@@ -156,17 +155,15 @@ def compare_inference(
     with open("compare_inference.pkl", "wb") as f:
         pickle.dump(post, f)
     # TODO(danj): follow this tutorial to get predictive: https://num.pyro.ai/en/stable/examples/gp.html
-    # TODO(danj): create a simple GP only model
-    # TODO(danj): record f_mu for the real model
     # TODO(danj): calculate comparison metrics, LL under real data?
 
 
-def run_mcmc(rng: jax.Array, model: Callable, mcmc: DictConfig, *args):
+def run_mcmc(rng: jax.Array, model: Callable, infer: DictConfig, *args):
     return MCMC(
         NUTS(model),
-        num_warmup=mcmc.num_warmup,
-        num_samples=mcmc.num_samples,
-        num_chains=mcmc.num_chains,
+        num_warmup=infer.num_warmup,
+        num_samples=infer.num_samples,
+        num_chains=infer.num_chains,
     ).run(rng, *args)
 
 
