@@ -26,8 +26,10 @@ from dl4bi.meta_learning.train_utils import (
 )
 
 # TODO:
-# Plot comparison images - pointwise post pred
-# figure out good metrics to use
+# Fix numpyro inference
+# Make 2D plots
+# KL(p || q) and KL(q || p)
+# Sampling comparisons?
 # Can you use distance bias on covariates too??
 # Can we do House Electricity Consumption dataset?? (one million point GP paper)
 
@@ -47,8 +49,7 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     if cfg.compare_inference:
-        model_path = path.with_suffix(".ckpt")
-        return compare_inference(rng, model_path, cfg)
+        return compare_inference(rng, path, cfg)
     dataloader, *_ = collect_infer_funcs(cfg.inference_model, cfg.data)
     rng_train, rng_test = random.split(rng)
     lr_schedule = cosine_annealing_lr(
@@ -97,15 +98,24 @@ def collect_infer_funcs(model_name: str, data: DictConfig):
     )
 
 
-def compare_inference(rng: jax.Array, model_path: Path, cfg: DictConfig):
+def compare_inference(rng: jax.Array, path: Path, cfg: DictConfig):
     rng_sample, rng_extra, rng_mcmc, rng_post = random.split(rng, 4)
     cfg.data.batch_size = 1
     cfg.data.num_ctx.min = cfg.infer.num_ctx
     cfg.data.num_ctx.max = cfg.infer.num_ctx
     dataloader, *infer_funcs = collect_infer_funcs(cfg.inference_model, cfg.data)
-    state, _ = load_ckpt(model_path)
+    state, _ = load_ckpt(path.with_suffix(".ckpt"))
     batch = next(dataloader(rng_sample))
-    s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, inv_permute_idx, *_ = batch
+    (
+        s_ctx,
+        f_ctx,
+        valid_lens_ctx,
+        s,
+        f,
+        valid_lens_test,
+        inv_permute_idx,
+        prior_samples,
+    ) = batch
     f_mu_model, f_std_model = jit(state.apply_fn)(
         {"params": state.params, **state.kwargs},
         s_ctx,
@@ -121,26 +131,43 @@ def compare_inference(rng: jax.Array, model_path: Path, cfg: DictConfig):
     kwargs = batch_to_infer_kwargs(batch, cfg.data, cfg.infer)
     mcmc = run_mcmc(rng_mcmc, numpyro_model, cfg.infer.mcmc, **kwargs)
     mcmc.print_summary()
-    samples = mcmc.get_samples()
+    post_samples = mcmc.get_samples()
     f_mu_pyro, f_std_pyro = numpyro_pointwise_post_pred(
         rng_post,
         **kwargs,
-        **samples,
+        **post_samples,
     )
     S, Nc = len(cfg.data.s), valid_lens_ctx[0]
-    s_ctx = s_ctx[0, :Nc, :S]  # if s is S + X, only take locations
+    s_ctx = s_ctx[0, :Nc, :S].squeeze()  # if s is S + X, only take locations
     f_ctx = f_ctx[0, :Nc, 0]
+    s = s[0, :, :S].squeeze()
+    f = f[0, :, 0]
     f_mu_model = f_mu_model[0, :, 0]
     f_std_model = f_std_model[0, :, 0]
     f_mu_model = f_mu_model.at[:Nc].set(f_ctx)
     f_std_model = f_std_model.at[:Nc].set(0.0)
     f_mu_pyro = jnp.hstack([f_ctx, f_mu_pyro])
     f_std_pyro = jnp.hstack([jnp.zeros(Nc), f_std_pyro])
+    results = {
+        "s_ctx": s_ctx,
+        "f_ctx": f_ctx,
+        "valid_lens_ctx": valid_lens_ctx,
+        "s": s[inv_permute_idx],
+        "f": f[inv_permute_idx],
+        "f_mu_model": f_mu_model[inv_permute_idx],
+        "f_std_model": f_std_model[inv_permute_idx],
+        "f_mu_pyro": f_mu_pyro[inv_permute_idx],
+        "f_std_pyro": f_std_pyro[inv_permute_idx],
+        "inv_permute_idx": inv_permute_idx,
+        **{k + "_true": v for k, v in prior_samples.items()},
+        **{k + "_post": v for k, v in post_samples.items()},
+    }
+    jnp.save(path.with_suffix(".npy"), results)
     plot_posterior_predictive(
         s_ctx,
         f_ctx,
-        s[0, inv_permute_idx],
-        f[0, inv_permute_idx, 0],
+        s[inv_permute_idx],
+        f[inv_permute_idx],
         f_mu_model[inv_permute_idx],
         f_std_model[inv_permute_idx],
         f_mu_pyro[inv_permute_idx],
@@ -172,8 +199,7 @@ def plot_posterior_predictive(
 ):
     # palette from https://davidmathlogic.com/colorblind
     magenta, green, blue, gold = "#D81B60", "#D81B60", "#1E88E5", "#FFC107"
-    if s_ctx.shape[-1] == 1:
-        s, s_ctx = s[..., 0], s_ctx[..., 0]
+    if s_ctx.ndim == 1:
         plt.scatter(s_ctx, f_ctx, color=magenta)
         plt.plot(s, f, color=magenta)
         _plot_bounds(s, f_mu_model, f_std_model, color=blue)

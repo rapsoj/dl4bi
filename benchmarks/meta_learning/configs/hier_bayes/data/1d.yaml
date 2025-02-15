@@ -8,4 +8,3 @@ num_ctx:
   max: 25
 num_features: 10
 batch_size: 32
-obs_noise: 0.1

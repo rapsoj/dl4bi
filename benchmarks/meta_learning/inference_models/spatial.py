@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Callable, Optional
+from typing import Callable
 
 import jax
 import jax.numpy as jnp
@@ -17,8 +17,8 @@ from .utils import condition_gp
 
 
 def numpyro_model(
-    s_ctx: jax.Array,
-    f_ctx: Optional[jax.Array] = None,
+    s_ctx: jax.Array,  # [L]
+    f_ctx: jax.Array,  # [L]
     jitter: float = 1e-5,
     **kwargs,
 ):
@@ -31,12 +31,11 @@ def numpyro_model(
         mask: Masks observations for likelihood, `[S]`.
         jitter: Jitter for kernel covariance to stabilize inversion.
     """
-
     L = s_ctx.shape[0]
     var = numpyro.deterministic("var", 1.0)
     ls = numpyro.sample("ls", dist.Beta(3, 7))
     k = rbf(s_ctx, s_ctx, var, ls) + jitter * jnp.eye(L)
-    f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(jnp.zeros(L), k))
+    f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(0, k))
     f_obs_noise = numpyro.sample("f_obs_noise", dist.HalfNormal(0.1))
     numpyro.sample("f", dist.Normal(f_mu_s, f_obs_noise), obs=f_ctx)
 
@@ -167,7 +166,7 @@ def build_dataloader(prior_pred: Callable, data: DictConfig):
 
 def batch_to_infer_kwargs(batch: tuple, data: DictConfig, infer: DictConfig):
     _, _, valid_lens_ctx, s, f, *_ = batch
-    s, f, Nc = s[0], f[0, :, 0], valid_lens_ctx[0]
+    s, f, Nc = s[0].squeeze(), f[0, :, 0], valid_lens_ctx[0]
     return {
         "s_ctx": s[:Nc],
         "f_ctx": f[:Nc],

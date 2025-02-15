@@ -19,7 +19,7 @@ from .utils import condition_gp
 def numpyro_model(
     x_ctx: jax.Array,  # [L, D]
     s_ctx: jax.Array,  # [L, S]
-    f_ctx: jax.Array,  # [L, 1]
+    f_ctx: jax.Array,  # [L]
     jitter: float = 1e-5,
     **kwargs,
 ):
@@ -37,7 +37,7 @@ def numpyro_model(
     k = rbf(s_ctx, s_ctx, var, ls) + jitter * jnp.eye(L)
     beta = numpyro.sample("beta", dist.Normal(jnp.zeros(D), jnp.ones(D)))
     f_mu_x = x_ctx @ beta
-    f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(jnp.zeros(L), k))
+    f_mu_s = numpyro.sample("f_mu_s", dist.MultivariateNormal(0, k))
     f_mu = f_mu_x + f_mu_s
     f_obs_noise = numpyro.sample("f_obs_noise", dist.HalfNormal(0.1))
     numpyro.sample("f", dist.Normal(f_mu, f_obs_noise), obs=f_ctx)
@@ -197,7 +197,7 @@ def build_dataloader(prior_pred: Callable, data: DictConfig):
 def batch_to_infer_kwargs(batch: tuple, data: DictConfig, infer: DictConfig):
     S = len(data.s)
     _, _, valid_lens_ctx, sx, f, *_ = batch
-    x, s, f, Nc = sx[0, :, S:], sx[0, :, :S], f[0, :, 0], valid_lens_ctx[0]
+    s, x, f, Nc = sx[0, :, :S].squeeze(), sx[0, :, S:], f[0, :, 0], valid_lens_ctx[0]
     return {
         "x_ctx": x[:Nc],
         "s_ctx": s[:Nc],
