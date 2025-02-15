@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import optax
 import wandb
 from jax import jit, random
+from jax.experimental import enable_x64
 from jax.scipy.stats import norm
 from numpyro.infer import MCMC, NUTS
 from omegaconf import DictConfig, OmegaConf
@@ -26,7 +27,6 @@ from dl4bi.meta_learning.train_utils import (
 )
 
 # TODO:
-# Fix numpyro inference
 # Make 2D plots
 # KL(p || q) and KL(q || p)
 # Sampling comparisons?
@@ -49,7 +49,8 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     if cfg.compare_inference:
-        return compare_inference(rng, path, cfg)
+        with enable_x64():
+            return compare_inference(rng, path, cfg)
     dataloader, *_ = collect_infer_funcs(cfg.inference_model, cfg.data)
     rng_train, rng_test = random.split(rng)
     lr_schedule = cosine_annealing_lr(
@@ -207,7 +208,7 @@ def plot_posterior_predictive(
         plt.xlabel("s")
         plt.ylabel("f")
         plt.title("GP 1D")
-        plt.savefig("/tmp/test.png")
+        plt.savefig("/tmp/test.pdf")
     else:  # 2D
         # TODO(danj): implement 2D!!
         pass
