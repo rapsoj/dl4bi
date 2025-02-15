@@ -5,7 +5,7 @@ s:
     num: 100
 num_ctx:
   min: 3
-  max: 50
+  max: 25
 num_features: 10
 batch_size: 32
 obs_noise: 0.1

@@ -20,6 +20,7 @@ def numpyro_model(
     s_ctx: jax.Array,
     f_ctx: Optional[jax.Array] = None,
     jitter: float = 1e-5,
+    **kwargs,
 ):
     """Generic Spatiotemporal model with fixed and random spatial effects.
 
@@ -109,7 +110,8 @@ def jax_prior_pred(
     ls = Prior("beta", {"a": 3.0, "b": 7.0})
     var = Prior("fixed", {"value": 1.0})
     f_mu_s, var, ls, *_ = GP(rbf, var, ls, jitter=1e-5).simulate(rng_gp, s, batch_size)
-    f, f_obs_noise = _jax_helper(rng_rest, f_mu_s.squeeze())
+    f_mu_s = f_mu_s[..., 0]
+    f, f_obs_noise = _jax_helper(rng_rest, f_mu_s)
     return {"f": f, "var": var, "ls": ls, "f_obs_noise": f_obs_noise}
 
 
@@ -130,24 +132,30 @@ def build_dataloader(prior_pred: Callable, data: DictConfig):
     """
     B, S = data.batch_size, len(data.s)
     Nc_min, Nc_max = data.num_ctx.min, data.num_ctx.max
-    s_g = build_grid(data.s).reshape(-1, S)  # flatten spatial dims
-    L = Nc_max + s_g.shape[0]  # L = num_test or all points
-    valid_lens_test = jnp.repeat(L, B)
-    s_min = jnp.array([axis["start"] for axis in data.s])
-    s_max = jnp.array([axis["stop"] for axis in data.s])
     batchify = lambda x: jnp.repeat(x[None, ...], B, axis=0)
+    s_g = build_grid(data.s).reshape(-1, S)  # flatten spatial dims
+    L = s_g.shape[0]
+    s = batchify(s_g)
+    valid_lens_test = jnp.repeat(L, B)
 
     def gen_batch(rng: jax.Array):
-        rng_s, rng_v = random.split(rng, 2)
-        s_r = random.uniform(rng_s, (Nc_max, S), jnp.float32, s_min, s_max)
-        s = jnp.vstack([s_r, s_g])
-        samples = prior_pred(rng, s, B)  # x: [L, D], s: [L, S], f: [B, L, 1]
+        rng_perm, rng_v = random.split(rng, 2)
+        samples = prior_pred(rng, s_g, B)
         f = samples["f"][..., None]  # [B, L, 1]
-        s = batchify(s)  # [B, L, S]
         valid_lens_ctx = random.randint(rng_v, (B,), Nc_min, Nc_max)
-        s_ctx = s[:, :Nc_max, :]
-        f_ctx = f[:, :Nc_max, :]
-        return s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, samples
+        permute_idx = random.choice(rng_perm, L, (L,))
+        s_perm, f_perm = s[:, permute_idx], f[:, permute_idx]
+        inv_permute_idx = jnp.argsort(permute_idx)
+        return (
+            s_perm[:, :Nc_max],
+            f_perm[:, :Nc_max],
+            valid_lens_ctx,
+            s_perm,
+            f_perm,
+            valid_lens_test,
+            inv_permute_idx,
+            samples,
+        )
 
     def dataloader(rng: jax.Array):
         while True:
@@ -158,12 +166,11 @@ def build_dataloader(prior_pred: Callable, data: DictConfig):
 
 
 def batch_to_infer_kwargs(batch: tuple, data: DictConfig, infer: DictConfig):
-    Nc = infer.num_ctx
-    _, _, _, s, f, *_ = batch
-    s, f = s[0], f[0]
+    _, _, valid_lens_ctx, s, f, *_ = batch
+    s, f, Nc = s[0], f[0, :, 0], valid_lens_ctx[0]
     return {
         "s_ctx": s[:Nc],
-        "s_test": s[Nc:],
         "f_ctx": f[:Nc],
+        "s_test": s[Nc:],
         "f_test": f[Nc:],
     }

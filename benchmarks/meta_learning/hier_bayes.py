@@ -6,9 +6,11 @@ from typing import Callable
 import hydra
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import optax
 import wandb
 from jax import jit, random
+from jax.scipy.stats import norm
 from numpyro.infer import MCMC, NUTS
 from omegaconf import DictConfig, OmegaConf
 
@@ -33,7 +35,7 @@ from dl4bi.meta_learning.train_utils import (
 @hydra.main("configs/hier_bayes", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
-    path = f"results/{cfg.project}/{cfg.seed}/{run_name}"
+    path = f"results/{cfg.project}/{cfg.inference_model}/{cfg.data.name}/{cfg.seed}/{run_name}"
     path = Path(path)
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
@@ -97,18 +99,20 @@ def collect_infer_funcs(model_name: str, data: DictConfig):
 
 def compare_inference(rng: jax.Array, model_path: Path, cfg: DictConfig):
     rng_sample, rng_extra, rng_mcmc, rng_post = random.split(rng, 4)
+    cfg.data.batch_size = 1
+    cfg.data.num_ctx.min = cfg.infer.num_ctx
+    cfg.data.num_ctx.max = cfg.infer.num_ctx
     dataloader, *infer_funcs = collect_infer_funcs(cfg.inference_model, cfg.data)
     state, _ = load_ckpt(model_path)
     batch = next(dataloader(rng_sample))
-    s_ctx, f_ctx, _, s_test, f_test, *_ = batch
-    Nc = cfg.infer.num_ctx
+    s_ctx, f_ctx, valid_lens_ctx, s, f, valid_lens_test, inv_permute_idx, *_ = batch
     f_mu_model, f_std_model = jit(state.apply_fn)(
         {"params": state.params, **state.kwargs},
-        s_ctx[[0], :Nc],
-        f_ctx[[0], :Nc],
-        s_test[[0], Nc:],
-        jnp.array([cfg.infer.num_ctx]),
-        valid_lens_test=None,
+        s_ctx,
+        f_ctx,
+        s,
+        valid_lens_ctx,
+        valid_lens_test,
         rngs={"extra": rng_extra},
     )
     batch_to_infer_kwargs, numpyro_model, numpyro_pointwise_post_pred = infer_funcs
@@ -123,7 +127,25 @@ def compare_inference(rng: jax.Array, model_path: Path, cfg: DictConfig):
         **kwargs,
         **samples,
     )
-    print(f_mu_model.shape, f_mu_pyro.shape)
+    S, Nc = len(cfg.data.s), valid_lens_ctx[0]
+    s_ctx = s_ctx[0, :Nc, :S]  # if s is S + X, only take locations
+    f_ctx = f_ctx[0, :Nc, 0]
+    f_mu_model = f_mu_model[0, :, 0]
+    f_std_model = f_std_model[0, :, 0]
+    f_mu_model = f_mu_model.at[:Nc].set(f_ctx)
+    f_std_model = f_std_model.at[:Nc].set(0.0)
+    f_mu_pyro = jnp.hstack([f_ctx, f_mu_pyro])
+    f_std_pyro = jnp.hstack([jnp.zeros(Nc), f_std_pyro])
+    plot_posterior_predictive(
+        s_ctx,
+        f_ctx,
+        s[0, inv_permute_idx],
+        f[0, inv_permute_idx, 0],
+        f_mu_model[inv_permute_idx],
+        f_std_model[inv_permute_idx],
+        f_mu_pyro[inv_permute_idx],
+        f_std_pyro[inv_permute_idx],
+    )
 
 
 def run_mcmc(rng: jax.Array, model: Callable, infer: DictConfig, **kwargs):
@@ -135,6 +157,48 @@ def run_mcmc(rng: jax.Array, model: Callable, infer: DictConfig, **kwargs):
     )
     mcmc.run(rng, **kwargs)
     return mcmc
+
+
+def plot_posterior_predictive(
+    s_ctx: jax.Array,  # [L_ctx, S]
+    f_ctx: jax.Array,  # [L_ctx, 1]
+    s: jax.Array,  # [L, S]
+    f: jax.Array,  # [L, 1]
+    f_mu_model: jax.Array,  # [L, 1]
+    f_std_model: jax.Array,  # [L, 1]
+    f_mu_pyro: jax.Array,  # [L, 1]
+    f_std_pyro: jax.Array,  # [L, 1]
+    hdi_prob: float = 0.95,
+):
+    # palette from https://davidmathlogic.com/colorblind
+    magenta, green, blue, gold = "#D81B60", "#D81B60", "#1E88E5", "#FFC107"
+    if s_ctx.shape[-1] == 1:
+        s, s_ctx = s[..., 0], s_ctx[..., 0]
+        plt.scatter(s_ctx, f_ctx, color=magenta)
+        plt.plot(s, f, color=magenta)
+        _plot_bounds(s, f_mu_model, f_std_model, color=blue)
+        _plot_bounds(s, f_mu_pyro, f_std_pyro, color=gold)
+        plt.xlabel("s")
+        plt.ylabel("f")
+        plt.title("GP 1D")
+        plt.savefig("/tmp/test.png")
+    else:  # 2D
+        # TODO(danj): implement 2D!!
+        pass
+
+
+def _plot_bounds(
+    s: jax.Array,
+    f_mu: jax.Array,
+    f_std: jax.Array,
+    color: str = "steelblue",
+    hdi_prob: float = 0.95,
+):
+    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
+    f_lower = f_mu - z_score * f_std
+    f_upper = f_mu + z_score * f_std
+    plt.plot(s, f_mu, color=color)
+    plt.fill_between(s, f_lower, f_upper, alpha=0.4, color=color, interpolate=True)
 
 
 if __name__ == "__main__":
