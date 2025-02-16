@@ -6,11 +6,15 @@ from typing import Callable, Optional
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
+import scoringrules as sr
 from jax import jit, random
 from jax.scipy.stats import norm
 from numpyro.infer import MCMC, NUTS
 from omegaconf import DictConfig
 from sps.kernels import rbf
+
+from dl4bi.metrics import mean_kl_div_diag_mvn
 
 
 def collect_infer_funcs(infer_model_name: str, data: DictConfig):
@@ -149,7 +153,7 @@ def plot_2d_posterior_predictive(
     axs[0, 0].imshow(task, cmap=cmap, interpolation="none")
     axs[0, 1].set_title("Uncertainty", fontsize=fontsize)
     axs[0, 1].imshow(to_img(f_std_pyro), cmap=cmap_std, interpolation="none")
-    axs[0, 2].set_title("Mean Prediction", fontsize=fontsize)
+    axs[0, 2].set_title("Prediction", fontsize=fontsize)
     axs[0, 2].imshow(to_img(f_mu_pyro), cmap=cmap, interpolation="none")
     axs[0, 3].set_title("Ground Truth", fontsize=fontsize)
     axs[0, 3].imshow(f, cmap=cmap, interpolation="none")
@@ -163,4 +167,54 @@ def plot_2d_posterior_predictive(
 
 # TODO(danj): complete
 def compute_metrics(**kwargs):
-    return {}
+    hdi_prob = kwargs.get("hdi_prob", 0.95)
+    alpha = 1 - hdi_prob
+    z_score = jnp.abs(norm.ppf(alpha / 2))
+    Nc = kwargs["valid_lens_ctx"]
+    f = kwargs["f"][Nc:]
+    f_mu_pyro, f_std_pyro = kwargs["f_mu_pyro"][Nc:], kwargs["f_std_pyro"][Nc:]
+    f_mu_model, f_std_model = kwargs["f_mu_model"][Nc:], kwargs["f_std_model"][Nc:]
+    f_pyro_lower = f_mu_pyro + z_score * f_std_pyro
+    f_pyro_upper = f_mu_pyro - z_score * f_std_pyro
+    f_model_lower = f_mu_model + z_score * f_std_model
+    f_model_upper = f_mu_model - z_score * f_std_model
+    return {
+        "KL Divergence (KL)": {
+            "HMC": mean_kl_div_diag_mvn(
+                f_mu_pyro,
+                f_std_pyro,
+                f_mu_model,
+                f_std_model,
+            ),
+            "Model": mean_kl_div_diag_mvn(
+                f_mu_model,
+                f_std_model,
+                f_mu_pyro,
+                f_std_pyro,
+            ),
+        },
+        "Coverage (CVG)": {
+            "HMC": ((f >= f_pyro_lower) & (f <= f_pyro_upper)).mean(),
+            "Model": ((f >= f_model_lower) & (f <= f_model_upper)).mean(),
+        },
+        "Continuous Ranked Probability Score (CRPS)": {
+            "HMC": np.mean(sr.crps_normal(f, f_mu_pyro, f_std_pyro)),
+            "Model": np.mean(sr.crps_normal(f, f_mu_model, f_std_model)),
+        },
+        "Interval Score (IS)": {
+            "HMC": np.mean(sr.interval_score(f, f_pyro_lower, f_pyro_upper, alpha)),
+            "Model": np.mean(sr.interval_score(f, f_model_lower, f_model_upper, alpha)),
+        },
+        "Log Likelihood (LL)": {
+            "HMC": jnp.sum(norm.logpdf(f, f_mu_pyro, f_std_pyro)),
+            "Model": jnp.sum(norm.logpdf(f, f_mu_model, f_std_model)),
+        },
+        "Root Mean Squared Error (RMSE)": {
+            "HMC": jnp.sqrt(jnp.square(f - f_mu_pyro).mean()),
+            "Model": jnp.sqrt(jnp.square(f - f_mu_model).mean()),
+        },
+        "Mean Absolute Error (MAE)": {
+            "HMC": jnp.abs(f - f_mu_pyro).mean(),
+            "Model": jnp.abs(f - f_mu_model).mean(),
+        },
+    }

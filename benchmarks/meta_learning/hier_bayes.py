@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 from pathlib import Path
 
+import pandas as pd
 import hydra
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -154,9 +155,17 @@ def compare_inference(path: Path, cfg: DictConfig):
         **{k + "_post": v for k, v in post_samples.items()},
     }
     jnp.save(path.with_suffix(f".{cfg.infer_seed}.npy"), results)
-    # TODO(danj): complete
     metrics = compute_metrics(**results)
-    wandb.log({m: v for m, v in metrics.items()})
+    data = []
+    for metric, models in metrics.items():
+        for model, value in models.items():
+            data.append([model, metric, value])  # Model is the category (X-axis)
+    df = pd.DataFrame(data, columns=["Model", "Metric", "Value"])
+    df["Value"] = df["Value"].astype(float)
+    df = df.pivot(index="Metric", columns="Model", values="Value")
+    df = df.reset_index()
+    print(df)
+    wandb.log({"metrics": wandb.Table(dataframe=df)})
     fig = visualize(**results)
     fig.tight_layout()
     fig_path = path.with_suffix(f".{cfg.infer_seed}.png")
