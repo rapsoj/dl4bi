@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 from pathlib import Path
 
-import pandas as pd
 import hydra
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
+import pandas as pd
 import wandb
 from inference_models.utils import collect_infer_funcs, compute_metrics, run_mcmc
 from jax import jit, random
