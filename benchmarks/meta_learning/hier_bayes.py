@@ -1,18 +1,13 @@
 #!/usr/bin/env python
-import importlib
 from pathlib import Path
-from typing import Callable
 
 import hydra
-import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import optax
 import wandb
+from inference_models.utils import collect_infer_funcs, compute_metrics, run_mcmc
 from jax import jit, random
 from jax.experimental import enable_x64
-from jax.scipy.stats import norm
-from numpyro.infer import MCMC, NUTS
 from omegaconf import DictConfig, OmegaConf
 
 from dl4bi.meta_learning.train_utils import (
@@ -28,6 +23,7 @@ from dl4bi.meta_learning.train_utils import (
 
 # TODO:
 # Make 2D plots
+# calculate metrics
 # KL(p || q) and KL(q || p)
 # Calculate the log likelihood of the real data
 # Sampling comparisons?
@@ -38,24 +34,21 @@ from dl4bi.meta_learning.train_utils import (
 @hydra.main("configs/hier_bayes", config_name="default", version_base=None)
 def main(cfg: DictConfig):
     run_name = cfg.get("name", cfg_to_run_name(cfg))
-    path = f"results/{cfg.project}/{cfg.inference_model}/{cfg.data.name}/{cfg.seed}/{run_name}"
-    path = Path(path)
-    wandb_mode = "disabled"
-    if cfg.wandb and not cfg.compare_inference:
-        wandb_mode = "online"
+    p = f"results/{cfg.project}/{cfg.infer_model}/{cfg.data.name}/{cfg.seed}/{run_name}"
+    path = Path(p)
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
-        mode=wandb_mode,
-        name=run_name,
+        mode="online" if cfg.wandb else "disabled",
+        name=run_name + f" - infer {cfg.infer_seed}" if cfg.infer_compare else "",
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
     )
     print(OmegaConf.to_yaml(cfg))
-    rng = random.key(cfg.seed)
-    if cfg.compare_inference:
+    if cfg.infer_compare:
         with enable_x64():
-            return compare_inference(rng, path, cfg)
-    dataloader, *_ = collect_infer_funcs(cfg.inference_model, cfg.data)
+            return compare_inference(path, cfg)
+    rng = random.key(cfg.seed)
+    dataloader, *_ = collect_infer_funcs(cfg.infer_model, cfg.data)
     rng_train, rng_test = random.split(rng)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
@@ -92,23 +85,13 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def collect_infer_funcs(model_name: str, data: DictConfig):
-    module = importlib.import_module(f"inference_models.{model_name}")
-    dataloader = module.build_dataloader(module.jax_prior_pred, data)
-    return (
-        dataloader,
-        module.batch_to_infer_kwargs,
-        module.numpyro_model,
-        module.numpyro_pointwise_post_pred,
-    )
-
-
-def compare_inference(rng: jax.Array, path: Path, cfg: DictConfig):
+def compare_inference(path: Path, cfg: DictConfig):
+    rng = random.key(cfg.infer_seed)
     rng_sample, rng_extra, rng_mcmc, rng_post = random.split(rng, 4)
     cfg.data.batch_size = 1
     cfg.data.num_ctx.min = cfg.infer.num_ctx
     cfg.data.num_ctx.max = cfg.infer.num_ctx
-    dataloader, *infer_funcs = collect_infer_funcs(cfg.inference_model, cfg.data)
+    dataloader, *infer_funcs = collect_infer_funcs(cfg.infer_model, cfg.data)
     state, _ = load_ckpt(path.with_suffix(".ckpt"))
     batch = next(dataloader(rng_sample))
     (
@@ -130,7 +113,9 @@ def compare_inference(rng: jax.Array, path: Path, cfg: DictConfig):
         valid_lens_test,
         rngs={"extra": rng_extra},
     )
-    batch_to_infer_kwargs, numpyro_model, numpyro_pointwise_post_pred = infer_funcs
+    batch_to_infer_kwargs, numpyro_model, numpyro_pointwise_post_pred, visualize = (
+        infer_funcs
+    )
     rng_sample, rng_mcmc, rng_post, rng = random.split(rng, 4)
     batch = next(dataloader(rng_sample))
     kwargs = batch_to_infer_kwargs(batch, cfg.data, cfg.infer)
@@ -156,80 +141,23 @@ def compare_inference(rng: jax.Array, path: Path, cfg: DictConfig):
     results = {
         "s_ctx": s_ctx,
         "f_ctx": f_ctx,
-        "valid_lens_ctx": valid_lens_ctx,
-        "s": s[inv_permute_idx],
-        "f": f[inv_permute_idx],
-        "f_mu_model": f_mu_model[inv_permute_idx],
-        "f_std_model": f_std_model[inv_permute_idx],
-        "f_mu_pyro": f_mu_pyro[inv_permute_idx],
-        "f_std_pyro": f_std_pyro[inv_permute_idx],
+        "valid_lens_ctx": Nc,
+        "s": s,
+        "f": f,
+        "f_mu_model": f_mu_model,
+        "f_std_model": f_std_model,
+        "f_mu_pyro": f_mu_pyro,
+        "f_std_pyro": f_std_pyro,
         "inv_permute_idx": inv_permute_idx,
         **{k + "_true": v for k, v in prior_samples.items()},
         **{k + "_post": v for k, v in post_samples.items()},
     }
-    jnp.save(path.with_suffix(".npy"), results)
-    plot_posterior_predictive(
-        s_ctx,
-        f_ctx,
-        s[inv_permute_idx],
-        f[inv_permute_idx],
-        f_mu_model[inv_permute_idx],
-        f_std_model[inv_permute_idx],
-        f_mu_pyro[inv_permute_idx],
-        f_std_pyro[inv_permute_idx],
-    )
-
-
-def run_mcmc(rng: jax.Array, model: Callable, infer: DictConfig, **kwargs):
-    mcmc = MCMC(
-        NUTS(model),
-        num_warmup=infer.num_warmup,
-        num_samples=infer.num_samples,
-        num_chains=infer.num_chains,
-    )
-    mcmc.run(rng, **kwargs)
-    return mcmc
-
-
-def plot_posterior_predictive(
-    s_ctx: jax.Array,  # [L_ctx, S]
-    f_ctx: jax.Array,  # [L_ctx, 1]
-    s: jax.Array,  # [L, S]
-    f: jax.Array,  # [L, 1]
-    f_mu_model: jax.Array,  # [L, 1]
-    f_std_model: jax.Array,  # [L, 1]
-    f_mu_pyro: jax.Array,  # [L, 1]
-    f_std_pyro: jax.Array,  # [L, 1]
-    hdi_prob: float = 0.95,
-):
-    # palette from https://davidmathlogic.com/colorblind
-    magenta, green, blue, gold = "#D81B60", "#D81B60", "#1E88E5", "#FFC107"
-    if s_ctx.ndim == 1:
-        plt.scatter(s_ctx, f_ctx, color=magenta)
-        plt.plot(s, f, color=magenta)
-        _plot_bounds(s, f_mu_model, f_std_model, color=blue)
-        _plot_bounds(s, f_mu_pyro, f_std_pyro, color=gold)
-        plt.xlabel("s")
-        plt.ylabel("f")
-        plt.title("GP 1D")
-        plt.savefig("/tmp/test.pdf")
-    else:  # 2D
-        # TODO(danj): implement 2D!!
-        pass
-
-
-def _plot_bounds(
-    s: jax.Array,
-    f_mu: jax.Array,
-    f_std: jax.Array,
-    color: str = "steelblue",
-    hdi_prob: float = 0.95,
-):
-    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
-    f_lower = f_mu - z_score * f_std
-    f_upper = f_mu + z_score * f_std
-    plt.plot(s, f_mu, color=color)
-    plt.fill_between(s, f_lower, f_upper, alpha=0.4, color=color, interpolate=True)
+    jnp.save(path.with_suffix(f".{cfg.infer_seed}.npy"), results)
+    # TODO(danj): complete
+    metrics = compute_metrics(**results)
+    wandb.log({m: v for m, v in metrics.items()})
+    path = visualize(**results)
+    wandb.log({"Posterior Predictive Comparison": wandb.Image(path)})
 
 
 if __name__ == "__main__":

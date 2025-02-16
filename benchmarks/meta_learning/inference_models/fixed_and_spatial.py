@@ -14,6 +14,7 @@ from sps.priors import Prior
 from sps.utils import build_grid
 
 from .utils import condition_gp
+from .utils import visualize_spatial as visualize
 
 
 def numpyro_model(
