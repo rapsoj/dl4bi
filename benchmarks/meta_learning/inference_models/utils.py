@@ -165,7 +165,6 @@ def plot_2d_posterior_predictive(
     return plt.gcf()
 
 
-# TODO(danj): complete
 def compute_metrics(**kwargs):
     hdi_prob = kwargs.get("hdi_prob", 0.95)
     alpha = 1 - hdi_prob
@@ -174,10 +173,10 @@ def compute_metrics(**kwargs):
     f = kwargs["f"][Nc:]
     f_mu_pyro, f_std_pyro = kwargs["f_mu_pyro"][Nc:], kwargs["f_std_pyro"][Nc:]
     f_mu_model, f_std_model = kwargs["f_mu_model"][Nc:], kwargs["f_std_model"][Nc:]
-    f_pyro_lower = f_mu_pyro + z_score * f_std_pyro
-    f_pyro_upper = f_mu_pyro - z_score * f_std_pyro
-    f_model_lower = f_mu_model + z_score * f_std_model
-    f_model_upper = f_mu_model - z_score * f_std_model
+    f_pyro_lower = f_mu_pyro - z_score * f_std_pyro
+    f_pyro_upper = f_mu_pyro + z_score * f_std_pyro
+    f_model_lower = f_mu_model - z_score * f_std_model
+    f_model_upper = f_mu_model + z_score * f_std_model
     return {
         "KL Divergence (KL)": {
             "HMC": mean_kl_div_diag_mvn(
