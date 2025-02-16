@@ -3,9 +3,11 @@ defaults:
   - data: 1d
   - infer: 1d
   - model: 1d/tnp_kr
-inference_model: spatial
-seed: 42
 wandb: True
+seed: 42
+infer_seed: 42
+infer_model: spatial
+infer_compare: False
 project: Hierarchical Bayes
 train_num_steps: 100000
 valid_num_steps: 5000
@@ -14,4 +16,3 @@ plot_interval: 100000
 lr_peak: 1.0e-3
 lr_pct_warmup: 0.0
 clip_max_norm: 3.0
-compare_inference: False

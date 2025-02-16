@@ -1,6 +1,6 @@
 name: 1d
 mcmc:
-  num_warmup: 1000
-  num_samples: 1000
+  num_warmup: 2000
+  num_samples: 2000
   num_chains: 4
-num_ctx: 32
+num_ctx: 12
