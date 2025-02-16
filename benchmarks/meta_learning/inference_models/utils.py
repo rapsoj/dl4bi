@@ -1,6 +1,7 @@
 import importlib
+import math
 from functools import partial
-from typing import Callable
+from typing import Callable, Optional
 
 import jax
 import jax.numpy as jnp
@@ -64,13 +65,11 @@ def run_mcmc(rng: jax.Array, model: Callable, infer: DictConfig, **kwargs):
 
 
 def visualize_spatial(**kwargs):
-    if kwargs["s_ctx"].ndim == 1:
-        plot_1d_posterior_predictive(**kwargs)
-    else:  # 2D
-        plot_2d_posterior_predictive(**kwargs)
+    if kwargs["s_ctx"].ndim == 1:  # 1D
+        return plot_1d_posterior_predictive(**kwargs)
+    return plot_2d_posterior_predictive(**kwargs)
 
 
-# TODO(danj): update to use a real path
 def plot_1d_posterior_predictive(
     s_ctx: jax.Array,  # [L_ctx]
     f_ctx: jax.Array,  # [L_ctx]
@@ -80,19 +79,33 @@ def plot_1d_posterior_predictive(
     f_std_model: jax.Array,  # [L]
     f_mu_pyro: jax.Array,  # [L]
     f_std_pyro: jax.Array,  # [L]
+    inv_permute_idx: jax.Array,  # [L]
     hdi_prob: float = 0.95,
+    **kwargs,
 ):
     # palette from https://davidmathlogic.com/colorblind
     magenta, green, blue, gold = "#D81B60", "#D81B60", "#1E88E5", "#FFC107"
     plt.scatter(s_ctx, f_ctx, color=magenta)
-    plt.plot(s, f, color=magenta)
-    _plot_1d_bounds(s, f_mu_model, f_std_model, color=blue)
-    _plot_1d_bounds(s, f_mu_pyro, f_std_pyro, color=gold)
+    order = lambda x: x[inv_permute_idx]
+    s = order(s)
+    plt.plot(s, order(f), color=magenta)
+    _plot_1d_bounds(
+        s,
+        order(f_mu_model),
+        order(f_std_model),
+        color=blue,
+        hdi_prob=hdi_prob,
+    )
+    _plot_1d_bounds(
+        s,
+        order(f_mu_pyro),
+        order(f_std_pyro),
+        color=gold,
+        hdi_prob=hdi_prob,
+    )
     plt.xlabel("s")
     plt.ylabel("f")
-    plt.title("GP 1D")
-    plt.savefig("/tmp/test.pdf")
-    return "/tmp/test.pdf"
+    return plt.gcf()
 
 
 def _plot_1d_bounds(
@@ -118,10 +131,34 @@ def plot_2d_posterior_predictive(
     f_std_model: jax.Array,  # [L]
     f_mu_pyro: jax.Array,  # [L]
     f_std_pyro: jax.Array,  # [L]
-    hdi_prob: float = 0.95,
+    inv_permute_idx: jax.Array,  # [L]
+    shape: Optional[tuple[int, int]] = None,
+    fontsize: int = 20,
+    **kwargs,
 ):
-    # TODO(danj): implement
-    pass
+    L_ctx, L = s_ctx.shape[0], s.shape[0]
+    D = int(math.sqrt(L))
+    H, W = (D, D) if shape is None else shape
+    cmap, cmap_std = "viridis", "plasma"
+    _, axs = plt.subplots(2, 4, figsize=(20, 10))
+    task = jnp.hstack([f_ctx, jnp.repeat(jnp.nan, L - L_ctx)])
+    to_img = lambda x: x[inv_permute_idx].reshape(H, W)
+    task, f = to_img(task), to_img(f)
+    axs[0, 0].set_ylabel("HMC", fontsize=fontsize)
+    axs[0, 0].set_title("Task", fontsize=fontsize)
+    axs[0, 0].imshow(task, cmap=cmap, interpolation="none")
+    axs[0, 1].set_title("Uncertainty", fontsize=fontsize)
+    axs[0, 1].imshow(to_img(f_std_pyro), cmap=cmap_std, interpolation="none")
+    axs[0, 2].set_title("Mean Prediction", fontsize=fontsize)
+    axs[0, 2].imshow(to_img(f_mu_pyro), cmap=cmap, interpolation="none")
+    axs[0, 3].set_title("Ground Truth", fontsize=fontsize)
+    axs[0, 3].imshow(f, cmap=cmap, interpolation="none")
+    axs[1, 0].set_ylabel("TNP-KR", fontsize=fontsize)
+    axs[1, 0].imshow(task, cmap=cmap, interpolation="none")
+    axs[1, 1].imshow(to_img(f_std_model), cmap=cmap_std, interpolation="none")
+    axs[1, 2].imshow(to_img(f_mu_model), cmap=cmap, interpolation="none")
+    axs[1, 3].imshow(f)
+    return plt.gcf()
 
 
 # TODO(danj): complete

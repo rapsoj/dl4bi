@@ -3,6 +3,7 @@ from pathlib import Path
 
 import hydra
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import optax
 import wandb
 from inference_models.utils import collect_infer_funcs, compute_metrics, run_mcmc
@@ -156,8 +157,12 @@ def compare_inference(path: Path, cfg: DictConfig):
     # TODO(danj): complete
     metrics = compute_metrics(**results)
     wandb.log({m: v for m, v in metrics.items()})
-    path = visualize(**results)
-    wandb.log({"Posterior Predictive Comparison": wandb.Image(path)})
+    fig = visualize(**results)
+    fig.tight_layout()
+    fig_path = path.with_suffix(f".{cfg.infer_seed}.png")
+    fig.savefig(fig_path)
+    plt.close(fig)
+    wandb.log({"Posterior Predictive Comparison": wandb.Image(str(fig_path))})
 
 
 if __name__ == "__main__":
