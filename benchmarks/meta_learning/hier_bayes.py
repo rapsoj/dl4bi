@@ -24,11 +24,6 @@ from dl4bi.meta_learning.train_utils import (
 )
 
 # TODO:
-# Make 2D plots
-# calculate metrics
-# KL(p || q) and KL(q || p)
-# Calculate the log likelihood of the real data
-# Sampling comparisons?
 # Can you use distance bias on covariates too??
 # Can we do House Electricity Consumption dataset?? (one million point GP paper)
 
