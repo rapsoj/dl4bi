@@ -4,6 +4,7 @@ from pathlib import Path
 import hydra
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
 import optax
 import pandas as pd
 import wandb
@@ -149,7 +150,8 @@ def compare_inference(path: Path, cfg: DictConfig):
         **{k + "_true": v for k, v in prior_samples.items()},
         **{k + "_post": v for k, v in post_samples.items()},
     }
-    jnp.save(path.with_suffix(f".{cfg.infer_seed}.npy"), results)
+    # save with numpy so can load in torch
+    np.save(path.with_suffix(f".{cfg.infer_seed}.npy"), results, allow_pickle=True)
     metrics = compute_metrics(**results)
     data = []
     for metric, models in metrics.items():
