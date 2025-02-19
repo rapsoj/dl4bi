@@ -1,0 +1,6 @@
+cls: DeepChol
+kwargs:
+  decoder:
+    cls: gMLP
+    kwargs:
+      num_blks: 2
