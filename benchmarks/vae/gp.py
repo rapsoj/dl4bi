@@ -27,8 +27,8 @@ from dl4bi.mlp import MLP, gMLP
 from dl4bi.vae import DeepRV, PriorCVAE
 from dl4bi.vae.train_utils import (
     TrainState,
-    append_cond_to_feats,
-    append_cond_to_locs,
+    cond_as_feats,
+    cond_as_locs,
     elbo_train_step,
     mse_train_step,
 )
