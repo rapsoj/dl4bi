@@ -26,7 +26,14 @@ from sps.utils import build_grid
 from tqdm import tqdm
 
 from dl4bi.mlp import MLP, gMLP
-from dl4bi.vae import DeepChol, PriorCVAE, train_utils
+from dl4bi.vae import DeepRV, PriorCVAE
+from dl4bi.vae.train_utils import (
+    TrainState,
+    append_cond_to_feats,
+    append_cond_to_locs,
+    elbo_train_step,
+    mse_train_step,
+)
 
 
 @hydra.main("configs/gp", config_name="default", version_base=None)
@@ -51,7 +58,7 @@ def main(cfg: DictConfig):
         gp,
         s,
         state,
-        is_decoder_only=isinstance(model, (DeepChol,)),
+        is_decoder_only=isinstance(model, (DeepRV,)),
         wandb_key="Final Model Samples",
         results_path=path.with_suffix(".pkl"),
     )
@@ -92,17 +99,17 @@ def train(
     loader = dataloader(rng_data, gp, s, batch_size)
     f, var, ls, period, z = next(loader)
     rngs = {"params": rng_params, "extra": rng_extra}
-    x = f if isinstance(model, PriorCVAE) else z  # decoder-only, e.g. DeepChol
-    kwargs = model.init(rngs, x, var, ls)
+    x = f if isinstance(model, PriorCVAE) else z  # decoder-only, e.g. DeepRV
+    kwargs = model.init(rngs, x, jnp.array([var, ls]))
     params = kwargs.pop("params")
-    param_count = nn.tabulate(model, rngs)(x, var, ls)
+    param_count = nn.tabulate(model, rngs)(x, jnp.array([var, ls]))
     learning_rate_fn = create_learning_rate_fn(
         num_steps,
         lr_peak,
         lr_pct_warmup,
         lr_num_cycles,
     )
-    state = train_utils.TrainState.create(
+    state = TrainState.create(
         apply_fn=model.apply,
         params=params,
         tx=optax.yogi(learning_rate_fn),
@@ -110,10 +117,10 @@ def train(
     )
     print(f"{model}\n\n{param_count}")
     is_decoder_only = False
-    train_step = train_utils.elbo_train_step
-    if isinstance(model, (DeepChol,)):
+    train_step = elbo_train_step
+    if isinstance(model, (DeepRV,)):
         is_decoder_only = True
-        train_step = train_utils.mse_train_step
+        train_step = mse_train_step
     losses = np.zeros((num_steps,))
     for i in (pbar := tqdm(range(num_steps), unit="batch", dynamic_ncols=True)):
         rng_step, rng_train = random.split(rng_train)
@@ -165,7 +172,7 @@ def validate(
     rng: jax.Array,
     gp: GP,
     s: jax.Array,
-    state: train_utils.TrainState,
+    state: TrainState,
     is_decoder_only: bool = False,
     num_batches: int = 5000,
     num_plots: int = 16,
@@ -182,10 +189,12 @@ def validate(
         params = {"params": state.params, **state.kwargs}
         rngs = {"extra": rng_extra}
         if is_decoder_only:
-            f_hat = jit(state.apply_fn)(params, z, var, ls)
-            losses[i] = optax.squared_error(f_hat, f.squeeze()).mean()
+            f_hat = jit(state.apply_fn)(params, z, jnp.array([var, ls]))
+            losses[i] = optax.squared_error(f_hat.squeeze(), f.squeeze()).mean()
         else:
-            f_hat, z_mu, z_std = jit(state.apply_fn)(params, f, var, ls, rngs=rngs)
+            f_hat, z_mu, z_std = jit(state.apply_fn)(
+                params, f, jnp.array([var, ls]), rngs=rngs
+            )
             kl_div = -jnp.log(z_std) + (z_std**2 + z_mu**2 - 1) / 2
             logp = norm.logpdf(f, f_hat, 1.0).mean()
             losses[i] = -logp + kl_div.mean()
@@ -225,8 +234,8 @@ def log_plots(
     wandb.log({wandb_key: [wandb.Image(p) for p in sample_paths]})
 
 
-def save_ckpt(state: train_utils.TrainState, cfg: DictConfig, path: Path):
-    "Save a checkpoint."
+def save_ckpt(state: TrainState, cfg: DictConfig, path: Path):
+    """Saves a checkpoint."""
     shutil.rmtree(path, ignore_errors=True)
     ckptr = PyTreeCheckpointer()
     ckpt = {"state": state, "config": OmegaConf.to_container(cfg, resolve=True)}
@@ -242,7 +251,7 @@ def load_ckpt(path: Union[str, Path]):
     ckpt = ckptr.restore(path.absolute())
     cfg = OmegaConf.create(ckpt["config"])
     model = instantiate(cfg.model)
-    state = train_utils.TrainState.create(
+    state = TrainState.create(
         apply_fn=model.apply,
         # TODO(danj): reload optimizer state
         tx=optax.yogi(1e-4),
