@@ -130,6 +130,102 @@ jax.tree_util.register_pytree_node(
 
 
 @dataclass(frozen=True)
+class Data:
+    x: jax.Array  # [B, L, D_x]
+    f: jax.Array  # [B, L, D_f]
+
+    def to_batch(
+        self,
+        rng: jax.Array,
+        min_ctx: int,
+        max_ctx: Optional[int],
+        num_test: Optional[int],
+        independent: bool = False,
+        test_includes_ctx: bool = True,
+    ):
+        return data_to_batch(
+            rng,
+            self.x,
+            self.f,
+            min_ctx,
+            max_ctx,
+            num_test,
+            independent,
+            test_includes_ctx,
+        )
+
+
+# register Data with jax so it can be used in compiled functions
+jax.tree_util.register_pytree_node(
+    Data,
+    lambda d: ((d.x, d.f), None),
+    lambda _aux, children: Data(*children),
+)
+
+
+@partial(
+    jit,
+    static_argnames=(
+        "min_ctx",
+        "max_ctx",
+        "num_test",
+        "independent",
+        "test_includes_ctx",
+    ),
+)
+def data_to_batch(
+    rng: jax.Array,
+    x: jax.Array,  # [B, L, D_x]
+    f: jax.Array,  # [B, L, D_f]
+    min_ctx: int,
+    max_ctx: int,
+    num_test: int,
+    independent: bool = False,
+    test_includes_ctx: bool = True,
+):
+    B = x.shape[0]
+    rng_valid, rng = random.split(rng)
+    valid_lens_ctx = random.randint(rng_valid, (B,), min_ctx, max_ctx)
+    valid_lens_test = jnp.repeat(num_test, B)
+    vbatch = vmap(lambda rng, v: _batch(rng, v, max_ctx, num_test, test_includes_ctx))
+    rngs = random.split(rng, B) if independent else jnp.repeat(rng, B)
+    x_ctx, x_test, _ = vbatch(rngs, x)
+    f_ctx, f_test, inv_permute_idx = vbatch(rngs, f)
+    s_ctx, s_test = None, None
+    return Batch(
+        x_ctx,
+        s_ctx,
+        f_ctx,
+        valid_lens_ctx,
+        x_test,
+        s_test,
+        f_test,
+        valid_lens_test,
+        inv_permute_idx,
+    )
+
+
+@partial(jit, static_argnames=("max_ctx", "num_test", "test_includes_ctx"))
+def _batch(
+    rng: jax.Array,
+    v: jax.Array,  # [L, D]
+    max_ctx: int,
+    num_test: int,
+    test_includes_ctx: bool = True,
+):
+    L = v.shape[0]
+    permute_idx = random.choice(rng, L, (L,), replace=False)
+    inv_permute_idx = jnp.argsort(permute_idx)
+    v_permuted = v[permute_idx]
+    v_ctx = v_permuted[:max_ctx]
+    if test_includes_ctx:
+        v_test = v_permuted[:num_test]
+    else:
+        v_test = v_permuted[max_ctx : max_ctx + num_test]
+    return v_ctx, v_test, inv_permute_idx
+
+
+@dataclass(frozen=True)
 class SpatialData:
     x: Optional[jax.Array]  # [B, [S]+, D_x] or None
     s: jax.Array  # [B, [S]+, D_s]
@@ -139,8 +235,8 @@ class SpatialData:
         self,
         rng: jax.Array,
         min_ctx: int,
-        max_ctx: Optional[int],
-        num_test: Optional[int],
+        max_ctx: int,
+        num_test: int,
         independent: bool = False,
         test_includes_ctx: bool = True,
     ):
@@ -180,9 +276,9 @@ def spatial_data_to_batch(
     x: Optional[jax.Array],  # [B, [S]+, D_x] or None
     s: jax.Array,  # [B, [S]+]
     f: jax.Array,  # [B, [S]+, D_f]
-    min_ctx: int = 1,
-    max_ctx: Optional[int] = None,
-    num_test: Optional[int] = None,
+    min_ctx: int,
+    max_ctx: int,
+    num_test: int,
     independent: bool = False,
     test_includes_ctx: bool = True,
 ):
@@ -192,51 +288,14 @@ def spatial_data_to_batch(
     x = flatten_spatial_dims(x) if has_x else None
     s = flatten_spatial_dims(s)
     f = flatten_spatial_dims(f)
-    L = s.shape[1]
-    num_test = num_test or L
-    max_ctx = max_ctx or L - num_test
     rng_valid, rng = random.split(rng)
     valid_lens_ctx = random.randint(rng_valid, (B,), min_ctx, max_ctx)
     valid_lens_test = jnp.repeat(num_test, B)
-    if independent:  # each element of the batch is permunted independently
-        rngs = random.split(rng, B)
-        if has_x:
-            output = vmap(_spatial_helper, in_axes=(0, 0, 0, 0, None, None, None))(
-                rngs,
-                # add an extra dim to use the helper
-                x[:, None],
-                s[:, None],
-                f[:, None],
-                max_ctx,
-                num_test,
-                test_includes_ctx,
-            )
-        else:
-            output = vmap(_spatial_helper, in_axes=(0, None, 0, 0, None, None, None))(
-                rngs,
-                None,
-                # add an extra dim to use the helper
-                s[:, None],
-                f[:, None],
-                max_ctx,
-                num_test,
-                test_includes_ctx,
-            )
-        # remove the extra dim
-        x_ctx, s_ctx, f_ctx, x_test, s_test, f_test, inv_permute_idx = output
-        x_ctx, x_test = (x_ctx[:, 0], x_test[:, 0]) if has_x else (None, None)
-        s_ctx, s_test = s_ctx[:, 0], s_test[:, 0]
-        f_ctx, f_test = f_ctx[:, 0], f_test[:, 0]
-    else:  # use same permutation for all elements in the batch
-        x_ctx, s_ctx, f_ctx, x_test, s_test, f_test, inv_permute_idx = _spatial_helper(
-            rng,
-            x,
-            s,
-            f,
-            max_ctx,
-            num_test,
-            test_includes_ctx,
-        )
+    vbatch = vmap(lambda rng, v: _batch(rng, v, max_ctx, num_test, test_includes_ctx))
+    rngs = random.split(rng, B) if independent else jnp.repeat(rng, B)
+    x_ctx, x_test, _ = vbatch(rngs, x) if has_x else (None, None, None)
+    s_ctx, s_test, _ = vbatch(rngs, s)
+    f_ctx, f_test, inv_permute_idx = vbatch(rngs, f)
     return Batch(
         x_ctx,
         s_ctx,
@@ -248,37 +307,6 @@ def spatial_data_to_batch(
         valid_lens_test,
         inv_permute_idx,
     )
-
-
-@partial(jit, static_argnames=("max_ctx", "num_test", "test_includes_ctx"))
-def _spatial_helper(
-    rng: jax.Array,
-    x: Optional[jax.Array],  # [B, L, D_x] or None
-    s: jax.Array,  # [B, L, D_s]
-    f: jax.Array,  # [B, L, D_f]
-    max_ctx: int,
-    num_test: int,
-    test_includes_ctx: bool = True,
-):
-    L = s.shape[1]
-    has_x = x is not None
-    permute_idx = random.choice(rng, L, (L,), replace=False)
-    inv_permute_idx = jnp.argsort(permute_idx)
-    x_permuted = x[:, permute_idx] if has_x else None
-    s_permuted = s[:, permute_idx]
-    f_permuted = f[:, permute_idx]
-    x_ctx = x_permuted[:, :max_ctx] if has_x else None
-    s_ctx = s_permuted[:, :max_ctx]
-    f_ctx = f_permuted[:, :max_ctx]
-    if test_includes_ctx:
-        x_test = x_permuted[:, :num_test] if has_x else None
-        s_test = s_permuted[:, :num_test]
-        f_test = f_permuted[:, :num_test]
-    else:
-        x_test = x_permuted[:, max_ctx : max_ctx + num_test] if has_x else None
-        s_test = s_permuted[:, max_ctx : max_ctx + num_test]
-        f_test = f_permuted[:, max_ctx : max_ctx + num_test]
-    return x_ctx, s_ctx, f_ctx, x_test, s_test, f_test, inv_permute_idx
 
 
 # @partial(

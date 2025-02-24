@@ -2,7 +2,32 @@ import jax.numpy as jnp
 from jax import random
 from sps.utils import build_grid
 
-from dl4bi.core.data import BatchElement, SpatialData
+from dl4bi.core.data import BatchElement, Data, SpatialData
+
+
+def test_data():
+    B, L, D = 4, 32, 8
+    min_ctx, max_ctx = 4, 16
+    rng = random.key(42)
+    rng_x, rng_f = random.split(rng)
+    x = random.normal(rng_x, (B, L, D))
+    f = random.normal(rng_f, (B, L, 1))
+    data = Data(x, f)
+    batch = data.to_batch(
+        rng,
+        min_ctx,
+        max_ctx,
+        num_test=L,
+        independent=False,
+        test_includes_ctx=True,
+    )
+    assert batch.x_ctx.shape == (B, max_ctx, D), "Incorrect x_ctx shape!"
+    assert batch.f_ctx.shape == (B, max_ctx, 1), "Incorrect f_ctx shape!"
+    assert batch.x_test.shape == (B, L, D), "Incorrect x_test shape!"
+    assert batch.f_test.shape == (B, L, 1), "Incorrect f_test shape!"
+    assert batch.valid_lens_ctx.shape == (B,), "Incorrect valid_lens_ctx shape!"
+    assert batch.valid_lens_test.shape == (B,), "Incorrect valid_lens_test shape!"
+    assert batch.inv_permute_idx.shape == (B, L), "Incorrect inv_permute_idx shape!"
 
 
 def test_spatial_data():
@@ -17,7 +42,7 @@ def test_spatial_data():
         rng,
         min_ctx,
         max_ctx,
-        num_test=None,
+        num_test=S * S,
         independent=False,
         test_includes_ctx=True,
     )
@@ -29,7 +54,10 @@ def test_spatial_data():
     assert batch.f_test.shape == (B, S * S, D), "Incorrect f_test shape!"
     assert batch.valid_lens_ctx.shape == (B,), "Incorrect valid_lens_ctx shape!"
     assert batch.valid_lens_test.shape == (B,), "Incorrect valid_lens_test shape!"
-    assert batch.inv_permute_idx.shape == (S * S,), "Incorrect inv_permute_idx shape!"
+    assert batch.inv_permute_idx.shape == (
+        B,
+        S * S,
+    ), "Incorrect inv_permute_idx shape!"
     num_test = 128
     batch = data.to_batch(
         rng,
@@ -47,7 +75,10 @@ def test_spatial_data():
     assert batch.f_test.shape == (B, num_test, D), "Incorrect f_test shape!"
     assert batch.valid_lens_ctx.shape == (B,), "Incorrect valid_lens_ctx shape!"
     assert batch.valid_lens_test.shape == (B,), "Incorrect valid_lens_test shape!"
-    assert batch.inv_permute_idx.shape == (S * S,), "Incorrect inv_permute_idx shape!"
+    assert batch.inv_permute_idx.shape == (
+        B,
+        S * S,
+    ), "Incorrect inv_permute_idx shape!"
     batch = data.to_batch(
         rng,
         min_ctx,
