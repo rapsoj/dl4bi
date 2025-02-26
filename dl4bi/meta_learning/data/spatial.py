@@ -48,8 +48,7 @@ class SpatialData(MetaLearningData):
         _s = flatten_spatial(self.s)
         _f = flatten_spatial(self.f)
         x = self.x
-        # when x.shape[1]=1 means the same features are broadcast to all locations,
-        # so no need to permute
+        # no need to inv_permute x if it is None or is the same value for all locations
         if self.x is not None and self.x.ndim != 2:
             _x = flatten_spatial(self.x)
             x, s, f, inv_permute_idx = permute_L_in_BLD(rng, [_x, _s, _f], independent)
@@ -162,7 +161,6 @@ class DenseBatchedSpatialData(MetaLearningBatch):
             f = f.reshape(*self.shape_s[:-1], self.f_ctx.shape[-1])
             x = None
             if self.broadcast_x:
-                num_spatial_axes = len(self.shape_s) - 2
                 # since x is the same for all L, select first x for each batch element
                 x = self.x_ctx[:, 0]
             return PermutedSpatialData(x, s, f, self.inv_permute_idx)
