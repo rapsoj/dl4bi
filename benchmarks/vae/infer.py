@@ -92,7 +92,7 @@ def main(cfg: DictConfig):
 def _hmc(
     rng: jax.Array,
     cfg: DictConfig,
-    model,
+    model: Callable,
     f_obs: jax.Array,
     obs_mask: Union[bool, jax.Array],
     surrogate_decoder: Optional[Callable],

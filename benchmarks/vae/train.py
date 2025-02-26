@@ -64,7 +64,7 @@ def main(cfg: DictConfig):
     train_loader, test_loader, large_batch_loader, cond_names = (
         build_spatial_dataloaders(rng, cfg, map_data, s, priors, spatial_prior)
     )
-    valid_step = get_valid_step(cfg.model, cond_names)
+    valid_step = gen_valid_step(cfg.model, cond_names)
     decoder_only = cfg.model.cls == "DeepRV"
     z_dim = s.shape[0] if decoder_only else model.z_dim
     callback_fn = log_vae_grid_plots if map_data is None else log_vae_map_plots
@@ -72,7 +72,7 @@ def main(cfg: DictConfig):
         rng_train,
         model,
         optimizer,
-        get_train_step(cfg.model, cond_names),
+        gen_train_step(cfg.model, cond_names),
         valid_step,
         train_loader,
         cfg.train_num_steps,
@@ -164,6 +164,7 @@ def train(
     callbacks: list[Callback] = [],
     **kwargs,
 ):
+    """Runs the spatial prior's pre-training"""
     rng_params, rng_extra, rng_train = random.split(rng, 3)
     f, z, conditionals = next(loader)
     rngs = {"params": rng_params, "extra": rng_extra}
@@ -210,6 +211,7 @@ def validate(
     name: str = "Validation",
     **kwargs,
 ):
+    """Validation step to store and log metrics"""
     metrics = defaultdict(list)
     for _ in (_ := tqdm(range(valid_num_steps), unit="batch", dynamic_ncols=True)):
         rng_step, rng = random.split(rng)
@@ -231,7 +233,7 @@ def validate(
     print(metrics)
 
 
-def get_train_step(model_cfg: DictConfig, cond_names: list[str]):
+def gen_train_step(model_cfg: DictConfig, cond_names: list[str]):
     var_idx = None if "var" not in cond_names else cond_names.index("var")
     train_step = elbo_train_step
     if model_cfg.cls == "DeepRV":
@@ -241,7 +243,7 @@ def get_train_step(model_cfg: DictConfig, cond_names: list[str]):
     return train_step
 
 
-def get_valid_step(model_cfg: DictConfig, cond_names: list[str]):
+def gen_valid_step(model_cfg: DictConfig, cond_names: list[str]):
     ls_idx = None if "ls" not in cond_names else cond_names.index("ls")
     var_idx = None if "var" not in cond_names else cond_names.index("var")
     model_name = model_cfg.cls

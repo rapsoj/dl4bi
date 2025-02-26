@@ -9,6 +9,15 @@ from sps.utils import build_grid
 
 
 def gen_locations(data: DictConfig):
+    """Generates the map location information for training and inference.
+    return map_data=None in case a grid is being used
+
+    Args:
+        data (DictConfig): data config
+
+    Returns:
+        map data, locations
+    """
     map_data = (
         None if data.get("map_path", None) is None else gpd.read_file(data.map_path)
     )
@@ -44,7 +53,7 @@ def normalize_geometry(gdf: gpd.GeoDataFrame):
 
 
 def process_map(gdf: gpd.GeoDataFrame):
-    """Prepares map for the vae train or inference process
+    """Prepares map locations for the vae train or inference process
 
     Args:
         gdf (gpd.GeoDataFrame): geopandas data frame
