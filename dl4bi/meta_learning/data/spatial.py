@@ -3,13 +3,12 @@ Provides standard containers for Spatial Data.
 
 This is based on the following general state machine:
 
-1. Data.permute() -> PermutedData
-2. PermutedData.batch() -> DenseBatchedData [data loss: non-context, non-test points dropped]
-3. DenseBatchedData.sparse() -> SparseBatchedData [no-op here since data is already packed]
+SpatialData.permute(...) -> PermutedSpatialData
+PermutedSpatialData.inv_permute() -> SpatialData
 
-4. SparseBatchedData.dense() -> DenseBatchedData [no-op here since sparse = dense data]
-5. DenseBatchedData.unbatch() -> PermutedData [dropped points filled with NaNs]
-6. PermutedData.inv_permute() -> Data
+PermutedSpatialData.batch(...) -> BatchedPermutedSpatialData [data loss: non-context, non-test points dropped]
+BatchedPermutedSpatialData.unbatch() -> PermutedSpatialData [dropped points filled with NaNs]
+BatchedPermutedSpatialData.inv_permute() -> BatchedSpatialData [dropped points filled with NaNs]
 """
 
 from dataclasses import dataclass
@@ -115,14 +114,14 @@ class PermutedSpatialData(MetaLearningData):
             # pack x=None back into args
             s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, *rest = args
             args = (None, s_ctx, f_ctx, valid_lens_ctx, None, s_test, f_test, *rest)
-            return DenseBatchedSpatialData(*args, **kwargs)
+            return BatchedPermutedSpatialData(*args, **kwargs)
         if self.x.ndim == 2:
             x = jnp.broadcast_to(self.x[:, None], (*s.shape[:-1], self.x.shape[-1]))
             kwargs["broadcast_x"] = True
         else:
             x = flatten_spatial(self.x)
         args = batch_BLD(rng, [x, s, f], *batch_BLD_args)
-        return DenseBatchedSpatialData(*args, **kwargs)
+        return BatchedPermutedSpatialData(*args, **kwargs)
 
 
 jax.tree_util.register_pytree_node(
@@ -133,7 +132,7 @@ jax.tree_util.register_pytree_node(
 
 
 @dataclass(frozen=True, eq=False)
-class DenseBatchedSpatialData(MetaLearningBatch):
+class BatchedPermutedSpatialData(MetaLearningBatch):
     x_ctx: Optional[jax.Array]
     s_ctx: jax.Array
     f_ctx: jax.Array
@@ -174,25 +173,9 @@ class DenseBatchedSpatialData(MetaLearningBatch):
         f = f.reshape(*self.shape_s[:-1], self.f_ctx.shape[-1])
         return PermutedSpatialData(x, s, f, self.inv_permute_idx)
 
-    def sparse(self):
-        return SparseBatchedSpatialData(
-            self.x_ctx,
-            self.s_ctx,
-            self.f_ctx,
-            self.valid_lens_ctx,
-            self.x_test,
-            self.s_test,
-            self.f_test,
-            self.valid_lens_test,
-            self.inv_permute_idx,
-            self.test_includes_ctx,
-            self.shape_s,
-            self.broadcast_x,
-        )
-
 
 jax.tree_util.register_pytree_node(
-    DenseBatchedSpatialData,
+    BatchedPermutedSpatialData,
     lambda d: (
         (
             d.x_ctx,
@@ -207,57 +190,5 @@ jax.tree_util.register_pytree_node(
         ),
         (d.test_includes_ctx, d.shape_s, d.broadcast_x),
     ),
-    lambda aux, children: DenseBatchedSpatialData(*children, *aux),
-)
-
-
-@dataclass(frozen=True, eq=False)
-class SparseBatchedSpatialData(MetaLearningBatch):
-    x_ctx: Optional[jax.Array]
-    s_ctx: jax.Array
-    f_ctx: jax.Array
-    valid_lens_ctx: jax.Array
-    x_test: Optional[jax.Array]
-    s_test: jax.Array
-    f_test: jax.Array
-    valid_lens_test: jax.Array
-    inv_permute_idx: jax.Array
-    test_includes_ctx: bool
-    shape_s: tuple
-    broadcast_x: bool
-
-    def dense(self):
-        return DenseBatchedSpatialData(
-            self.x_ctx,
-            self.s_ctx,
-            self.f_ctx,
-            self.valid_lens_ctx,
-            self.x_test,
-            self.s_test,
-            self.f_test,
-            self.valid_lens_test,
-            self.inv_permute_idx,
-            self.test_includes_ctx,
-            self.shape_s,
-            self.broadcast_x,
-        )
-
-
-jax.tree_util.register_pytree_node(
-    SparseBatchedSpatialData,
-    lambda d: (
-        (
-            d.x_ctx,
-            d.s_ctx,
-            d.f_ctx,
-            d.valid_lens_ctx,
-            d.x_test,
-            d.s_test,
-            d.f_test,
-            d.valid_lens_test,
-            d.inv_permute_idx,
-        ),
-        (d.test_includes_ctx, d.shape_s, d.broadcast_x),
-    ),
-    lambda aux, children: SparseBatchedSpatialData(*children, *aux),
+    lambda aux, children: BatchedPermutedSpatialData(*children, *aux),
 )

@@ -3,13 +3,12 @@ Provides standard containers for Temporal Data.
 
 This is based on the following general state machine:
 
-1. Data.permute() -> PermutedData
-2. PermutedData.batch() -> DenseBatchedData [data loss: non-context, non-test points dropped]
-3. DenseBatchedData.sparse() -> SparseBatchedData [no-op here since data is already packed]
+TemporalData.permute(...) -> PermutedTemporalData
+PermutedTemporalData.inv_permute() -> TemporalData
 
-4. SparseBatchedData.dense() -> DenseBatchedData [no-op here since sparse = dense data]
-5. DenseBatchedData.unbatch() -> PermutedData [dropped points filled with NaNs]
-6. PermutedData.inv_permute() -> Data
+PermutedTemporalData.batch(...) -> BatchedPermutedTemporalData [data loss: non-context, non-test points dropped]
+BatchedPermutedTemporalData.unbatch() -> PermutedTemporalData [dropped points filled with NaNs]
+BatchedPermutedTemporalData.inv_permute() -> BatchedTemporalData [dropped points filled with NaNs]
 """
 
 from dataclasses import dataclass
@@ -103,12 +102,12 @@ class PermutedTemporalData(MetaLearningData):
             # pack x=None back into args
             s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, *rest = args
             args = (x, s_ctx, f_ctx, valid_lens_ctx, x, s_test, f_test, *rest)
-            return DenseBatchedTemporalData(*args, **kwargs)
+            return BatchedPermutedTemporalData(*args, **kwargs)
         if self.x.ndim == 2:
             x = jnp.broadcast_to(self.x[:, None], (*self.t.shape, self.x.shape[-1]))
             kwargs["broadcast_x"] = True
         args = batch_BLD(rng, [x, t, self.f], *batch_BLD_args)
-        return DenseBatchedTemporalData(*args, **kwargs)
+        return BatchedPermutedTemporalData(*args, **kwargs)
 
 
 jax.tree_util.register_pytree_node(
@@ -119,7 +118,7 @@ jax.tree_util.register_pytree_node(
 
 
 @dataclass(frozen=True, eq=False)
-class DenseBatchedTemporalData(MetaLearningBatch):
+class BatchedPermutedTemporalData(MetaLearningBatch):
     x_ctx: Optional[jax.Array]
     t_ctx: jax.Array
     f_ctx: jax.Array
@@ -154,24 +153,9 @@ class DenseBatchedTemporalData(MetaLearningBatch):
         )
         return PermutedTemporalData(x, t[..., 0], f, self.inv_permute_idx)
 
-    def sparse(self):
-        return SparseBatchedTemporalData(
-            self.x_ctx,
-            self.t_ctx,
-            self.f_ctx,
-            self.valid_lens_ctx,
-            self.x_test,
-            self.t_test,
-            self.f_test,
-            self.valid_lens_test,
-            self.inv_permute_idx,
-            self.test_includes_ctx,
-            self.broadcast_x,
-        )
-
 
 jax.tree_util.register_pytree_node(
-    DenseBatchedTemporalData,
+    BatchedPermutedTemporalData,
     lambda d: (
         (
             d.x_ctx,
@@ -186,55 +170,5 @@ jax.tree_util.register_pytree_node(
         ),
         (d.test_includes_ctx, d.broadcast_x),
     ),
-    lambda aux, children: DenseBatchedTemporalData(*children, *aux),
-)
-
-
-@dataclass(frozen=True, eq=False)
-class SparseBatchedTemporalData(MetaLearningBatch):
-    x_ctx: Optional[jax.Array]
-    t_ctx: jax.Array
-    f_ctx: jax.Array
-    valid_lens_ctx: jax.Array
-    x_test: Optional[jax.Array]
-    t_test: jax.Array
-    f_test: jax.Array
-    valid_lens_test: jax.Array
-    inv_permute_idx: jax.Array
-    test_includes_ctx: bool
-    broadcast_x: bool
-
-    def dense(self):
-        return DenseBatchedTemporalData(
-            self.x_ctx,
-            self.t_ctx,
-            self.f_ctx,
-            self.valid_lens_ctx,
-            self.x_test,
-            self.t_test,
-            self.f_test,
-            self.valid_lens_test,
-            self.inv_permute_idx,
-            self.test_includes_ctx,
-            self.broadcast_x,
-        )
-
-
-jax.tree_util.register_pytree_node(
-    SparseBatchedTemporalData,
-    lambda d: (
-        (
-            d.x_ctx,
-            d.t_ctx,
-            d.f_ctx,
-            d.valid_lens_ctx,
-            d.x_test,
-            d.t_test,
-            d.f_test,
-            d.valid_lens_test,
-            d.inv_permute_idx,
-        ),
-        (d.test_includes_ctx, d.broadcast_x),
-    ),
-    lambda aux, children: SparseBatchedTemporalData(*children, *aux),
+    lambda aux, children: BatchedPermutedTemporalData(*children, *aux),
 )

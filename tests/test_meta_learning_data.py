@@ -57,8 +57,6 @@ def test_tabular_data():
     assert b.valid_lens_test.shape == (B,)
     assert not (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-    # test no-op sparse-dense
-    assert b == b.sparse().dense()
     # test unbatching
     _dp = b.unbatch()
     _d = _dp.inv_permute()
@@ -129,8 +127,6 @@ def test_spatial_data_with_x():
     assert not (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
     assert not (b.s_ctx[:, :num_ctx_max] == b.s_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-    # test no-op sparse-dense
-    assert b == b.sparse().dense()
     # test unbatching
     _dp = b.unbatch()
     _d = _dp.inv_permute()
@@ -200,8 +196,6 @@ def test_spatial_data_broadcast_x():
     assert b.valid_lens_test.shape == (B,)
     assert not (b.s_ctx[:, :num_ctx_max] == b.s_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-    # test no-op sparse-dense
-    assert b == b.sparse().dense()
     # test unbatching
     _dp = b.unbatch()
     _d = _dp.inv_permute()
@@ -267,8 +261,6 @@ def test_spatial_data_without_x():
     assert b.valid_lens_test.shape == (B,)
     assert not (b.s_ctx[:, :num_ctx_max] == b.s_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-    # test no-op sparse-dense
-    assert b == b.sparse().dense()
     # test unbatching
     _dp = b.unbatch()
     _d = _dp.inv_permute()
@@ -338,8 +330,6 @@ def test_temporal_data_with_x():
     assert not (b.x_ctx[:, :num_ctx_max] == b.x_test[:, :num_ctx_max]).all()
     assert not (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-    # test no-op sparse-dense
-    assert b == b.sparse().dense()
     # test unbatching
     _dp = b.unbatch()
     _d = _dp.inv_permute()
@@ -408,8 +398,6 @@ def test_temporal_data_broadcast_x():
     assert b.valid_lens_test.shape == (B,)
     assert not (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-    # test no-op sparse-dense
-    assert b == b.sparse().dense()
     # test unbatching
     _dp = b.unbatch()
     _d = _dp.inv_permute()
@@ -474,8 +462,6 @@ def test_temporal_data_without_x():
     assert b.valid_lens_test.shape == (B,)
     assert not (b.t_ctx[:, :num_ctx_max] == b.t_test[:, :num_ctx_max]).all()
     assert not (b.f_ctx[:, :num_ctx_max] == b.f_test[:, :num_ctx_max]).all()
-    # test no-op sparse-dense
-    assert b == b.sparse().dense()
     # test unbatching
     _dp = b.unbatch()
     _d = _dp.inv_permute()

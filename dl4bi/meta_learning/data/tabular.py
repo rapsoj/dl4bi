@@ -3,18 +3,18 @@ Provides standard containers for Tabular Data.
 
 This is based on the following general state machine:
 
-1. Data.permute() -> PermutedData
-2. PermutedData.batch() -> DenseBatchedData [data loss: non-context, non-test points dropped]
-3. DenseBatchedData.sparse() -> SparseBatchedData [no-op here since data is already packed]
+TabularData.permute(...) -> PermutedTabularData
+PermutedTabularData.inv_permute() -> TabularData
 
-4. SparseBatchedData.dense() -> DenseBatchedData [no-op here since sparse = dense data]
-5. DenseBatchedData.unbatch() -> PermutedData [dropped points filled with NaNs]
-6. PermutedData.inv_permute() -> Data
+PermutedTabularData.batch(...) -> BatchedPermutedTabularData [data loss: non-context, non-test points dropped]
+BatchedPermutedTabularData.unbatch() -> PermutedTabularData [dropped points filled with NaNs]
+BatchedPermutedTabularData.inv_permute() -> BatchedTabularData [dropped points filled with NaNs]
 """
 
 from dataclasses import dataclass
 
 import jax
+from jax import random
 
 from .utils import (
     MetaLearningBatch,
@@ -32,6 +32,17 @@ class TabularData(MetaLearningData):
 
     x: jax.Array  # [B, L, D_x]
     f: jax.Array  # [B, L, D_f]
+
+    def batch(
+        self,
+        rng: jax.Array,
+        num_ctx_min: int,
+        num_ctx_max: int,
+        num_test: int,
+        test_includes_ctx: bool = False,
+    ):
+        rng_p, rng_v = random.split(rng)
+        s, f = permute_L_in_BLD(rng, [self.x, self.f])
 
     def permute(self, rng: jax.Array, independent: bool = False):
         """Returns a `PermutedTabularData` object.
@@ -86,7 +97,7 @@ class PermutedTabularData(MetaLearningData):
             "test_includes_ctx": test_includes_ctx,
             "inv_permute_idx": self.inv_permute_idx,
         }
-        return DenseBatchedTabularData(*args, **kwargs)
+        return BatchedPermutedTabularData(*args, **kwargs)
 
 
 jax.tree_util.register_pytree_node(
@@ -97,7 +108,7 @@ jax.tree_util.register_pytree_node(
 
 
 @dataclass(frozen=True, eq=False)
-class DenseBatchedTabularData(MetaLearningBatch):
+class BatchedPermutedTabularData(MetaLearningBatch):
     x_ctx: jax.Array
     f_ctx: jax.Array
     valid_lens_ctx: jax.Array
@@ -118,21 +129,9 @@ class DenseBatchedTabularData(MetaLearningBatch):
         )
         return PermutedTabularData(x, f, self.inv_permute_idx)
 
-    def sparse(self):
-        return SparseBatchedTabularData(
-            self.x_ctx,
-            self.f_ctx,
-            self.valid_lens_ctx,
-            self.x_test,
-            self.f_test,
-            self.valid_lens_test,
-            self.inv_permute_idx,
-            self.test_includes_ctx,
-        )
-
 
 jax.tree_util.register_pytree_node(
-    DenseBatchedTabularData,
+    BatchedPermutedTabularData,
     lambda d: (
         (
             d.x_ctx,
@@ -145,47 +144,5 @@ jax.tree_util.register_pytree_node(
         ),
         (d.test_includes_ctx,),
     ),
-    lambda aux, children: DenseBatchedTabularData(*children, *aux),
-)
-
-
-@dataclass(frozen=True)
-class SparseBatchedTabularData(MetaLearningBatch):
-    x_ctx: jax.Array
-    f_ctx: jax.Array
-    valid_lens_ctx: jax.Array
-    x_test: jax.Array
-    f_test: jax.Array
-    valid_lens_test: jax.Array
-    inv_permute_idx: jax.Array
-    test_includes_ctx: bool
-
-    def dense(self):
-        return DenseBatchedTabularData(
-            self.x_ctx,
-            self.f_ctx,
-            self.valid_lens_ctx,
-            self.x_test,
-            self.f_test,
-            self.valid_lens_test,
-            self.inv_permute_idx,
-            self.test_includes_ctx,
-        )
-
-
-jax.tree_util.register_pytree_node(
-    SparseBatchedTabularData,
-    lambda d: (
-        (
-            d.x_ctx,
-            d.f_ctx,
-            d.valid_lens_ctx,
-            d.x_test,
-            d.f_test,
-            d.valid_lens_test,
-            d.inv_permute_idx,
-        ),
-        (d.test_includes_ctx,),
-    ),
-    lambda aux, children: SparseBatchedTabularData(*children, *aux),
+    lambda aux, children: BatchedPermutedTabularData(*children, *aux),
 )
