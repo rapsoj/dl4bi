@@ -123,5 +123,5 @@ jax.tree_util.register_pytree_node(
         ),
         None,
     ),
-    lambda aux, children: TemporalBatch(*children, *aux),
+    lambda _aux, children: TemporalBatch(*children),
 )
