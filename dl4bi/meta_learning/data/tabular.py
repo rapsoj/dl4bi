@@ -1,28 +1,14 @@
-"""
-Provides standard containers for Tabular Data.
-
-This is based on the following general state machine:
-
-TabularData.permute(...) -> PermutedTabularData
-PermutedTabularData.inv_permute() -> TabularData
-
-PermutedTabularData.batch(...) -> BatchedPermutedTabularData [data loss: non-context, non-test points dropped]
-BatchedPermutedTabularData.unbatch() -> PermutedTabularData [dropped points filled with NaNs]
-BatchedPermutedTabularData.inv_permute() -> BatchedTabularData [dropped points filled with NaNs]
-"""
-
 from dataclasses import dataclass
+from functools import partial
 
 import jax
-from jax import random
+from jax import jit, random
 
 from .utils import (
     MetaLearningBatch,
     MetaLearningData,
     batch_BLD,
-    inv_permute_L_in_BLD,
     permute_L_in_BLD,
-    unbatch_BLD,
 )
 
 
@@ -41,19 +27,40 @@ class TabularData(MetaLearningData):
         num_test: int,
         test_includes_ctx: bool = False,
     ):
-        rng_p, rng_v = random.split(rng)
-        s, f = permute_L_in_BLD(rng, [self.x, self.f])
+        return _batch(
+            rng,
+            self.x,
+            self.f,
+            num_ctx_min,
+            num_ctx_max,
+            num_test,
+            test_includes_ctx,
+        )
 
-    def permute(self, rng: jax.Array, independent: bool = False):
-        """Returns a `PermutedTabularData` object.
 
-        Args:
-            rng: A PRNG for generating the permutation indices.
-            independent: Whether to permute each element in the
-                batch separately.
-        """
-        args = permute_L_in_BLD(rng, [self.x, self.f], independent)
-        return PermutedTabularData(*args)
+@partial(
+    jit,
+    static_argnames=(
+        "num_ctx_min",
+        "num_ctx_max",
+        "num_test",
+        "test_includes_ctx",
+    ),
+)
+def _batch(
+    rng: jax.Array,
+    x: jax.Array,
+    f: jax.Array,
+    num_ctx_min: int,
+    num_ctx_max: int,
+    num_test: int,
+    test_includes_ctx: bool,
+):
+    rng_p, rng_b = random.split(rng)
+    x, f, inv_permute_idx = permute_L_in_BLD(rng, [x, f])
+    batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
+    args = batch_BLD(rng_b, [x, f], *batch_args)
+    return TabularBatch(*args, inv_permute_idx=inv_permute_idx)
 
 
 # register to use in jitted functions
@@ -65,50 +72,7 @@ jax.tree_util.register_pytree_node(
 
 
 @dataclass(frozen=True, eq=False)
-class PermutedTabularData(MetaLearningData):
-    """A permuted version of `TabularData`."""
-
-    x: jax.Array  # [B, L, D_x]
-    f: jax.Array  # [B, L, D_f]
-    inv_permute_idx: jax.Array  # [B, L] or [L]
-
-    def inv_permute(self):
-        """Inverts the permutation and returns `TabularData`."""
-        x, f = inv_permute_L_in_BLD([self.x, self.f], self.inv_permute_idx)
-        return TabularData(x, f)
-
-    def batch(
-        self,
-        rng: jax.Array,
-        num_ctx_min: int,
-        num_ctx_max: int,
-        num_test: int,
-        test_includes_ctx: bool = False,
-    ):
-        args = batch_BLD(
-            rng,
-            [self.x, self.f],
-            num_ctx_min,
-            num_ctx_max,
-            num_test,
-            test_includes_ctx,
-        )
-        kwargs = {
-            "test_includes_ctx": test_includes_ctx,
-            "inv_permute_idx": self.inv_permute_idx,
-        }
-        return BatchedPermutedTabularData(*args, **kwargs)
-
-
-jax.tree_util.register_pytree_node(
-    PermutedTabularData,
-    lambda d: ((d.x, d.f, d.inv_permute_idx), None),
-    lambda _aux, children: PermutedTabularData(*children),
-)
-
-
-@dataclass(frozen=True, eq=False)
-class BatchedPermutedTabularData(MetaLearningBatch):
+class TabularBatch(MetaLearningBatch):
     x_ctx: jax.Array
     f_ctx: jax.Array
     valid_lens_ctx: jax.Array
@@ -116,22 +80,11 @@ class BatchedPermutedTabularData(MetaLearningBatch):
     f_test: jax.Array
     valid_lens_test: jax.Array
     inv_permute_idx: jax.Array
-    test_includes_ctx: bool
-
-    def unbatch(self):
-        i = self.inv_permute_idx
-        L = i.shape[0] if i.ndim == 1 else i.shape[1]
-        x, f = unbatch_BLD(
-            [self.x_ctx, self.f_ctx],
-            [self.x_test, self.f_test],
-            L,
-            self.test_includes_ctx,
-        )
-        return PermutedTabularData(x, f, self.inv_permute_idx)
 
 
+# register to use in jitted functions
 jax.tree_util.register_pytree_node(
-    BatchedPermutedTabularData,
+    TabularBatch,
     lambda d: (
         (
             d.x_ctx,
@@ -142,7 +95,7 @@ jax.tree_util.register_pytree_node(
             d.valid_lens_test,
             d.inv_permute_idx,
         ),
-        (d.test_includes_ctx,),
+        None,
     ),
-    lambda aux, children: BatchedPermutedTabularData(*children, *aux),
+    lambda _aux, children: TabularBatch(*children),
 )

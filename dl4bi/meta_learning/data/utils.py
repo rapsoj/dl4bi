@@ -96,18 +96,9 @@ def batch_BLD(
     )
 
 
-@partial(jit, static_argnames=("L", "test_includes_ctx"))
-def unbatch_BLD(
-    ctx: Sequence[jax.Array],
-    test: Sequence[jax.Array],
-    L: int,
-    test_includes_ctx: bool,
-):
-    if test_includes_ctx:
-        return [_nan_pad(a, axis=1, L=L) for a in test]
-    arrays = [jnp.concat(p, axis=1) for p in zip(ctx, test)]
-    arrays = [_nan_pad(a, axis=1, L=L) for a in arrays]
-    return arrays
+@partial(jit, static_argnames=("L",))
+def unbatch_BLD(arrays: Sequence[jax.Array], L: int):
+    return [_nan_pad(a, axis=1, L=L) for a in arrays]
 
 
 def _nan_pad(v: jax.Array, axis: int, L: int):

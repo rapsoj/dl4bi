@@ -108,28 +108,20 @@ def build_dataloaders(
     s = build_grid([dict(start=-2.0, stop=2.0, num=28)] * 2)
     s = jnp.repeat(s[None, ...], B, axis=0)
 
-    def build_dataloader(dataset, is_callback=False):
+    def build_dataloader(dataset, num_test_max):
         def dataloader(rng: jax.Array):
             for f in dataset.as_numpy_iterator():
-                rng_p, rng_b, rng = random.split(rng, 3)
-                d = SpatialData(x=None, s=s, f=f)
-                b = d.permute(rng_p).batch(
-                    rng_b,
-                    num_ctx_min,
-                    num_ctx_max,
-                    num_test_max,
-                    True,
+                rng_i, rng = random.split(rng)
+                yield SpatialData(x=None, s=s, f=f).batch(
+                    rng_i, num_ctx_min, num_ctx_max, num_test_max, True
                 )
-                if is_callback:
-                    yield b, d
-                yield b
 
         return dataloader
 
     return (
-        build_dataloader(train_ds),
-        build_dataloader(valid_ds),
-        build_dataloader(valid_ds, True),
+        build_dataloader(train_ds, num_test_max),
+        build_dataloader(valid_ds, num_test_max),
+        build_dataloader(valid_ds, 28 * 28),
     )
 
 
