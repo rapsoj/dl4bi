@@ -1,23 +1,40 @@
 from functools import partial
-from typing import Sequence
+from typing import Optional, Sequence
 
 import jax
 import jax.numpy as jnp
 from jax import jit, random, vmap
 
+from ...core.data import Batch, Data, ElementSelectorMixin
+
+
+class MetaLearningData(Data, ElementSelectorMixin):
+    pass
+
+
+class MetaLearningBatch(Batch, ElementSelectorMixin):
+    pass
+
+
+@jit
+def flatten_spatial(v: Optional[jax.Array]):
+    if v is None:
+        return None
+    return v.reshape(v.shape[0], -1, v.shape[-1])
+
 
 @partial(jit, static_argnames=("independent",))
 def permute_L_in_BLD(
     rng: jax.Array,
+    arrays: Sequence[jax.Array],
     independent: bool = False,
-    *arrays,
 ):
     B, L = arrays[0].shape[:2]
     if independent:
         rngs = random.split(rng, B)
         permute_idx = _vpermute_idx(rngs, L)
         inv_permute_idx = jnp.argsort(permute_idx, axis=1)
-        vpermute = vmap(lambda v, idx: v[:, idx])
+        vpermute = vmap(lambda v, idx: v[idx])
         arrays = [vpermute(a, permute_idx) for a in arrays]
         return *arrays, inv_permute_idx
     permute_idx = _permute_idx(rng, L)
@@ -35,10 +52,13 @@ def _permute_idx(rng: jax.Array, L: int):
 
 
 @jit
-def inv_permute_L_in_BLD(inv_permute_idx: jax.Array, *arrays):
+def inv_permute_L_in_BLD(
+    arrays: Sequence[jax.Array],
+    inv_permute_idx: jax.Array,
+):
     if inv_permute_idx.ndim == 1:
         return [a[:, inv_permute_idx] for a in arrays]
-    v_inv = vmap(lambda v, idx: v[:, idx])
+    v_inv = vmap(lambda v, idx: v[idx])
     return [v_inv(a, inv_permute_idx) for a in arrays]
 
 
@@ -53,49 +73,41 @@ def inv_permute_L_in_BLD(inv_permute_idx: jax.Array, *arrays):
 )
 def batch_BLD(
     rng: jax.Array,
-    inv_permute_idx: jax.Array,
+    arrays: Sequence[jax.Array],
     num_ctx_min: int,
     num_ctx_max: int,
     num_test: int,
     test_includes_ctx: bool = False,
-    *arrays,
 ):
     B = arrays[0].shape[0]
     valid_lens_ctx = random.randint(rng, (B,), num_ctx_min, num_ctx_max)
     valid_lens_test = jnp.repeat(num_test, B)
     ctx = [a[:, :num_ctx_max] for a in arrays]
+    Nc, Nt = num_ctx_max, num_test
     if test_includes_ctx:
-        test = [a[:, :num_test] for a in arrays]
+        test = [a[:, :Nt] for a in arrays]
     else:
-        test = [a[:, num_ctx_max : num_ctx_max + num_test] for a in arrays]
+        test = [a[:, Nc : Nc + Nt] for a in arrays]
     return (
         *ctx,
         valid_lens_ctx,
         *test,
         valid_lens_test,
-        inv_permute_idx,
-        test_includes_ctx,
     )
 
 
-@partial(jit, static_argnames=("test_includes_ctx",))
+@partial(jit, static_argnames=("L", "test_includes_ctx"))
 def unbatch_BLD(
     ctx: Sequence[jax.Array],
-    valid_lens_ctx: jax.Array,
     test: Sequence[jax.Array],
-    valid_lens_test: jax.Array,
-    inv_permute_idx: jax.Array,
+    L: int,
     test_includes_ctx: bool,
 ):
-    L = inv_permute_idx.shape[0]
-    if inv_permute_idx.ndim > 1:
-        L = inv_permute_idx.shape[1]
     if test_includes_ctx:
-        arrays = [_nan_pad(a, axis=1, L=L) for a in test]
-        return *arrays, inv_permute_idx
-    arrays = [jnp.concat(pair, axis=1) for pair in zip(ctx, test)]
+        return [_nan_pad(a, axis=1, L=L) for a in test]
+    arrays = [jnp.concat(p, axis=1) for p in zip(ctx, test)]
     arrays = [_nan_pad(a, axis=1, L=L) for a in arrays]
-    return *arrays, inv_permute_idx
+    return arrays
 
 
 def _nan_pad(v: jax.Array, axis: int, L: int):
