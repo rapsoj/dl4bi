@@ -14,7 +14,7 @@ from jax import random
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import build_grid
 
-from dl4bi.core.data import SpatialData
+from dl4bi.meta_learning.data.spatial import SpatialData
 from dl4bi.meta_learning.train_utils import (
     Callback,
     cfg_to_run_name,
@@ -42,7 +42,7 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader, valid_dataloader = build_dataloaders()
+    train_dataloader, valid_dataloader, callback_dataloader = build_dataloaders()
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -70,6 +70,7 @@ def main(cfg: DictConfig):
         valid_step,
         train_dataloader,
         valid_dataloader,
+        callback_dataloader,
         cfg.train_num_steps,
         cfg.valid_num_steps,
         cfg.valid_interval,
@@ -107,22 +108,29 @@ def build_dataloaders(
     s = build_grid([dict(start=-2.0, stop=2.0, num=28)] * 2)
     s = jnp.repeat(s[None, ...], B, axis=0)
 
-    def build_dataloader(dataset):
+    def build_dataloader(dataset, is_callback=False):
         def dataloader(rng: jax.Array):
             for f in dataset.as_numpy_iterator():
-                rng_i, rng = random.split(rng)
-                yield SpatialData(x=None, s=s, f=f).to_batch(
-                    rng_i,
+                rng_p, rng_b, rng = random.split(rng, 3)
+                d = SpatialData(x=None, s=s, f=f)
+                b = d.permute(rng_p).batch(
+                    rng_b,
                     num_ctx_min,
                     num_ctx_max,
                     num_test_max,
-                    test_includes_ctx=True,
-                    include_inv_permute_idx=True,
+                    True,
                 )
+                if is_callback:
+                    yield b, d
+                yield b
 
         return dataloader
 
-    return build_dataloader(train_ds), build_dataloader(valid_ds)
+    return (
+        build_dataloader(train_ds),
+        build_dataloader(valid_ds),
+        build_dataloader(valid_ds, True),
+    )
 
 
 if __name__ == "__main__":

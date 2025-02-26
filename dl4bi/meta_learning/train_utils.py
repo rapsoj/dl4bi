@@ -99,6 +99,7 @@ def train(
     valid_step: Callable,
     train_dataloader: Callable,
     valid_dataloader: Callable,
+    callback_dataloader: Callable,
     train_num_steps: int = 100000,
     valid_num_steps: Optional[int] = None,
     valid_interval: int = 25000,
@@ -158,7 +159,8 @@ def train(
                 return best_state
         for cbk in callbacks:
             if i % cbk.interval == 0:
-                cbk.fn(i, rng_train_step, state, batch)
+                batch, extra = next(callback_dataloader(rng_train_step))
+                cbk.fn(i, rng_train_step, state, batch, extra)
         pbar.set_postfix(
             {"Train NLL": f"{train_nll:.3f}", "Valid NLL": f"{valid_nll:.3f}"}
         )
