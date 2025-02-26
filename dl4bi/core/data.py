@@ -21,12 +21,34 @@ class Data(Mapping):
         """Returns a new batch with updated attributes."""
         return replace(self, **kwargs)
 
+    def eq_shapes(self, other):
+        for f in fields(self):
+            lhs = getattr(self, f.name)
+            rhs = getattr(other, f.name)
+            if isinstance(lhs, jax.Array):
+                if lhs.shape != rhs.shape:
+                    return False
+            elif isinstance(lhs, (dict, set)):
+                if set(lhs) != set(rhs):
+                    return False
+            elif isinstance(lhs, (list, tuple)):
+                if len(lhs) != len(rhs):
+                    return False
+            if lhs is None:
+                if rhs is not None:
+                    return False
+            return True
+
     def __eq__(self, other):
         if not isinstance(other, type(self)):
-            return NotImplemented
-        return all(
-            getattr(self, f.name) == getattr(other, f.name) for f in fields(self)
-        )
+            return False
+        for k, v in self.items():
+            if isinstance(v, jax.Array):
+                if not (v == other[k]).all():
+                    return False
+            elif v != other[k]:
+                return False
+        return True
 
     def __getitem__(self, key):
         return asdict(self)[key]
@@ -45,12 +67,34 @@ class Batch(Mapping):
         """Returns a new batch with updated attributes."""
         return replace(self, **kwargs)
 
+    def eq_shapes(self, other):
+        for f in fields(self):
+            lhs = getattr(self, f.name)
+            rhs = getattr(other, f.name)
+            if isinstance(lhs, jax.Array):
+                if lhs.shape != rhs.shape:
+                    return False
+            elif isinstance(lhs, (dict, set)):
+                if set(lhs) != set(rhs):
+                    return False
+            elif isinstance(lhs, (list, tuple)):
+                if len(lhs) != len(rhs):
+                    return False
+            elif lhs is None:
+                if rhs is not None:
+                    return False
+            return True
+
     def __eq__(self, other):
         if not isinstance(other, type(self)):
-            return NotImplemented
-        return all(
-            getattr(self, f.name) == getattr(other, f.name) for f in fields(self)
-        )
+            return False
+        for k, v in self.items():
+            if isinstance(v, jax.Array):
+                if not (v == other[k]).all():
+                    return False
+            elif v != other[k]:
+                return False
+        return True
 
     def __getitem__(self, key):
         return asdict(self)[key]

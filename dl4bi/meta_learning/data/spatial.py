@@ -29,7 +29,7 @@ from .utils import (
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class SpatialData(MetaLearningData):
     """A simple `SpatialData` container."""
 
@@ -69,7 +69,7 @@ jax.tree_util.register_pytree_node(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PermutedSpatialData(MetaLearningData):
     """A permuted version of `SpatialData`."""
 
@@ -133,7 +133,7 @@ jax.tree_util.register_pytree_node(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class DenseBatchedSpatialData(MetaLearningBatch):
     x_ctx: Optional[jax.Array]
     s_ctx: jax.Array
@@ -213,7 +213,7 @@ jax.tree_util.register_pytree_node(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class SparseBatchedSpatialData(MetaLearningBatch):
     x_ctx: Optional[jax.Array]
     s_ctx: jax.Array

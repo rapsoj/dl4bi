@@ -25,18 +25,14 @@ def test_tabular_data():
     # test permute and inv_permute
     dp = d.permute(rng)
     _d = dp.inv_permute()
-    assert d.x.shape == dp.x.shape
-    assert d.f.shape == dp.f.shape
-    assert (d.x == _d.x).all()
-    assert (d.f == _d.f).all()
+    assert d.eq_shapes(dp)
+    assert d == _d
     assert dp.inv_permute_idx.shape == (L,)
     # test permute and inv_permute with independent permutations
     dp = d.permute(rng, independent=True)
     _d = dp.inv_permute()
-    assert d.x.shape == dp.x.shape
-    assert d.f.shape == dp.f.shape
-    assert (d.x == _d.x).all()
-    assert (d.f == _d.f).all()
+    assert d.eq_shapes(dp)
+    assert d == _d
     assert dp.inv_permute_idx.shape == (B, L)
     # test batching where test includes context
     test_includes_ctx = True
@@ -65,11 +61,9 @@ def test_tabular_data():
     # test unbatching
     _dp = b.unbatch()
     _d = _dp.inv_permute()
-    assert dp.x.shape == _dp.x.shape
-    assert dp.f.shape == _dp.f.shape
+    assert dp.eq_shapes(_dp)
     assert (dp.inv_permute_idx == dp.inv_permute_idx).all()
-    assert d.x.shape == _d.x.shape
-    assert d.f.shape == _d.f.shape
+    assert d.eq_shapes(_d)
 
 
 def test_spatial_data_with_x():
@@ -97,22 +91,14 @@ def test_spatial_data_with_x():
     # test permute and inv_permute
     dp = d.permute(rng)
     _d = dp.inv_permute()
-    assert d.x.shape == dp.x.shape
-    assert d.s.shape == dp.s.shape
-    assert d.f.shape == dp.f.shape
-    assert (d.x == _d.x).all()
-    assert (d.s == _d.s).all()
-    assert (d.f == _d.f).all()
+    assert d.eq_shapes(dp)
+    assert d == _d
     assert dp.inv_permute_idx.shape == (S**D_s,)
     # test permute and inv_permute with independent permutations
     dp = d.permute(rng, independent=True)
     _d = dp.inv_permute()
-    assert d.x.shape == dp.x.shape
-    assert d.s.shape == dp.s.shape
-    assert d.f.shape == dp.f.shape
-    assert (d.x == _d.x).all()
-    assert (d.s == _d.s).all()
-    assert (d.f == _d.f).all()
+    assert d.eq_shapes(dp)
+    assert d == _d
     assert dp.inv_permute_idx.shape == (B, S**D_s)
     # test batching where test includes context
     test_includes_ctx = True
@@ -147,13 +133,9 @@ def test_spatial_data_with_x():
     # test unbatching
     _dp = b.unbatch()
     _d = _dp.inv_permute()
-    assert dp.x.shape == _dp.x.shape
-    assert dp.s.shape == _dp.s.shape
-    assert dp.f.shape == _dp.f.shape
+    assert dp.eq_shapes(_dp)
     assert (dp.inv_permute_idx == dp.inv_permute_idx).all()
-    assert d.x.shape == _d.x.shape
-    assert d.s.shape == _d.s.shape
-    assert d.f.shape == _d.f.shape
+    assert d.eq_shapes(_d)
 
 
 def test_spatial_data_broadcast_x():
@@ -181,22 +163,14 @@ def test_spatial_data_broadcast_x():
     # test permute and inv_permute
     dp = d.permute(rng)
     _d = dp.inv_permute()
-    assert d.x.shape == dp.x.shape
-    assert d.s.shape == dp.s.shape
-    assert d.f.shape == dp.f.shape
-    assert (d.x == _d.x).all()
-    assert (d.s == _d.s).all()
-    assert (d.f == _d.f).all()
+    assert d.eq_shapes(dp)
+    assert d == _d
     assert dp.inv_permute_idx.shape == (S**D_s,)
     # test permute and inv_permute with independent permutations
     dp = d.permute(rng, independent=True)
     _d = dp.inv_permute()
-    assert d.x.shape == dp.x.shape
-    assert d.s.shape == dp.s.shape
-    assert d.f.shape == dp.f.shape
-    assert (d.x == _d.x).all()
-    assert (d.s == _d.s).all()
-    assert (d.f == _d.f).all()
+    assert d.eq_shapes(dp)
+    assert d == _d
     assert dp.inv_permute_idx.shape == (B, S**D_s)
     # test batching where test includes context
     test_includes_ctx = True
@@ -230,13 +204,9 @@ def test_spatial_data_broadcast_x():
     # test unbatching
     _dp = b.unbatch()
     _d = _dp.inv_permute()
-    assert dp.x.shape == _dp.x.shape
-    assert dp.s.shape == _dp.s.shape
-    assert dp.f.shape == _dp.f.shape
+    assert dp.eq_shapes(_dp)
     assert (dp.inv_permute_idx == dp.inv_permute_idx).all()
-    assert d.x.shape == _d.x.shape
-    assert d.s.shape == _d.s.shape
-    assert d.f.shape == _d.f.shape
+    assert d.eq_shapes(_d)
 
 
 def test_spatial_data_without_x():
@@ -261,20 +231,14 @@ def test_spatial_data_without_x():
     # test permute and inv_permute
     dp = d.permute(rng)
     _d = dp.inv_permute()
-    assert d.x == dp.x
-    assert d.s.shape == dp.s.shape
-    assert d.f.shape == dp.f.shape
-    assert (d.s == _d.s).all()
-    assert (d.f == _d.f).all()
+    assert d.eq_shapes(dp)
+    assert d == _d
     assert dp.inv_permute_idx.shape == (S**D_s,)
     # test permute and inv_permute with independent permutations
     dp = d.permute(rng, independent=True)
     _d = dp.inv_permute()
-    assert d.s.shape == dp.s.shape
-    assert d.f.shape == dp.f.shape
-    assert d.x == _d.x
-    assert (d.s == _d.s).all()
-    assert (d.f == _d.f).all()
+    assert d.eq_shapes(dp)
+    assert d == _d
     assert dp.inv_permute_idx.shape == (B, S**D_s)
     # test batching where test includes context
     test_includes_ctx = True
@@ -307,10 +271,6 @@ def test_spatial_data_without_x():
     # test unbatching
     _dp = b.unbatch()
     _d = _dp.inv_permute()
-    assert dp.x == _dp.x
-    assert dp.s.shape == _dp.s.shape
-    assert dp.f.shape == _dp.f.shape
+    assert dp.eq_shapes(_dp)
     assert (dp.inv_permute_idx == dp.inv_permute_idx).all()
-    assert d.x == _d.x
-    assert d.s.shape == _d.s.shape
-    assert d.f.shape == _d.f.shape
+    assert d.eq_shapes(_d)

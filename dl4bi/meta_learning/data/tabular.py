@@ -26,7 +26,7 @@ from .utils import (
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class TabularData(MetaLearningData):
     """A simple `TabularData` container."""
 
@@ -53,7 +53,7 @@ jax.tree_util.register_pytree_node(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PermutedTabularData(MetaLearningData):
     """A permuted version of `TabularData`."""
 
@@ -96,7 +96,7 @@ jax.tree_util.register_pytree_node(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class DenseBatchedTabularData(MetaLearningBatch):
     x_ctx: jax.Array
     f_ctx: jax.Array
