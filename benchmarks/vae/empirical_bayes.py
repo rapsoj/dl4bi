@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Callable, Union
 
 import flax.linen as nn
-import geopandas as gpd
 import hydra
 import jax
 import jax.numpy as jnp

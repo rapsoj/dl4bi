@@ -85,22 +85,27 @@ DeepRV is a VAE-decoder-only model designed to generate pre-trained priors for g
 ## Full Train and Inference Examples
 ### RBF Kernel with Poisson Inference
 ```bash
-python vae.py exp_name=experiment_name map_path=user_path/map_path inference_model.spatial_prior.func=rbf seed=19 wandb=False && \
+python train.py exp_name=experiment_name map_path=user_path/map_path inference_model.spatial_prior.func=rbf seed=19 wandb=False && \
 python infer.py exp_name=experiment_name map_path=user_path/map_path inference_model=poisson inference_model.spatial_prior.func=rbf seed=19 wandb=False
 ```
 
 ### CAR model with Poisson Inference
 ```bash
-python vae.py exp_name=experiment_name map_path=user_path/map_path inference_model.spatial_prior.func=car seed=19 wandb=False && \
+python train.py exp_name=experiment_name map_path=user_path/map_path inference_model.spatial_prior.func=car seed=19 wandb=False && \
 python infer.py exp_name=experiment_name map_path=user_path/map_path inference_model=poisson_car_gp seed=19 wandb=False
 ```
 
 ### Periodic Kernel with binomial Inference
 ```bash
-python vae.py exp_name=experiment_name map_path=user_path/map_path inference_model=binomial inference_model.spatial_prior.func=periodic seed=19 wandb=False && \
+python train.py exp_name=experiment_name map_path=user_path/map_path inference_model=binomial inference_model.spatial_prior.func=periodic seed=19 wandb=False && \
 python infer.py exp_name=experiment_name map_path=user_path/map_path inference_model=binomial inference_model.spatial_prior.func=periodic seed=19 wandb=False
 ```
 
+## Validating pre-trained prior with empirical bayes
+```bash
+python train.py exp_name=experiment_name map_path=user_path/map_path inference_model=spatial_only inference_model.spatial_prior.func=matern_5_2 seed=19 wandb=False && \
+python empirical_bayes.py exp_name=experiment_name map_path=user_path/map_path inference_model=spatial_only inference_model.spatial_prior.func=matern_5_2 seed=19 wandb=False
+```
 
 ## Reproducing Paper Results (Deprecated)
 
