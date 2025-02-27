@@ -45,7 +45,7 @@ simulation_priors:
   beta:
     numpyro_dist: Delta
     kwargs:
-      v: 2.0
+      v: 1.0
   alpha: #CAR model param
     numpyro_dist: Delta
     kwargs:

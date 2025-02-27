@@ -35,7 +35,9 @@ def main(cfg: DictConfig):
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
-        name=f"Infer_{cfg.exp_name}_{model_name}_{cfg.inference_model.model.func}",
+        name=f"Infer_{cfg.exp_name}_{model_name}_"
+        f"{cfg.inference_model.spatial_prior.func}_"
+        f"{cfg.inference_model.model.func}",
         project=cfg.project,
         reinit=True,
     )
@@ -73,7 +75,7 @@ def main(cfg: DictConfig):
             **conditionals,
         }
     )
-    results_dir = get_results_dir(cfg, model_dir, obs_idxs, s)
+    results_dir = get_results_dir(cfg, model_dir, obs_idxs, s, model_name)
     results_dir.mkdir(parents=True, exist_ok=True)
     log_inference_run((samples, mcmc, post), conditionals, results_dir)
     plot_inference_run(
@@ -283,9 +285,9 @@ def load_ckpt(path: Union[str, Path]):
     return state, model
 
 
-def get_results_dir(cfg, model_dir, obs_idxs, s):
+def get_results_dir(cfg, model_dir, obs_idxs, s, model_name):
     results_dir = model_dir / (
-        f"{cfg.model.cls if cfg.inference_model.surrogate_model else 'Baseline_GP'}/"
+        f"{model_name if cfg.inference_model.surrogate_model else 'Baseline_GP'}/"
         f"{cfg.inference_model.model.func}/"
     )
     if len(obs_idxs) < s.shape[0]:
