@@ -17,11 +17,8 @@ priors: # Priors for inference model data generation
   ls:
     numpyro_dist: Uniform
     kwargs:
-      low: 0.05
-      high: 1.0
-
-  period: # Would only be used if training prior is Periodic
-    numpyro_dist: HalfNormal
+      low: 5.0
+      high: 100.0
 surrogate_model: True # Whether to use a surrogate model or and actual GP sampling
 num_obs_locations: null # Can be used to randomly select partial number of locations for inference
 population_scale: 100

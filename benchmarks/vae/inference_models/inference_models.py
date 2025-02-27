@@ -222,7 +222,7 @@ def car_model(
 ):
     tau = numpyro.sample("tau", priors["tau"]).squeeze()
     alpha = numpyro.sample("alpha", priors["alpha"]).squeeze()
-    conditionals = [jnp.array(tau), jnp.array(alpha)]
+    conditionals = jnp.array([jnp.array(tau), jnp.array(alpha)])
     z = numpyro.sample("z", dist.Normal(), sample_shape=(batch_size, n))
     if surrogate_decoder is not None:
         mu = numpyro.deterministic(

@@ -28,7 +28,7 @@ def main(cfg: DictConfig):
     state = None
     model_dir = Path(f"results/{cfg.exp_name}/{spatial_prior.__name__}/{cfg.seed}")
     if not cfg.inference_model.surrogate_model:
-        model_name = f"Baseline_GP_{spatial_prior.__name__}"
+        model_name, dec_model = f"Baseline_GP_{spatial_prior.__name__}", ""
     else:
         state, dec_model = load_ckpt((model_dir / model_name).with_suffix(".ckpt"))
     wandb.init(
