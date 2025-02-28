@@ -1,3 +1,6 @@
+import sys
+
+sys.path.append("benchmarks/vae")
 import argparse
 import pickle
 from pathlib import Path
@@ -27,37 +30,44 @@ from dl4bi.vae.train_utils import TrainState
 
 
 def reproduce_plots(seeds: jax.Array):
-    models = ["DeepRV", "PriorCVAE", "Baseline_GP"]
+    models_cfgs = ["auto_deep_RV", "deep_RV_gMLP", "auto_prior_cvae"]
+    models_n = ["DeepRV_MLP", "DeepRV_gMLP", "PriorCVAE_MLP", "Baseline_GP"]
     spatial_priors = ["rbf", "matern_3_2", "matern_1_2", "matern_5_2", "car"]
     seed = int(seeds[0])
-    plot_vae_train_samples(seed, ["DeepRV", "PriorCVAE"], spatial_priors)
-    plot_empirical_bayes_comparison(seed, models, spatial_priors[:-1], "ls")
-    plot_empirical_bayes_comparison(seed, models, ["car"], "alpha")
-
+    plot_vae_train_samples(seed, models_cfgs, spatial_priors)
+    plot_empirical_bayes_comparison(seed, models_n, spatial_priors)
     infer_summary = summarize_inference_runs(
         seed,
-        models,
+        models_n,
         spatial_priors,
         "UK_LTLA_sim",
-        "maps/UK",
+        "benchmarks/vae/maps/UK",
         "poisson",
         log_plot=False,
     )
-    print_simulated_latex_table(pd.DataFrame(infer_summary))
+    print_simulated_latex_table(pd.DataFrame(infer_summary), models_n)
     summarize_inference_runs(
         seed,
-        ["DeepRV", "Baseline_GP"],
-        ["matern_3_2"],
-        "total_U50_cancer_mort",
-        "maps/total_under_50_cancer_mortality_LAD_2023",
+        models_n,
+        ["matern_1_2", "matern_3_2"],
+        "female_U50_cancer_mort",
+        "benchmarks/vae/maps/total_under_50_cancer_mortality_LAD_2023",
         "binomial",
     )
     summarize_inference_runs(
         seed,
-        ["DeepRV", "Baseline_GP"],
+        models_n,
+        ["matern_1_2", "matern_3_2"],
+        "male_U50_cancer_mort",
+        "benchmarks/vae/maps/total_under_50_cancer_mortality_LAD_2023",
+        "binomial",
+    )
+    summarize_inference_runs(
+        seed,
+        models_n,
         ["matern_1_2"],
         "zimbabwe_HIV",
-        "maps/zwe2016phia_fixed.geojson",
+        "benchmarks/vae/maps/zwe2016phia_fixed.geojson",
         "binomial",
         population_scale=1,
     )
@@ -65,33 +75,32 @@ def reproduce_plots(seeds: jax.Array):
 
 def plot_vae_train_samples(seed: int, models: list[str], spatial_priors: list[str]):
     exp_name = "UK_LTLA_sim"
-    map_path = "maps/UK"
+    map_path = "benchmarks/vae/maps/UK"
     save_dir = Path("results/final_plots/vae/")
 
     for spatial_prior_name in spatial_priors:
         for model in models:
             with hydra.initialize(config_path="../configs", version_base=None):
-                cfg_model = model.lower().replace("rv", "_RV").replace("cvae", "_cvae")
                 cfg = hydra.compose(
-                    "default_vae",
+                    "default",
                     overrides=[
                         f"exp_name={exp_name}",
-                        f"map_path={map_path}",
+                        f"data.map_path={map_path}",
                         f"inference_model.spatial_prior.func={spatial_prior_name}",
                         f"seed={seed}",
-                        f"model={cfg_model}",
+                        f"model={model}",
                     ],
                 )
-                model_save_dir = save_dir / f"{spatial_prior_name}/{model}/"
-                model_save_dir.mkdir(parents=True, exist_ok=True)
                 model_name = generate_model_name(cfg)
-                spatial_prior = instantiate(cfg.cfg.inference_model.spatial_prior)
+                model_save_dir = save_dir / f"{spatial_prior_name}/{model_name}/"
+                model_save_dir.mkdir(parents=True, exist_ok=True)
+                spatial_prior = instantiate(cfg.inference_model.spatial_prior)
                 model_dir = Path(
                     f"results/{cfg.exp_name}/{spatial_prior_name}/{cfg.seed}"
                 )
                 map_data, s = gen_locations(cfg.data)
                 kwargs = {}
-                if cfg.model.kwargs.decoder.cls == "FixedLocationTransfomer":
+                if "FixedLocationTransfomer" in model_name:
                     kwargs = {"s": s}
                 state, _ = load_ckpt((model_dir / model_name).with_suffix(".ckpt"))
                 priors = {
@@ -107,20 +116,22 @@ def plot_vae_train_samples(seed: int, models: list[str], spatial_priors: list[st
                     s,
                     map_data,
                     state,
-                    model,
+                    model_name,
                     loader,
                     cond_names,
+                    "DeepRV" in model_name,
                     save_dir=model_save_dir,
-                    kwargs=kwargs,
+                    **kwargs,
                 )
                 plot_vae_scatter_comp(
                     rng,
                     state,
-                    model,
+                    model_name,
                     loader,
                     cond_names,
+                    "DeepRV" in model_name,
                     model_save_dir,
-                    kwargs=kwargs,
+                    **kwargs,
                 )
 
 
@@ -130,6 +141,7 @@ def plot_vae_scatter_comp(
     model: str,
     loader,
     conds_names: list[str],
+    is_decoder_only: bool,
     save_dir: Path,
     num_samples=5,
     **kwargs,
@@ -143,7 +155,7 @@ def plot_vae_scatter_comp(
         **kwargs,
         rngs={"dropout": rng_drop, "extra": rng_extra},
     )
-    f_hat = f_hat if model == "DeepRV" else f_hat[0]
+    f_hat = f_hat if is_decoder_only else f_hat[0]
 
     plot_vae_scatter_plot(
         f, f_hat, None, conds_names, num_samples=num_samples, save_dir=save_dir
@@ -154,12 +166,12 @@ def plot_empirical_bayes_comparison(
     seed: int,
     models: list[str],
     spatial_priors: list[str],
-    comapre_var: str,
 ):
     exp_name = "UK_LTLA_sim"
     save_dir = Path("results/final_plots/EB/")
     abs_min, abs_max = 10000, -10000
     for spatial_prior in spatial_priors:
+        compare_var = "alpha" if spatial_prior == "car" else "ls"
         fig, axes = plt.subplots(1, len(models), figsize=(5 * len(models), 5))
         axes = axes.flatten() if len(models) > 1 else [axes]
         for model, ax in zip(models, axes):
@@ -168,16 +180,16 @@ def plot_empirical_bayes_comparison(
             )
             with open(result_dir / "cond_data.pkl", "rb") as ff:
                 data = pickle.load(ff)
-                inf_c = data[f"inf_{comapre_var}"]
-                real_c = data[f"real_{comapre_var}"]
+                inf_c = data[f"inf_{compare_var}"]
+                real_c = data[f"real_{compare_var}"]
             ax.scatter(real_c, inf_c, alpha=0.6)
             ax.set_title(model.replace("_", " "))
             abs_min = min(abs_min, min(real_c.min(), inf_c.min()))
             abs_max = max(abs_max, max(real_c.max(), inf_c.max()))
         for ax in fig.axes:
             ax.plot([abs_min, abs_max], [abs_min, abs_max], "r--", label="y = x")
-            ax.set_xlabel(f"Real {comapre_var.replace('ls', 'lengthscale')}")
-            ax.set_ylabel(f"EB Estimate of {comapre_var.replace('ls', 'lengthscale')}")
+            ax.set_xlabel(f"Real {compare_var.replace('ls', 'lengthscale')}")
+            ax.set_ylabel(f"EB Estimate of {compare_var.replace('ls', 'lengthscale')}")
             ax.legend(loc="lower right")
             ax.set_xlim(abs_min - 0.01, abs_max + 0.01)
             ax.set_ylim(abs_min - 0.01, abs_max + 0.01)
@@ -226,7 +238,11 @@ def summarize_inference_runs(
             lambda_hat = samples["beta"][..., None] + samples["mu"]
             prev_hats.append(lambda_hat)
             f, f_hat = post["f"], post["obs"]
-            if i == 0 and "beta" in post and "spatial_eff" in post:
+            if (
+                i == 0
+                and post.get("beta") is not None
+                and post.get("spatial_eff") is not None
+            ):
                 prev_real = post["beta"] + post["spatial_eff"]
             f_hats[0] = f
             f_hats.append(f_hat)
@@ -286,6 +302,7 @@ def summarize_inference_runs(
             model_type,
             map_data,
             save_dir / f"{exp_name}_{spatial_prior}_prevalence_means.png",
+            population_scale=population_scale,
         )
         plot_prevalence_scatter_comp(
             prev_real,
@@ -295,6 +312,7 @@ def summarize_inference_runs(
             models,
             model_type,
             save_dir / f"{exp_name}_{spatial_prior}_prevalence_scatter.png",
+            population_scale=population_scale,
         )
     return infer_summary
 
@@ -372,7 +390,7 @@ def plot_infer_obs_summary(f, f_hat, map_data, save_path: Path, log=True):
     plt.close(fig)
 
 
-def print_simulated_latex_table(infer_summary):
+def print_simulated_latex_table(infer_summary, models_n):
     spatial_priors = ["car", "matern_1_2", "matern_3_2", "matern_5_2", "rbf"]
     latex_str = r"""\begin{table}
 \small
@@ -389,9 +407,7 @@ def print_simulated_latex_table(infer_summary):
 \midrule
 """
 
-    models = ["Baseline_GP", "PriorCVAE", "DeepRV"]
-
-    for model in models:
+    for model in models_n:
         latex_str += (
             rf"\multirow{{6}}{{*}}{{\begin{{sideways}}\textbf{{{model}}}\end{{sideways}}}} "
             + "\n"

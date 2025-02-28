@@ -13,12 +13,11 @@ from dl4bi.vae.train_utils import TrainState
 
 
 def generate_model_name(cfg: DictConfig):
-    spatial_prior = cfg.inference_model.spatial_prior.func
     if cfg.model.get("kwargs", None) is None:
         dec_name = "MLP"
     else:
         dec_name = cfg.model.kwargs.decoder.cls
-    return cfg.get("name", f"{cfg.model.cls}_{dec_name}_{spatial_prior}")
+    return cfg.get("name", f"{cfg.model.cls}_{dec_name}")
 
 
 def build_model(model_cfg: DictConfig, s: Array):

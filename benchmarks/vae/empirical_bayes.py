@@ -28,13 +28,14 @@ def main(cfg: DictConfig):
     state = None
     model_dir = Path(f"results/{cfg.exp_name}/{spatial_prior.__name__}/{cfg.seed}")
     if not cfg.inference_model.surrogate_model:
-        model_name = f"Baseline_GP_{spatial_prior.__name__}"
+        model_name, dec_model = "Baseline_GP", ""
     else:
         state, dec_model = load_ckpt((model_dir / model_name).with_suffix(".ckpt"))
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
-        name=f"Infer_Empirical_Bayes_{cfg.exp_name}_{model_name}",
+        name=f"Infer_Empirical_Bayes_{cfg.exp_name}_{model_name}"
+        f"_{cfg.inference_model.spatial_prior.func}",
         project=cfg.project,
         reinit=True,
     )
@@ -62,10 +63,7 @@ def main(cfg: DictConfig):
         infer_cond = empirical_infer(s, f_obs, conds, spatial_prior, adj_mat)
         real_conds = real_conds.at[i].set(jnp.array(conds).squeeze())
         inferred_conds = inferred_conds.at[i].set(jnp.array(infer_cond).squeeze())
-    results_dir = (
-        model_dir
-        / f"{model_name.replace(f'_{spatial_prior.__name__}', '')}/Empirical_Bayes"
-    )
+    results_dir = model_dir / f"{model_name}/Empirical_Bayes"
     results_dir.mkdir(parents=True, exist_ok=True)
     log_EB_run(real_conds, inferred_conds, conds_names, results_dir)
 

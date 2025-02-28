@@ -38,7 +38,7 @@ def main(cfg: DictConfig):
     wandb.init(
         config=OmegaConf.to_container(cfg, resolve=True),
         mode="online" if cfg.wandb else "disabled",
-        name=f"VAE_{cfg.exp_name}_{model_name}",
+        name=f"VAE_{cfg.exp_name}_{model_name}_{cfg.inference_model.spatial_prior.func}",
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
     )

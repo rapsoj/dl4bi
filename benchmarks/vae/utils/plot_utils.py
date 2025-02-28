@@ -94,11 +94,12 @@ def plot_prevalence_scatter_comp(
     population_scale: int = 100,
     log: bool = False,
 ):
-    if prev_real is None and inference_model == "binomial" and population:
+    if prev_real is None and inference_model == "binomial" and population is not None:
         population = population // population_scale
         prev_real = jnp.array(f_obs / population)
     if prev_real is None:
         return
+    val_n = "Prevalence" if inference_model == "binomial" else "Intensity"
     prev_hats = [_to_prev(prev_hat, inference_model) for prev_hat in prev_hats]
     if log:
         prev_hats = [jnp.log(prev_hat + 1) for prev_hat in prev_hats]
@@ -110,13 +111,15 @@ def plot_prevalence_scatter_comp(
     for i, (ax, model) in enumerate(zip(axes, models)):
         p_hat_i = prev_hat_means[i]
         ax.scatter(prev_real, p_hat_i, alpha=0.6, label="Samples")
-        ax.set_title(f"Prevalence vs. {model.replace('_', ' ')} mean prevalence")
+        ax.set_title(f"{val_n} vs. {model.replace('_', ' ')} mean {val_n.lower()}")
         abs_min = min(abs_min, p_hat_i.min())
         abs_max = max(abs_max, p_hat_i.max())
     for ax in axes:
         ax.plot([abs_min, abs_max], [abs_min, abs_max], "r--", label="y = x")
-        ax.set_xlabel(r"$p$")
-        ax.set_ylabel(r"$\hat{p}$")
+        ax.set_xlabel(r"$p$" if inference_model == "binomial" else r"$\lambda$")
+        ax.set_ylabel(
+            r"$\hat{p}$" if inference_model == "binomial" else r"$\hat{\lambda}$"
+        )
         ax.legend(loc="lower right")
         ax.set_xlim(abs_min - 0.01, abs_max + 0.01)
         ax.set_ylim(abs_min - 0.01, abs_max + 0.01)
@@ -124,6 +127,7 @@ def plot_prevalence_scatter_comp(
     fig.subplots_adjust(top=0.86)
     if save_path is None:
         save_path = f"/tmp/Scatter prevalence{datetime.now().isoformat()}.png"
+    fig.savefig(save_path, dpi=125)
     plt.clf()
     plt.close(fig)
 
@@ -140,9 +144,10 @@ def plot_models_mean_prevalence(
     population_scale: int = 100,
     log: bool = False,
 ):
-    if prev_real is None and inference_model == "binomial" and population:
+    if prev_real is None and inference_model == "binomial" and population is not None:
         population = population // population_scale
         prev_real = jnp.array(f_obs / population)
+    val_n = "Prevalence" if inference_model == "binomial" else "Intensity"
     prev_hats = [_to_prev(prev_hat, inference_model) for prev_hat in prev_hats]
     use_real = prev_real is not None
     if log:
@@ -158,9 +163,9 @@ def plot_models_mean_prevalence(
     )
     log_str = " (Log scale)" if log else ""
     for i, prev_mean in enumerate(prev_hat_means):
-        title = f"{models[i - 1]}: Mean prevalence"
+        title = f"{models[i - 1]}: Mean {val_n.lower()}"
         if i == 0 and use_real:
-            title = "Observed prevalence"
+            title = f"Observed {val_n.lower()}"
         ax = axes if len(prev_hat_means) == 1 else axes[i]
         plot_on_map(ax, map_data, prev_mean, vmin, vmax, f"{title}{log_str}")
         ax.set_axis_off()
@@ -380,7 +385,7 @@ def plot_inference_run(
             [model_name],
             inference_model.model.func,
             map_data,
-            population_scale=inference_model.get("population_scale", None),
+            population_scale=inference_model.get("population_scale", 1),
         )
     plot_prevalence_scatter_comp(
         prev_real,
@@ -389,7 +394,7 @@ def plot_inference_run(
         population,
         [model_name],
         inference_model.model.func,
-        population_scale=inference_model.get("population_scale", None),
+        population_scale=inference_model.get("population_scale", 1),
     )
 
 
@@ -441,6 +446,7 @@ def plot_vae_reconstruction(
     model: str,
     loader,
     conds_names: list[str],
+    is_decoder_only: bool,
     save_dir: Optional[Path] = None,
     num_plots: int = 5,
     samples_per_plot: int = 3,
@@ -463,7 +469,8 @@ def plot_vae_reconstruction(
             **kwargs,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
-        f_hat = f_hat if model == "DeepRV" else f_hat[0]
+        # NOTE: full VAEs architectures return additional outputs
+        f_hat = f_hat if is_decoder_only else f_hat[0]
         fig, ax = plt.subplots(
             1, samples_per_plot * 2 + int(plot_locations), figsize=(16, 5)
         )
@@ -698,6 +705,7 @@ def log_vae_map_plots(
             model.__class__.__name__,
             loader,
             conds_names,
+            is_decoder_only,
             plot_locations=True,
             step=str(step),
             **kwargs,
@@ -785,6 +793,7 @@ def plot_vae_rec_1d(
     model: str,
     loader,
     conds_names: list[str],
+    is_decoder_only: bool,
     save_dir: Optional[Path] = None,
     num_plots: int = 5,
     samples_per_plot: int = 3,
@@ -799,12 +808,13 @@ def plot_vae_rec_1d(
         f, z, conditionals = next(loader)
         f_hat = state.apply_fn(
             {"params": state.params, **state.kwargs},
-            z if model == "DeepRV" else f,
+            z if is_decoder_only else f,
             conditionals,
             **kwargs,
             rngs={"dropout": rng_drop, "extra": rng_extra},
         )
-        f_hat = f_hat if model == "DeepRV" else f_hat[0]
+        # NOTE: full VAEs architectures return additional outputs
+        f_hat = f_hat if is_decoder_only else f_hat[0]
         fig, ax = plt.subplots(1, samples_per_plot, figsize=(16, 5))
         for j in range(samples_per_plot):
             ax[j].plot(s_flat, f[j].squeeze(), color="black", label=r"$f$")
@@ -894,6 +904,7 @@ def log_vae_grid_plots(
                 model.__class__.__name__,
                 loader,
                 conds_names,
+                is_decoder_only,
                 step=str(step),
                 **kwargs,
             )
