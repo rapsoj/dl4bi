@@ -16,13 +16,6 @@ class MetaLearningBatch(Batch, ElementSelectorMixin):
     pass
 
 
-@jit
-def flatten_spatial(v: Optional[jax.Array]):
-    if v is None:
-        return None
-    return v.reshape(v.shape[0], -1, v.shape[-1])
-
-
 @partial(jit, static_argnames=("independent",))
 def permute_L_in_BLD(
     rng: jax.Array,

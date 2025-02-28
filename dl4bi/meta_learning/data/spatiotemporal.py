@@ -8,12 +8,12 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from jax import jit, random
 from jax.scipy.stats import norm
+from jax import vmap
 
 from .utils import (
     MetaLearningBatch,
     MetaLearningData,
     batch_BLD,
-    flatten_spatial,
     inv_permute_L_in_BLD,
     permute_L_in_BLD,
     unbatch_BLD,
@@ -22,75 +22,147 @@ from .utils import (
 
 @dataclass(frozen=True, eq=False)
 class SpatiotemporalData(MetaLearningData):
-    x: Optional[jax.Array]  # [T, [S]+, D_x] or [B, D_x] or None
+    """
+    .. warning::
+        This class assumes that time, `t`, is ordered and ascending.
+    """
+
+    x: Optional[jax.Array]  # [T, [S]+, D_x] or [B, T, D_x] or [B, D_x] or None
     s: jax.Array  # [T, [S]+, D_s]
+    t: jax.Array  # [T]
     f: jax.Array  # [T, [S]+, D_f]
 
     def batch(
         self,
         rng: jax.Array,
-        num_ctx_min: int,
-        num_ctx_max: int,
+        num_t: int,
+        random_t: int,
+        num_ctx_min_per_t: int,
+        num_ctx_max_per_t: int,
+        independent_t_masks: bool,
         num_test: int,
-        test_includes_ctx: bool = False,
+        forecast: bool,
+        batch_size: int = 4,
     ):
+        """
+        Args:
+            rng: A PRNG.
+            num_t: Number of time steps in each batch element.
+            random_t: When `True` selects random time steps and when `False`
+                selects a a sequential set of `num_t` time steps for each
+                batch element.
+            num_ctx_min_per_t: Minumum mumber of observable spatial context
+                points per time step.
+            num_ctx_max_per_t: Maximum mumber of observable spatial context
+                points per time step.
+            independent_t_masks: When `True`, the spatial context points
+                for each time step are chosen independently. When `False`,
+                the observed spatial locations are the same across all
+                time steps.
+            num_test: Number of test points in the test time step.
+            forecast: If `True`, the predicted test points are part of the last
+                time step in the batch element. Otherwise, this is assumed to
+                be an interpolation task and test points come from the median
+                time step.
+            batch_size: The batch size.
+        """
         return _batch(
             rng,
             self.x,
             self.s,
+            self.t,
             self.f,
-            num_ctx_min,
-            num_ctx_max,
+            num_t,
+            random_t,
+            num_ctx_min_per_t,
+            num_ctx_max_per_t,
+            independent_t_masks,
             num_test,
-            test_includes_ctx,
+            forecast,
+            batch_size,
         )
 
 
 @partial(
     jit,
     static_argnames=(
-        "num_ctx_min",
-        "num_ctx_max",
+        "num_t",
+        "random_t",
+        "num_ctx_min_per_t",
+        "num_ctx_max_per_t",
+        "independent_t_masks",
         "num_test",
-        "test_includes_ctx",
+        "forecast",
+        "batch_size",
     ),
 )
 def _batch(
-    rng,
+    rng: jax.Array,
     x: Optional[jax.Array],
     s: jax.Array,
+    t: jax.Array,
     f: jax.Array,
-    num_ctx_min: int,
-    num_ctx_max: int,
+    num_t: int,
+    random_t: int,
+    num_ctx_min_per_t: int,
+    num_ctx_max_per_t: int,
+    independent_t_masks: bool,
     num_test: int,
-    test_includes_ctx: bool,
+    forecast: bool,
+    batch_size: int = 4,
 ):
-    rng_p, rng_b = random.split(rng)
+    B, T, T_b = batch_size, t.shape[1], num_t
+    rng_t, rng_p, rng_b = random.split(rng, 3)
     has_x = x is not None
     broadcast_x = x.ndim == 2 if has_x else None
-    s, f = flatten_spatial(s), flatten_spatial(f)
-    batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
-    if broadcast_x or not has_x:
-        x_ctx = x_test = x
-        s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [s, f])
-        args = batch_BLD(rng_b, [s, f], *batch_args)
-        s_ctx, f_ctx, v_ctx, s_test, f_test, *rest = args
-        if broadcast_x:
-            x_ctx = jnp.repeat(x_ctx[:, None], num_ctx_max, axis=1)
-            x_test = jnp.repeat(x_test[:, None], num_test, axis=1)
-        args = (x_ctx, s_ctx, f_ctx, v_ctx, x_test, s_test, f_test, *rest)
+    if random_t:
+        rng_ts = random.split(rng_t, B)
+        ts = vmap(lambda rng: random.choice(rng, T, (T_b,)))(rng_ts)
+        ts = jnp.sort(ts, axis=1)  # [B, T_b]
     else:
-        x = flatten_spatial(x)
-        x, s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [x, s, f])
-        args = batch_BLD(rng_b, [x, s, f], *batch_args)
-    return SpatialBatch(*args, inv_permute_idx=inv_permute_idx, s_shape=s.shape)
+        last_ts = random.randint(rng_t, (T_b,), T_b, T)
+        prev_ts = jnp.arange(T_b - 1, -1, -1)
+        ts = last_ts[:, None] - prev_ts  # [B, T_b]
+    test_i = -1 if forecast else T_b // 2 + 1  # last time step or median
+    # get indices of time steps for batches
+    t_test_i = ts[:, [test_i]]
+    t_ctx_i = jnp.concat([ts[:, :test_i], ts[:, test_i + 1 :]], axis=1)
+    # shapes: *_ctx: [B, T_b-1, [S]+, D_*], *_test: [B, 1, [S]+, D_*]
+    x_ctx, x_test = (x[t_ctx_i], x[t_test_i]) if has_x else (None, None)
+    s_ctx, s_test = s[t_ctx_i], s[t_test_i]
+    t_ctx, t_test = t[t_ctx_i], t[t_test_i]
+    f_ctx, f_test = f[t_ctx_i], f[t_test_i]
+
+    # s, f = flatten_spatial(s), flatten_spatial(f)
+    # batch_args = (num_ctx_min_per_t, num_ctx_max_per_t, num_test)
+    # if broadcast_x or not has_x:
+    #     x_ctx = x_test = x
+    #     s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [s, f])
+    #     args = batch_BLD(rng_b, [s, f], *batch_args)
+    #     s_ctx, f_ctx, v_ctx, s_test, f_test, *rest = args
+    #     if broadcast_x:
+    #         x_ctx = jnp.repeat(x_ctx[:, None], num_ctx_max, axis=1)
+    #         x_test = jnp.repeat(x_test[:, None], num_test, axis=1)
+    #     args = (x_ctx, s_ctx, f_ctx, v_ctx, x_test, s_test, f_test, *rest)
+    # else:
+    #     x = flatten_spatial(x)
+    #     x, s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [x, s, f])
+    #     args = batch_BLD(rng_b, [x, s, f], *batch_args)
+    # return SpatiotemporalBatch(*args, inv_permute_idx=inv_permute_idx, s_shape=s.shape)
+
+
+@jit
+def flatten_spatial(v: Optional[jax.Array]):
+    if v is None:
+        return None
+    return v.reshape(*v.shape[:2], -1, v.shape[-1])
 
 
 # register to use in jitted functions
 jax.tree_util.register_pytree_node(
-    SpatialData,
-    lambda d: ((d.x, d.s, d.f), None),
-    lambda _aux, children: SpatialData(*children),
+    SpatiotemporalData,
+    lambda d: ((d.x, d.s, d.t, d.f), None),
+    lambda _aux, children: SpatiotemporalData(*children),
 )
 
 
@@ -98,10 +170,12 @@ jax.tree_util.register_pytree_node(
 class SpatiotemporalBatch(MetaLearningBatch):
     x_ctx: Optional[jax.Array]  # [B, L_ctx, D_x] or None
     s_ctx: jax.Array  # [B, L_ctx, D_s]
+    t_ctx: jax.Array  # [B, L_ctx, 1]
     f_ctx: jax.Array  # [B, L_ctx, D_f]
     valid_lens_ctx: jax.Array  # [B]
     x_test: Optional[jax.Array]  # [B, L_test, D_x]
     s_test: jax.Array  # [B, L_test, D_s]
+    t_test: jax.Array  # [B, L_test, 1]
     f_test: jax.Array  # [B, L_test, D_f]
     valid_lens_test: jax.Array  # [B]
     inv_permute_idx: jax.Array  # [L]
@@ -189,10 +263,12 @@ jax.tree_util.register_pytree_node(
         (
             d.x_ctx,
             d.s_ctx,
+            d.t_ctx,
             d.f_ctx,
             d.valid_lens_ctx,
             d.x_test,
             d.s_test,
+            d.t_test,
             d.f_test,
             d.valid_lens_test,
             d.inv_permute_idx,

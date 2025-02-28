@@ -13,7 +13,6 @@ from .utils import (
     MetaLearningBatch,
     MetaLearningData,
     batch_BLD,
-    flatten_spatial,
     inv_permute_L_in_BLD,
     permute_L_in_BLD,
     unbatch_BLD,
@@ -84,6 +83,13 @@ def _batch(
         x, s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [x, s, f])
         args = batch_BLD(rng_b, [x, s, f], *batch_args)
     return SpatialBatch(*args, inv_permute_idx=inv_permute_idx, s_shape=s.shape)
+
+
+@jit
+def flatten_spatial(v: Optional[jax.Array]):
+    if v is None:
+        return None
+    return v.reshape(v.shape[0], -1, v.shape[-1])
 
 
 # register to use in jitted functions
