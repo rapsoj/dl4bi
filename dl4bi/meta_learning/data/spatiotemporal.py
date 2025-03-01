@@ -112,7 +112,7 @@ def _batch(
     batch_size: int = 4,
 ):
     B, T, T_b = batch_size, t.shape[1], num_t
-    rng_t, rng_p, rng_b = random.split(rng, 3)
+    rng_t, rng_p, rng_b, rng_v = random.split(rng, 4)
     has_x = x is not None
     broadcast_x = x.ndim in (2, 3) if has_x else None
     ts_test, ts_ctx = _select_ts(rng_t, random_t, forecast, B, T, T_b)
@@ -131,6 +131,21 @@ def _batch(
         x = x[:, :, None, :] if x.ndim == 3 else x[:, None, None, :]
         x_ctx = jnp.broadcast_to(x, ctx_shape)
         x_test = jnp.broadcast_to(x, test_shape)
+    if independent_t_masks:
+        valid_lens_ctx_per_t = random.randint(
+            rng_v,
+            (T_b - 1,),
+            num_ctx_min_per_t,
+            num_ctx_max_per_t,
+        )
+    else:
+        valid_lens_ctx_per_t = random.randint(
+            rng_v,
+            (1,),
+            num_ctx_min_per_t,
+            num_ctx_max_per_t,
+        )
+    valid_lens_test = jnp.repeat(num_test, B)
     # *_ctx: [B, T_b-1, L_s, D_*], *_test: [B, 1, L_s, D_*]
     # TODO(danj): permute L_s, select valid_lens and truncate
     # vmap(batch_BLD)
