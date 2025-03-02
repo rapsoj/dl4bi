@@ -1,4 +1,5 @@
 from functools import partial
+from typing import Optional
 
 import jax
 import jax.numpy as jnp
@@ -36,12 +37,11 @@ def pad_concat(x: jax.Array, y: jax.Array):
     return jnp.concatenate([x, y], axis=-1)
 
 
-# TODO(danj): update this to be compatible with mask_ctx
 @partial(jit, static_argnames=("num_samples"))
-def bootstrap(
+def bootstrap_from_valid_lens(
     rng: jax.Array,
     x: jax.Array,  # [B, L, D]
-    mask: jax.Array,  # [B, L]
+    valid_lens: jax.Array,  # [B]
     num_samples: int = 1,
 ):
     """Bootstrap selects the first `valid_lens` values of `x` `num_samples` times.
@@ -49,40 +49,45 @@ def bootstrap(
     Args:
         rng: A PRNGKey.
         x: Array to bootstrap.
-        mask: The valid entries for every sequence in x.
+        valid_lens: The valid entries for every sequence in x.
 
     Returns:
         A bootstrap sampled array of shape [B * num_samples, L, D].
     """
     (B, L, _), K = x.shape, num_samples
     x = jnp.repeat(x, K, axis=0)
-    boot_mask = jnp.repeat(mask, K, axis=0)
-    # TODO(danj): implement here
+    valid_lens = jnp.repeat(valid_lens, K, axis=0)
+    mask = mask_from_valid_lens(L, valid_lens).squeeze()
     rnd_idx = random.randint(rng, (B * K, L), 0, valid_lens[:, None])
     ord_idx = jnp.repeat(jnp.arange(L)[None, :], B * K, axis=0)
     boot_idx = mask * rnd_idx + ~mask * ord_idx
-    return vmap(lambda row, idx: row[idx], (0, 0))(x, boot_idx), mask_boot
+    return vmap(lambda row, idx: row[idx], (0, 0))(x, boot_idx), valid_lens
 
 
-def bootstrap2(
+def bootstrap(
     rng: jax.Array,
     x: jax.Array,  # [B, L, D]
-    mask: jax.Array,  # [B, L]
+    mask: Optional[jax.Array],  # [B, L]
     num_samples: int,
 ):
     B = x.shape[0]
     rngs = random.split(rng, B)
-    vboot = vmap(_bootstrap_one, in_axes=(0, 0, 0, None))
-    return vboot(rngs, x, mask, num_samples)  # [B, K, L, D]
+    xs, masks = [], []
+    for i in range(B):  # can't vmap variable concrete arrays
+        mask_i = None if mask is None else mask[i]
+        x_b, mask_b = _bootstrap_one(rngs[i], x[i], mask_i, num_samples)
+        xs += [x_b]
+        masks += [mask_b]
+    return jnp.array(xs), jnp.array(masks)  # [B, K, L, D]
 
 
 def _bootstrap_one(
     rng: jax.Array,
     x_i: jax.Array,  # [L, D]
-    mask_i: jax.Array,  # [L]
+    mask_i: Optional[jax.Array],  # [L] or None
     num_samples: int,
 ):
-    idx = jnp.where(mask_i)[0]
+    idx = jnp.arange(x_i.shape[0]) if mask_i is None else jnp.where(mask_i)[0]
     K, L, L_valid = num_samples, x_i.shape[0], idx.shape[0]
     idx = random.choice(rng, idx, shape=(K, L_valid))
     x_boot = x_i[idx]  # x_k: [K, L_valid, D]

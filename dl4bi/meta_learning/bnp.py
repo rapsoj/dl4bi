@@ -71,7 +71,7 @@ class BNP(nn.Module):
         f_ctx: jax.Array,
         mask_ctx: Optional[jax.Array] = None,
     ):
-        K = self.num_samples
+        (B, L_ctx), K = self.s_ctx.shape[:2], self.num_samples
         # turn off gradients
         s_ctx, f_ctx, mask_ctx = (
             no_grad(s_ctx),
@@ -83,13 +83,18 @@ class BNP(nn.Module):
         rep = jit(lambda x: jnp.repeat(x, K, axis=0))
         s_ctx_boot, mask_ctx_boot = bootstrap(rng_ctx_boot, s_ctx, mask_ctx, K)
         f_ctx_boot, mask_ctx_boot = bootstrap(rng_ctx_boot, f_ctx, mask_ctx, K)
+        s_ctx_boot = s_ctx_boot.reshape(B * K, L_ctx, -1)
+        f_ctx_boot = f_ctx_boot.reshape(B * K, L_ctx, -1)
+        mask_ctx_boot = mask_ctx_boot.reshape(B * K, L_ctx)
         r_ctx_boot = self.encode_deterministic(s_ctx_boot, f_ctx_boot, mask_ctx_boot)
         s_ctx_rep = rep(s_ctx)
         f_ctx_mu_boot, f_ctx_std_boot = self.decode(r_ctx_boot, s_ctx_rep)
         # TODO(danj): update residual sampling to work with categorical dists
         res = (rep(f_ctx) - f_ctx_mu_boot) / f_ctx_std_boot
-        res_boot, _ = bootstrap(rng_res_boot, res, mask_ctx_boot)
+        res_boot, _ = bootstrap(rng_res_boot, res, mask_ctx_boot, num_samples=1)
+        res_boot = res_boot.reshape(B * K, L_ctx, -1)
         res_boot -= res_boot.mean(axis=1, where=mask_ctx_boot, keepdims=True)
+        # TODO(danj): indexing is weird when using new bootstrap
         return s_ctx_rep, f_ctx_mu_boot + f_ctx_std_boot * res_boot, mask_ctx_boot
 
     def encode_deterministic(
