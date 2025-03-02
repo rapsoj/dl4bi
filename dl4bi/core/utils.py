@@ -64,6 +64,40 @@ def bootstrap(
     return vmap(lambda row, idx: row[idx], (0, 0))(x, boot_idx), mask_boot
 
 
+def bootstrap2(
+    rng: jax.Array,
+    x: jax.Array,  # [B, L, D]
+    mask: jax.Array,  # [B, L]
+    num_samples: int,
+):
+    B = x.shape[0]
+    rngs = random.split(rng, B)
+    vboot = vmap(_bootstrap_one, in_axes=(0, 0, 0, None))
+    return vboot(rngs, x, mask, num_samples)  # [B, K, L, D]
+
+
+def _bootstrap_one(
+    rng: jax.Array,
+    x_i: jax.Array,  # [L, D]
+    mask_i: jax.Array,  # [L]
+    num_samples: int,
+):
+    idx = jnp.where(mask_i)[0]
+    K, L, L_valid = num_samples, x_i.shape[0], idx.shape[0]
+    idx = random.choice(rng, idx, shape=(K, L_valid))
+    x_boot = x_i[idx]  # x_k: [K, L_valid, D]
+    x_boot = nan_pad(x_boot, axis=1, L=L)  # [K, L, D]
+    mask_boot = mask_from_valid_lens(L, jnp.repeat(L_valid, K))
+    return x_boot, mask_boot  # [K, L, D]
+
+
+def nan_pad(v: jax.Array, axis: int, L: int):
+    pad = [(0, 0)] * v.ndim
+    L_v = v.shape[axis]
+    pad[axis] = (0, L - L_v)
+    return jnp.pad(v, pad, mode="constant", constant_values=jnp.nan)
+
+
 def breakpoint_if_nonfinite(x):
     """Create a breakpoint when non-finite values in `x`."""
     is_finite = jnp.isfinite(x).all()

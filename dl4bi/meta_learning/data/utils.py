@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from jax import jit, random, vmap
 
 from ...core.data import Batch, Data, ElementSelectorMixin
+from ...core.utils import nan_pad
 
 
 class MetaLearningData(Data, ElementSelectorMixin):
@@ -91,14 +92,7 @@ def batch_BLD(
 
 @partial(jit, static_argnames=("L",))
 def unbatch_BLD(arrays: Sequence[jax.Array], L: int):
-    return [_nan_pad(a, axis=1, L=L) for a in arrays]
-
-
-def _nan_pad(v: jax.Array, axis: int, L: int):
-    pad = [(0, 0)] * v.ndim
-    L_v = v.shape[axis]
-    pad[axis] = (0, L - L_v)
-    return jnp.pad(v, pad, mode="constant", constant_values=jnp.nan)
+    return [nan_pad(a, axis=1, L=L) for a in arrays]
 
 
 @jit
