@@ -15,13 +15,8 @@ from jax.scipy import stats
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-from dl4bi.meta_learning.train_utils import (
-    TrainState,
-    cfg_to_run_name,
-    load_ckpt,
-    log_wandb_line,
-)
-from dl4bi.utils import mask_from_valid_lens
+from dl4bi.core.train import TrainState, load_ckpt
+from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
 # NOTE: use the same configs as the Gaussian Process (GP) models
@@ -55,8 +50,6 @@ def main(cfg: DictConfig):
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     jnp.save(path.with_suffix(".npy"), regret)
-    log_wandb_line(regret.mean(axis=0), "Regret mu")
-    log_wandb_line(regret.std(axis=0), "Regret std")
     log_regret_dist(regret)
     log_worst_regret(
         s_ctx,

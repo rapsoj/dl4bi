@@ -385,3 +385,20 @@ def test_temporal_data_plot_1d():
     b = TemporalData(x, t, f).batch(rng, num_ctx_min, num_ctx_max, num_test, True)
     fig = b.plot_1d(f_pred, f_std)
     fig.savefig("/tmp/test_temporal_data_plot_1d.png")
+
+
+def test_spatial_data_plot_2d():
+    B, S, D_s, D_f = 4, 16, 2, 1
+    num_ctx_min, num_ctx_max, num_test = 3, 10, 256
+    rng = random.key(42)
+    rng_f, rng_f_pred, rng_b = random.split(rng, 3)
+    x = None
+    f = random.normal(rng_f, (B, num_test, D_f))
+    f_pred = f + 0.01 * random.normal(rng_f_pred, (B, num_test, D_f))
+    f_std = jnp.zeros((B, num_test, 1)) + 0.1
+    s = build_grid([{"start": -2, "stop": 2, "num": S}] * D_s)
+    s = jnp.repeat(s[None, ...], B, axis=0)
+    b = SpatialData(x, s, f).batch(rng, num_ctx_min, num_ctx_max, num_test, True)
+    fig = b.plot_2d(f_pred, f_std)
+    fig.savefig("/tmp/test_spatial_data_plot_2d.png")
+    assert False

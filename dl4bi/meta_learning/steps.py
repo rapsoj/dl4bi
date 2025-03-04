@@ -1,5 +1,3 @@
-from functools import partial
-
 import jax
 from jax import jit, random
 
@@ -7,7 +5,7 @@ from ..core.train import TrainState
 from .data.utils import MetaLearningBatch
 
 
-@partial(jit, static_argnames=("is_categorical",))
+@jit
 def likelihood_train_step(
     rng: jax.Array,
     state: TrainState,
@@ -29,25 +27,25 @@ def likelihood_train_step(
     return state.apply_gradients(grads=grads), nll
 
 
-@partial(jit, static_argnames=("is_categorical",))
+@jit
 def likelihood_valid_step(
     rng: jax.Array,
     state: TrainState,
     batch: MetaLearningBatch,
     **kwargs,
 ):
-    output = jit(state.apply_fn)(
+    output = state.apply_fn(
         {"params": state.params, **state.kwargs},
         **batch,
         training=False,
         rngs={"extra": rng},
     )
-    if isinstance(output[1], tuple):  # latent model
-        output, _ = output  # latent zs aren't used in validation
+    if isinstance(output, tuple):
+        output, _ = output  # latent output not used here
     return output.metrics(batch.f_test, batch.mask_test[..., None])
 
 
-@partial(jit, static_argnames=("is_categorical",))
+@jit
 def elbo_train_step(
     rng: jax.Array,
     state: TrainState,

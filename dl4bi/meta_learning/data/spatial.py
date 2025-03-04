@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from flax.core.frozen_dict import FrozenDict
 from jax import jit, random
 from jax.scipy.stats import norm
 
@@ -33,6 +34,7 @@ class SpatialData(MetaLearningData):
         num_ctx_max: int,
         num_test: int,
         test_includes_ctx: bool = False,
+        obs_noise: Optional[float] = None,
     ):
         return _batch(
             rng,
@@ -43,6 +45,7 @@ class SpatialData(MetaLearningData):
             num_ctx_max,
             num_test,
             test_includes_ctx,
+            obs_noise,
         )
 
 
@@ -53,6 +56,7 @@ class SpatialData(MetaLearningData):
         "num_ctx_max",
         "num_test",
         "test_includes_ctx",
+        "obs_noise",
     ),
 )
 def _batch(
@@ -64,26 +68,32 @@ def _batch(
     num_ctx_max: int,
     num_test: int,
     test_includes_ctx: bool,
+    obs_noise: Optional[FrozenDict] = None,
 ):
-    rng_p, rng_b = random.split(rng)
+    rng_p, rng_b, rng_eps = random.split(rng, 3)
     has_x = x is not None
     broadcast_x = x.ndim == 2 if has_x else None
+    s_shape = s.shape
     s, f = flatten_spatial(s), flatten_spatial(f)
     batch_args = (num_ctx_min, num_ctx_max, num_test, test_includes_ctx)
     if broadcast_x or not has_x:
         x_ctx = x_test = x
         s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [s, f])
         args = batch_BLD(rng_b, [s, f], *batch_args)
-        s_ctx, f_ctx, v_ctx, s_test, f_test, *rest = args
+        s_ctx, f_ctx, m_ctx, s_test, f_test, *rest = args
         if broadcast_x:
             x_ctx = jnp.repeat(x_ctx[:, None], num_ctx_max, axis=1)
             x_test = jnp.repeat(x_test[:, None], num_test, axis=1)
-        args = (x_ctx, s_ctx, f_ctx, v_ctx, x_test, s_test, f_test, *rest)
+        args = (x_ctx, s_ctx, f_ctx, m_ctx, x_test, s_test, f_test, *rest)
     else:
         x = flatten_spatial(x)
         x, s, f, inv_permute_idx = permute_L_in_BLD(rng_p, [x, s, f])
         args = batch_BLD(rng_b, [x, s, f], *batch_args)
-    return SpatialBatch(*args, inv_permute_idx=inv_permute_idx, s_shape=s.shape)
+    if obs_noise:
+        x_ctx, s_ctx, f_ctx, *rest = args
+        f_ctx += obs_noise * random.normal(rng_eps, f_ctx.shape)
+        args = (x_ctx, s_ctx, f_ctx, *rest)
+    return SpatialBatch(*args, inv_permute_idx=inv_permute_idx, s_shape=s_shape)
 
 
 # register to use in jitted functions
@@ -112,18 +122,25 @@ class SpatialBatch(MetaLearningBatch):
         f_pred: jax.Array,  # [B, L_test, 1]
         f_std: jax.Array,  # [B, L_test, 1]
         hdi_prob: float = 0.95,
+        subtitle: Optional[str] = None,
+        num_plots: Optional[int] = None,
+        **kwargs,
     ):
-        B, L = self.f_test.shape[0], self.inv_permute_idx.shape[0]
+        B = self.f_test.shape[0]
+        N = min(num_plots or B, B)
+        order = jnp.argsort(self.s_test, axis=1)
         arrays = [self.s_test, self.f_test, f_pred, f_std]
-        arrays = unbatch_BLD(arrays, L)
-        arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
+        arrays = [jnp.take_along_axis(a, order, axis=1) for a in arrays]
         s_test, f_test, f_pred, f_std = map(lambda v: v[..., 0], arrays)
         z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
         f_lower, f_upper = f_pred - z_score * f_std, f_pred + z_score * f_std
-        _, axs = plt.subplots(B, 1, figsize=(8, B * 4))
-        for i in range(B):
+        _, axs = plt.subplots(N, 1, figsize=(8, N * 4))
+        for i in range(N):
             if i == 0:
-                axs[i].set_title("Spatial Posterior Predictive")
+                if subtitle:
+                    axs[i].set_title(f"Spatial Posterior Predictive\n{subtitle}")
+                else:
+                    axs[i].set_title("Spatial Posterior Predictive")
             elif i == B - 1:
                 axs[i].set_xlabel("s")
             axs[i].set_ylabel(f"Sample {i+1}", rotation=90)
@@ -150,27 +167,38 @@ class SpatialBatch(MetaLearningBatch):
         norm=None,
         norm_std=None,
         remap_colors: Callable = lambda x: x,
+        subtitle: Optional[str] = None,
+        num_plots: Optional[int] = None,
+        **kwargs,
     ):
         B, L = self.f_test.shape[0], self.inv_permute_idx.shape[0]
-        reshape = jit(lambda v: v.reshape(*self.s_shape[:-1], v.shape[-1]))
+        N = min(num_plots or B, B)
+        reshape = jit(lambda v: v.reshape(*self.s_shape[:-1]))
         if f_std.shape[-1] > 1:  # e.g. uncertainty per RGB channel
             f_std = f_std.mean(axis=-1)
         arrays = unbatch_BLD([self.f_ctx, self.f_test, f_pred, f_std], L)
         arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
         arrays = map(reshape, arrays)
         f_ctx, f_test, f_pred, f_std = map(remap_colors, arrays)
-        _, axs = plt.subplots(B, 4, figsize=(20, B * 5))
-        for i in range(B):
+        _, axs = plt.subplots(N, 4, figsize=(20, N * 5))
+        for i in range(N):
             if i == 0:
-                axs[i, 0].set_title("Task")
-                axs[i, 1].set_title("Uncertainty")
-                axs[i, 2].set_title("Prediction")
-                axs[i, 3].set_title("Ground Truth")
-            axs[i, 0].set_ylabel(f"Sample {i}")
-            axs[i, 0].imshow(f_ctx, cmap=cmap, norm=norm, interpolation="none")
-            axs[i, 1].imshow(f_std, cmap=cmap_std, norm=norm_std, interpolation="none")
-            axs[i, 2].imshow(f_pred, cmap=cmap, norm=norm, interpolation="none")
-            axs[i, 3].imshow(f_test, cmap=cmap, norm=norm, interpolation="none")
+                axs[i, 0].set_title("Task", fontsize=30)
+                axs[i, 1].set_title("Uncertainty", fontsize=30)
+                axs[i, 2].set_title("Prediction", fontsize=30)
+                axs[i, 3].set_title("Ground Truth", fontsize=30)
+            axs[i, 0].set_ylabel(f"Sample {i+1}", fontsize=30)
+            for j in range(4):
+                axs[i, j].set_xticks([])
+                axs[i, j].set_yticks([])
+            axs[i, 0].imshow(f_ctx[i], cmap=cmap, norm=norm, interpolation="none")
+            axs[i, 1].imshow(
+                f_std[i], cmap=cmap_std, norm=norm_std, interpolation="none"
+            )
+            axs[i, 2].imshow(f_pred[i], cmap=cmap, norm=norm, interpolation="none")
+            axs[i, 3].imshow(f_test[i], cmap=cmap, norm=norm, interpolation="none")
+        if subtitle:
+            plt.suptitle(subtitle + "\n", fontsize=30)
         plt.tight_layout()
         return plt.gcf()
 

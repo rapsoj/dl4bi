@@ -4,20 +4,13 @@ from typing import Union
 
 import jax
 import jax.numpy as jnp
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 from ..core.train import load_ckpt
 
 
 def cfg_to_run_name(cfg: DictConfig):
-    name = cfg.model.cls
-    if "TNPKR" in name:
-        prefix = "model.kwargs.blk.kwargs.attn."
-        attn_cls = OmegaConf.select(cfg, prefix + "cls")
-        if attn_cls == "MultiHeadAttention":
-            attn_cls = OmegaConf.select(cfg, prefix + "kwargs.attn.cls")
-        name += ": " + attn_cls
-    return name
+    return cfg.model._target_.split(".")[-1]
 
 
 def load_ckpts(

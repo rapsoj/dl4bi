@@ -31,6 +31,7 @@ class TemporalData(MetaLearningData):
         num_ctx_max: int,
         num_test: int,
         test_includes_ctx: bool = False,
+        obs_noise: Optional[float] = None,
     ):
         return _batch(
             rng,
@@ -41,6 +42,7 @@ class TemporalData(MetaLearningData):
             num_ctx_max,
             num_test,
             test_includes_ctx,
+            obs_noise,
         )
 
 
@@ -51,6 +53,7 @@ class TemporalData(MetaLearningData):
         "num_ctx_max",
         "num_test",
         "test_includes_ctx",
+        "obs_noise",
     ),
 )
 def _batch(
@@ -62,6 +65,7 @@ def _batch(
     num_ctx_max: int,
     num_test: int,
     test_includes_ctx: bool,
+    obs_noise: Optional[float] = None,
 ):
     rng_p, rng_b = random.split(rng)
     has_x = x is not None
@@ -80,6 +84,10 @@ def _batch(
     else:
         x, t, f, inv_permute_idx = permute_L_in_BLD(rng_p, [x, t, f])
         args = batch_BLD(rng_b, [x, t, f], *batch_args)
+    if obs_noise:
+        x_ctx, s_ctx, f_ctx, *rest = args
+        f_ctx += obs_noise * random.normal(rng_eps, f_ctx.shape)
+        args = (x_ctx, s_ctx, f_ctx, *rest)
     return TemporalBatch(*args, inv_permute_idx=inv_permute_idx)
 
 
@@ -108,18 +116,23 @@ class TemporalBatch(MetaLearningBatch):
         f_pred: jax.Array,  # [B, [K]?, L_test, 1]
         f_std: jax.Array,  # [B, [K]?, L_test, 1]
         hdi_prob: float = 0.95,
+        subtitle: Optional[str] = None,
+        **kwargs,
     ):
         B, L = self.f_test.shape[0], self.inv_permute_idx.shape[0]
+        order = jnp.argsort(self.t_test, axis=1)
         arrays = [self.t_test, self.f_test, f_pred, f_std]
-        arrays = unbatch_BLD(arrays, L)
-        arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
+        arrays = [jnp.take_along_axis(a, order, axis=1) for a in arrays]
         t_test, f_test, f_pred, f_std = map(lambda v: v[..., 0], arrays)
         z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
         f_lower, f_upper = f_pred - z_score * f_std, f_pred + z_score * f_std
         _, axs = plt.subplots(B, 1, figsize=(8, B * 4))
         for i in range(B):
             if i == 0:
-                axs[i].set_title("Temporal Posterior Predictive")
+                if subtitle:
+                    axs[i].set_title(f"Spatial Posterior Predictive\n{subtitle}")
+                else:
+                    axs[i].set_title("Spatial Posterior Predictive")
             elif i == B - 1:
                 axs[i].set_xlabel("t")
             axs[i].set_ylabel(f"Sample {i+1}", rotation=90)
