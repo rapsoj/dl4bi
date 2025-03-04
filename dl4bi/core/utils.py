@@ -37,52 +37,6 @@ def pad_concat(x: jax.Array, y: jax.Array):
     return jnp.concatenate([x, y], axis=-1)
 
 
-@partial(jit, static_argnames=("num_samples"))
-def bootstrap_from_valid_lens(
-    rng: jax.Array,
-    x: jax.Array,  # [B, L, D]
-    valid_lens: jax.Array,  # [B]
-    num_samples: int = 1,
-):
-    """Bootstrap selects the first `valid_lens` values of `x` `num_samples` times.
-
-    Args:
-        rng: A PRNGKey.
-        x: Array to bootstrap.
-        valid_lens: The valid entries for every sequence in x.
-
-    Returns:
-        A bootstrap sampled array of shape [B * num_samples, L, D].
-    """
-    (B, L, _), K = x.shape, num_samples
-    x = jnp.repeat(x, K, axis=0)
-    valid_lens = jnp.repeat(valid_lens, K, axis=0)
-    mask = mask_from_valid_lens(L, valid_lens).squeeze()
-    rnd_idx = random.randint(rng, (B * K, L), 0, valid_lens[:, None])
-    ord_idx = jnp.repeat(jnp.arange(L)[None, :], B * K, axis=0)
-    boot_idx = mask * rnd_idx + ~mask * ord_idx
-    return vmap(lambda row, idx: row[idx], (0, 0))(x, boot_idx), valid_lens
-
-
-@partial(jit, static_argnames=("num_samples",))
-def bootstrap(
-    rng: jax.Array,
-    x: jax.Array,
-    mask: Optional[jax.Array],
-    num_samples: int = 1,
-):
-    """This generates a bootstrap sample of shape `[B * K, L, D]`.
-
-    It also "packs" the valid data in the front part of the array.
-    """
-    if mask is not None:
-        x = jnp.where(mask[..., None], x, jnp.nan)
-    x = jnp.repeat(x, num_samples, axis=0)
-    x = random.permutation(rng, x, axis=1, independent=True)
-    mask = jnp.isfinite(x)
-    return x, mask[..., 0]
-
-
 def nan_pad(v: jax.Array, axis: int, L: int):
     pad = [(0, 0)] * v.ndim
     L_v = v.shape[axis]

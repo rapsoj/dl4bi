@@ -113,10 +113,7 @@ class SpatialBatch(MetaLearningBatch):
         f_std: jax.Array,  # [B, [K]?, L_test, 1]
         hdi_prob: float = 0.95,
     ):
-        (B, L_test), L = self.f_test.shape[:2], self.inv_permute_idx.shape[0]
-        K = 1 if f_pred.ndim != 4 else f_pred.shape[1]  # bootstrapped K
-        f_pred = f_pred.reshape(B * K, L_test, -1)
-        f_std = f_std.reshape(B * K, L_test, -1)
+        B, L = self.f_test.shape[0], self.inv_permute_idx.shape[0]
         arrays = [self.s_test, self.f_test, f_pred, f_std]
         arrays = unbatch_BLD(arrays, L)
         arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)

@@ -193,8 +193,8 @@ def log_posterior_predictive_plots(
         valid_lens_test,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
-    if isinstance(output[1], tuple):  # latent or bootstrapped
-        output, _ = output  # throw away latent / base samples
+    if isinstance(output[1], tuple):  # latent
+        output, _ = output  # throw away latent samples
     f_mu, f_std = output
     paths = plot_posterior_predictives(
         s_ctx,
@@ -258,11 +258,6 @@ def plot_posterior_predictives(
         f_std_i = f_std[i, :v_test].squeeze()
         if f_mu[i].shape != f_std[i].shape:  # marginal from tril cov
             f_std_i = jnp.diag(f_std[i]).squeeze()  # TODO(danj): is this valid?
-        if f_mu.shape != f_test.shape:  # bootstrapped
-            K = f_mu.shape[0] // f_test.shape[0]
-            s = i * K
-            f_mu_i = f_mu[s : s + K].squeeze()
-            f_std_i = f_std[s : s + K].squeeze()
         title = f"Sample {i} (var: {var[i]:0.2f}, ls: {ls[i]:0.2f}"
         title += f", period: {period[i]:0.2f})" if jnp.isfinite(period) else ")"
         fig = plot_posterior_predictive(

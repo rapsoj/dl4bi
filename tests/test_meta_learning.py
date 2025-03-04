@@ -14,8 +14,6 @@ from dl4bi.core.transformer import KRBlock
 from dl4bi.core.utils import mask_from_valid_lens
 from dl4bi.meta_learning import (
     ANP,
-    BANP,
-    BNP,
     CANP,
     CNP,
     NP,
@@ -41,21 +39,19 @@ def test_models():
     mask_ctx = mask_from_valid_lens(L, valid_lens)
     f = random.normal(rng_data, s.shape)
     for model in [
-        # NP,
-        # CNP,
-        # BNP,
-        # ANP,
-        # CANP,
-        BANP,
-        # ConvCNP,
-        # TNPD,
-        # TNPND,
-        # TNPKR,
-        # lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
-        # lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
-        # lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
-        # ScanTNPKR,
-        # lambda: SGNP(kNN(k=L)),
+        NP,
+        CNP,
+        ANP,
+        CANP,
+        ConvCNP,
+        TNPD,
+        TNPND,
+        TNPKR,
+        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
+        lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
+        lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
+        ScanTNPKR,
+        lambda: SGNP(kNN(k=L)),
     ]:
         m = model()
         print(m.__class__)
@@ -67,21 +63,13 @@ def test_models():
             mask_ctx=mask_ctx,
             training=True,
         )
-        if isinstance(output, tuple):  # latent or bootstrapped
-            output, _ = output  # drop latent or base bootstrapped samples
+        if isinstance(output, tuple):
+            output, _ = output  # drop latent distribution
         if isinstance(m, TNPND):
             assert jnp.isfinite(output.mu).all()
             assert jnp.isfinite(output.L).all()
             assert output.mu.shape == (B, L, 1)
             assert output.L.shape == (B, L, L)
-        elif output.mu.ndim == 4:  # bootstrapped
-            K = output.mu.shape[1]
-            print(output.mu[:1])
-            print(output.std[:1])
-            assert jnp.isfinite(output.mu).all()
-            assert jnp.isfinite(output.std).all()
-            assert output.mu.shape == (B, K, L, 1)
-            assert output.std.shape == (B, K, L, 1)
         else:
             assert jnp.isfinite(output.mu).all()
             assert jnp.isfinite(output.std).all()
@@ -122,10 +110,8 @@ def test_context_data_leaks():
     for model in [
         NP,
         CNP,
-        BNP,
         ANP,
         CANP,
-        BANP,
         ConvCNP,
         TNPD,
         TNPND,
@@ -168,11 +154,8 @@ def test_context_data_leaks():
             rngs={"dropout": rng_dropout, "extra": rng_extra},
             # bucket_size=2,  # used by SGNP for numerical stability
         )
-        if hasattr(model, "n_z"):  # latent model
-            output, _ = output  # throw away latent zs
-            output_half, _ = output_half
-        if hasattr(m, "num_samples"):  # bootstrapped model
-            output, _ = output  # throw away base output
+        if isinstance(output, tuple):
+            output, _ = output  # drop latent distribution
             output_half, _ = output_half
         f_mu, f_std = output
         f_mu_half, f_std_half = output_half
@@ -205,10 +188,8 @@ def test_train_step_loss():
     for model in [
         NP,
         CNP,
-        BNP,
         ANP,
         CANP,
-        BANP,
         TNPD,
         TNPND,
         TNPKR,

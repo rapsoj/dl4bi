@@ -139,17 +139,9 @@ def optimize(
     for i in tqdm(range(budget), desc="Optimizing"):
         rng_extra, rng = random.split(rng)
         output = model_fn(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
-        if isinstance(output[1], tuple):  # latent or bootstrapped
-            output, _ = output  # throw away latent zs / or "base" samples
+        if isinstance(output[1], tuple):  # latent
+            output, _ = output  # throw away latent samples
         f_mu, f_std = output
-        if f_mu.shape != f_test.shape:  # bootstrapped
-            K = f_mu.shape[0] // f_test.shape[0]
-            f_mu = f_mu.reshape(B, K, L_test, 1)
-            f_std = f_std.reshape(B, K, L_test, 1)
-            # law of total variance
-            f_var = (f_std**2).mean(1) + (f_mu**2).mean(1) - (f_mu.mean(1)) ** 2
-            f_std = jnp.sqrt(f_var)
-            f_mu = f_mu.mean(axis=1)
         ei = expected_improvement(opt_min[:, [i], :], f_mu, f_std)
         min_idx = jnp.argmax(ei, axis=1).squeeze()  # [B]
         s_ctx = s_ctx.at[B_idx, num_init + i, :].set(s_test[B_idx, min_idx, :])
@@ -247,11 +239,6 @@ def log_worst_regret(
         f_mu_i, f_std_i = f_mu[i].squeeze(), f_std[i].squeeze()
         if f_mu[i].shape != f_std[i].shape:  # marginal from tril cov
             f_std_i = jnp.diag(f_std[i]).squeeze()  # TODO(danj): valid?
-        if f_mu.shape != f_test.shape:  # bootstrapped
-            K = f_mu.shape[0] // f_test.shape[0]
-            s = i * K
-            f_mu_i = f_mu[s : s + K].squeeze()
-            f_std_i = f_std[s : s + K].squeeze()
         fig = plot_posterior_predictive(
             s_ctx_i, f_ctx_i, s_test_i, f_test_i, f_mu_i, f_std_i
         )

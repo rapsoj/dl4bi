@@ -48,8 +48,6 @@ from ..core.mlp import *
 from ..core.preprocess import *
 from ..core.transformer import *
 from .anp import ANP
-from .banp import BANP
-from .bnp import BNP
 from .canp import CANP
 from .cnp import CNP
 from .convcnp import ConvCNP
@@ -198,12 +196,10 @@ def select_steps(model, is_categorical=False):
     train_step, valid_step = vanilla_train_step, vanilla_valid_step
     if isinstance(model, (NP, ANP)):
         train_step = npf_elbo_train_step
-    elif isinstance(model, (BNP, BANP)):
-        train_step, valid_step = bootstrap_train_step, bootstrap_valid_step
     elif isinstance(model, (TNPND,)):
         train_step, valid_step = tril_cov_train_step, tril_cov_valid_step
     if is_categorical:
-        if isinstance(model, (BNP, BANP, TNPND)):
+        if isinstance(model, (TNPND,)):
             raise NotImplementedError("Model does not support categorical loss!")
         train_step = partial(train_step, is_categorical=True)
         valid_step = partial(valid_step, is_categorical=True)
@@ -354,129 +350,6 @@ def npf_elbo_train_step(
 
     elbo, grads = jax.value_and_grad(loss_fn)(state.params)
     return state.apply_gradients(grads=grads), elbo
-
-
-@partial(jit, static_argnames=("is_categorical",))
-def bootstrap_train_step(
-    rng: jax.Array,
-    state: TrainState,
-    batch: tuple,
-    is_categorical: bool = False,
-    **kwargs,
-):
-    """Training step for meta regression with diagonal covariances.
-
-    Args:
-        rng: A PRNG key.
-        state: The current training state.
-        batch: Batch of data.
-        is_categorical: Indicates whether the output is categorical.
-
-    Returns:
-        `TrainState` with updated parameters.
-    """
-    rng_dropout, rng_extra = random.split(rng)
-
-    def loss_fn(params):
-        s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
-        (B, L_test, _) = s_test.shape
-        if valid_lens_test is None:
-            valid_lens_test = jnp.repeat(L_test, B)
-        mask_test = mask_from_valid_lens(L_test, valid_lens_test)
-        output_boot, output = state.apply_fn(
-            {"params": params, **state.kwargs},
-            s_ctx,
-            f_ctx,
-            s_test,
-            valid_lens_ctx,
-            valid_lens_test,
-            training=True,
-            rngs={"dropout": rng_dropout, "extra": rng_extra},
-        )
-        if is_categorical:
-            K = output_boot.shape[0] // B
-            mask_test = mask_test.squeeze()
-            f_test_boot = jnp.repeat(f_test, K, axis=0)
-            nll_boot = safe_softmax_cross_entropy(output_boot, f_test_boot)
-            nll_boot = logsumexp(nll_boot.reshape(B, K, L_test, -1)) - jnp.log(K)
-            nll_boot = nll_boot.mean(where=mask_test)
-            nll = safe_softmax_cross_entropy(output, f_test).mean(where=mask_test)
-            # take average so it is on the scale as other train_step losses
-            return (nll_boot + nll) / 2
-        (f_mu_boot, f_std_boot), (f_mu, f_std) = output_boot, output
-        K = f_mu_boot.shape[0] // B
-        f_test_boot = jnp.repeat(f_test, K, axis=0)
-        ll_boot = norm.logpdf(f_test_boot, f_mu_boot, f_std_boot)
-        # log of likelihood averaged over K bootstrapped samples
-        ll_boot = logsumexp(ll_boot.reshape(B, K, L_test, -1), axis=1) - jnp.log(K)
-        nll_boot = -ll_boot.mean(where=mask_test)
-        nll = -norm.logpdf(f_test, f_mu, f_std).mean(where=mask_test)
-        # take average so it is on the scale as other train_step losses
-        return (nll_boot + nll) / 2
-
-    nll, grads = jax.value_and_grad(loss_fn)(state.params)
-    return state.apply_gradients(grads=grads), nll
-
-
-@partial(jit, static_argnames=("is_categorical",))
-def bootstrap_valid_step(
-    rng: jax.Array,
-    state: TrainState,
-    batch: tuple,
-    is_categorical: bool = False,
-    **kwargs,
-):
-    s_ctx, f_ctx, valid_lens_ctx, s_test, f_test, valid_lens_test, *_ = batch
-    # at inference/validation time, only bootstrapped output is used
-    # at training time, base output (ignored here) is also used
-    output_boot, _ = jit(state.apply_fn)(
-        {"params": state.params, **state.kwargs},
-        s_ctx,
-        f_ctx,
-        s_test,
-        valid_lens_ctx,
-        valid_lens_test,
-        rngs={"extra": rng},
-    )
-    B, L_test, _ = s_test.shape
-    if valid_lens_test is None:
-        valid_lens_test = jnp.repeat(L_test, B)
-    mask_test = mask_from_valid_lens(L_test, valid_lens_test)
-    if is_categorical:
-        K = output_boot.shape[0] // B
-        f_test_boot = jnp.repeat(f_test, K, axis=0)
-        nll_boot = safe_softmax_cross_entropy(output_boot, f_test_boot)
-        nll_boot = logsumexp(nll_boot.reshape(B, K, L_test, -1)) - jnp.log(K)
-        nll_boot = nll_boot.mean(where=mask_test.squeeze())
-        return {"NLL": nll_boot}
-    hdi_prob = kwargs.get("hdi_prob", 0.95)
-    z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
-    f_mu_boot, f_std_boot = output_boot
-    K = f_mu_boot.shape[0] // B
-    f_test_boot = jnp.repeat(f_test, K, axis=0)
-    ll_boot = norm.logpdf(f_test_boot, f_mu_boot, f_std_boot)
-    # log of likelihood averaged over K bootstrapped samples
-    # NOTE: this is how BNP averages log-likelihood
-    ll_boot = logsumexp(ll_boot.reshape(B, K, L_test, -1), axis=1) - jnp.log(K)
-    nll = -ll_boot.mean(where=mask_test)
-    rmse = jnp.sqrt(
-        jnp.square(f_test_boot - f_mu_boot)
-        .reshape(B, K, L_test, -1)
-        .mean(axis=2, where=mask_test[:, None, ...])
-    ).mean()  # average over [B, K]
-    mae = (
-        jnp.abs(f_test_boot - f_mu_boot)
-        .reshape(B, K, L_test, -1)
-        .mean(axis=2, where=mask_test[:, None, ...])
-    ).mean()  # average over [B, K]
-    f_lower = f_mu_boot - z_score * f_std_boot
-    f_upper = f_mu_boot + z_score * f_std_boot
-    cvg = (
-        ((f_test_boot >= f_lower) & (f_test_boot <= f_upper))
-        .reshape(B, K, L_test, -1)
-        .mean(axis=2, where=mask_test[:, None, ...])
-    ).mean()  # average over [B, K]
-    return {"NLL": nll, "RMSE": rmse, "MAE": mae, "Coverage": cvg}
 
 
 @jit
@@ -733,8 +606,8 @@ def sample(
     for i in range(L_test):
         rng_extra, rng_eps, rng = random.split(rng, 3)
         output = apply(s_ctx, f_ctx, s_test, valid_lens_ctx, rng_extra)
-        if isinstance(output[1], tuple):  # latent or bootstrapped
-            output, _ = output  # throw away latent / base samples
+        if isinstance(output[1], tuple):  # latent
+            output, _ = output  # throw away latent samples
         f_mu, f_std = output
         f_mu_i, f_std_i = f_mu[:, i, :], f_std[:, i, :]
         f_test_i = f_mu_i + f_std_i * random.normal(rng_eps, f_std_i.shape)
@@ -779,8 +652,8 @@ def log_img_plots(
         valid_lens_test=None,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
-    if isinstance(output[1], tuple):  # latent or bootstrapped
-        output, _ = output  # throw away latent / base samples
+    if isinstance(output[1], tuple):  # latent
+        output, _ = output  # throw away latent samples
     f_mu, f_std = transform_model_output(output)
     paths = []
     for i in range(num_plots):
@@ -792,12 +665,6 @@ def log_img_plots(
         f_mu_i = f_mu[i]
         f_std_i = f_std[i]
         f_test_full_i = f_test_full[i]
-        if f_mu.shape != f_test.shape:  # bootstrapped
-            K = f_mu.shape[0] // f_test.shape[0]
-            s = i * K
-            f_mu_i = f_mu[s : s + K].mean(axis=0)
-            # Law of total variance: V[Y] = V[E[Y|X]] + E[V[Y|X]]
-            f_std_i = f_mu[s : s + K].std(axis=0) + f_std[s : s + K].mean(axis=0)
         fig = plot_img(
             i,
             shape,

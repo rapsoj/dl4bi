@@ -1,7 +1,5 @@
 from . import train_utils
 from .anp import ANP
-from .banp import BANP
-from .bnp import BNP
 from .canp import CANP
 from .cnp import CNP
 from .convcnp import ConvCNP

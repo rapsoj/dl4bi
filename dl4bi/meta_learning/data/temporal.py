@@ -109,10 +109,7 @@ class TemporalBatch(MetaLearningBatch):
         f_std: jax.Array,  # [B, [K]?, L_test, 1]
         hdi_prob: float = 0.95,
     ):
-        (B, L_test), L = self.f_test.shape[:2], self.inv_permute_idx.shape[0]
-        K = 1 if f_pred.ndim != 4 else f_pred.shape[1]  # bootstrapped K
-        f_pred = f_pred.reshape(B * K, L_test, -1)
-        f_std = f_std.reshape(B * K, L_test, -1)
+        B, L = self.f_test.shape[0], self.inv_permute_idx.shape[0]
         arrays = [self.t_test, self.f_test, f_pred, f_std]
         arrays = unbatch_BLD(arrays, L)
         arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
@@ -128,16 +125,15 @@ class TemporalBatch(MetaLearningBatch):
             axs[i].set_ylabel(f"Sample {i+1}", rotation=90)
             axs[i].scatter(self.t_ctx[i, :, 0], self.f_ctx[i, :, 0], color="black")
             axs[i].plot(t_test[i], f_test[i], color="black")
-            for j in range(K):
-                axs[i].plot(t_test[i], f_pred[i], color="steelblue")
-                axs[i].fill_between(
-                    t_test[i],
-                    f_lower[i],
-                    f_upper[i],
-                    alpha=0.4 / K,
-                    color="steelblue",
-                    interpolate=True,
-                )
+            axs[i].plot(t_test[i], f_pred[i], color="steelblue")
+            axs[i].fill_between(
+                t_test[i],
+                f_lower[i],
+                f_upper[i],
+                alpha=0.4 / K,
+                color="steelblue",
+                interpolate=True,
+            )
         plt.tight_layout()
         return plt.gcf()
 
