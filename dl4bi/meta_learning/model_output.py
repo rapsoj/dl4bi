@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from typing import Optional
 
 import jax
 import jax.numpy as jnp
@@ -8,8 +9,6 @@ from jax import jit
 from jax.nn import softmax, softplus
 from jax.scipy.stats import norm
 from optax.losses import safe_softmax_cross_entropy
-
-from ..core.metrics import mvn_logpdf
 
 # TODO(danj):
 # Support Binomial and Poisson
@@ -55,14 +54,23 @@ class DiagonalMVNOutput(DistributionOutput):
         # average over latent n_z samples
         return DiagonalMVNOutput(mu.mean(axis=1), std.mean(axis=1))
 
-    def nll(self, x: jax.Array, **kwargs):
-        return -norm.logpdf(x, self.mu, self.std)
+    def nll(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
+        return -norm.logpdf(x, self.mu, self.std).mean(where=mask)
+
+    def metrics(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
+        hdi_prob = kwargs.get("hdi_prob", 0.95)
+        z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
+        rmse = jnp.sqrt(jnp.square(x - self.mu).mean(where=mask))
+        mae = jnp.abs(x - self.mu).mean(where=mask)
+        f_lower, f_upper = self.mu - z_score * self.std, self.mu + z_score * self.std
+        cvg = (x >= f_lower) & (x <= f_upper)
+        return {"NLL": self.nll(x, mask), "RMSE": rmse, "MAE": mae, "Coverage": cvg}
 
     def forward_kl_div(self, p: "DiagonalMVNOutput"):
-        return forward_kl_div(p, self)
+        return forward_kl_div(p, self).mean()
 
     def reverse_kl_div(self, p: "DiagonalMVNOutput"):
-        return forward_kl_div(self, p)
+        return forward_kl_div(self, p).mean()
 
 
 @jit
@@ -77,17 +85,6 @@ def forward_kl_div(p: DiagonalMVNOutput, q: DiagonalMVNOutput):
         + 0.5 * jnp.expm1(2 * diff_log_scale)
         - diff_log_scale
     ).sum(axis=-1)
-
-
-@dataclass(frozen=True)
-class TrilMVNOutput(DistributionOutput):
-    mu: jax.Array
-    L: jax.Array
-
-    def nll(self, x: jax.Array, **kwargs):
-        B = x.shape[0]
-        x, mu = x.reshape(B, -1), self.mu.reshape(B, -1)
-        return -mvn_logpdf(x, mu, self.L, is_tril=True)
 
 
 @dataclass(frozen=True)
@@ -111,10 +108,8 @@ class MultinomialOutput(DistributionOutput):
         # average over n_z latent samples
         return MultinomialOutput(logits.mean(axis=1))
 
-    def nll(self, x: jax.Array, **kwargs):
-        return safe_softmax_cross_entropy(self.logits, x)
+    def nll(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
+        return safe_softmax_cross_entropy(self.logits, x).mean(where=mask)
 
-
-@dataclass(frozen=True)
-class LatentOutput(ModelOutput):
-    dist: DistributionOutput
+    def metrics(self, x: jax.Array, mask: Optional[jax.Array]):
+        return {"NLL": self.nll(x, mask)}

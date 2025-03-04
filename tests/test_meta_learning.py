@@ -20,13 +20,13 @@ from dl4bi.meta_learning import (
     SGNP,
     TNPD,
     TNPKR,
-    TNPND,
     ConvCNP,
     ScanTNPKR,
 )
 from dl4bi.meta_learning import (
     train_utils as tu,
 )
+from dl4bi.meta_learning.data.spatial import SpatialBatch
 
 
 def test_models():
@@ -45,7 +45,6 @@ def test_models():
         CANP,
         ConvCNP,
         TNPD,
-        TNPND,
         TNPKR,
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
@@ -65,16 +64,10 @@ def test_models():
         )
         if isinstance(output, tuple):
             output, _ = output  # drop latent distribution
-        if isinstance(m, TNPND):
-            assert jnp.isfinite(output.mu).all()
-            assert jnp.isfinite(output.L).all()
-            assert output.mu.shape == (B, L, 1)
-            assert output.L.shape == (B, L, L)
-        else:
-            assert jnp.isfinite(output.mu).all()
-            assert jnp.isfinite(output.std).all()
-            assert output.mu.shape == (B, L, 1)
-            assert output.std.shape == (B, L, 1)
+        assert jnp.isfinite(output.mu).all()
+        assert jnp.isfinite(output.std).all()
+        assert output.mu.shape == (B, L, 1)
+        assert output.std.shape == (B, L, 1)
 
 
 def test_tnp_kr_fast_scale():
@@ -101,8 +94,7 @@ def test_context_data_leaks():
     B, L, V = 4, 128, 64
     rng = random.key(42)
     rng_s, rng_f, rng_params, rng_dropout, rng_extra = random.split(rng, 5)
-    valid_lens_ctx = jnp.array([V] * B, dtype=jnp.int32)
-    valid_lens_test = jnp.array([L] * B, dtype=jnp.int32)
+    mask_ctx = jnp.ones((B, V), dtype=bool)
     s = 4 * (random.uniform(rng_s, (B, L, 1)) - 0.5)  # [0, 1] -> [-0.5, 0.5] -> [-2, 2]
     f = random.normal(rng_f, s.shape)
     # set second half to large value (different from using half the array because of attn)
@@ -114,7 +106,6 @@ def test_context_data_leaks():
         CANP,
         ConvCNP,
         TNPD,
-        TNPND,
         ScanTNPKR,
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
@@ -128,8 +119,7 @@ def test_context_data_leaks():
             s_ctx=s,
             f_ctx=f,
             s_test=s,
-            valid_lens_ctx=valid_lens_ctx,
-            valid_lens_test=valid_lens_test,
+            mask_ctx=mask_ctx,
         )
         jit_m = jit(m.apply, static_argnames=("bucket_size",))
         output = jit_m(
@@ -137,8 +127,7 @@ def test_context_data_leaks():
             s_ctx=s,
             f_ctx=f,
             s_test=s,
-            valid_lens_ctx=valid_lens_ctx,
-            valid_lens_test=valid_lens_test,
+            mask_ctx=mask_ctx,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
             # bucket_size=2,  # used by SGNP for numerical stability
         )
@@ -149,16 +138,15 @@ def test_context_data_leaks():
             s_ctx=s,
             f_ctx=f2,
             s_test=s,
-            valid_lens_ctx=valid_lens_ctx,
-            valid_lens_test=valid_lens_test,
+            mask_ctx=mask_ctx,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
             # bucket_size=2,  # used by SGNP for numerical stability
         )
         if isinstance(output, tuple):
             output, _ = output  # drop latent distribution
             output_half, _ = output_half
-        f_mu, f_std = output
-        f_mu_half, f_std_half = output_half
+        f_mu, f_std = output.mu, output.std
+        f_mu_half, f_std_half = output_half.mu, output_half.std
         print(
             "largest gaps:",
             jnp.sort(jnp.abs(f_mu - f_mu_half).flatten(), descending=True)[:5],
@@ -179,19 +167,17 @@ def test_train_step_loss():
     rng_data, rng_params, rng_dropout, rng_extra, rng_step = random.split(key, 5)
     s = jnp.linspace(0, 1.0, L)
     s = jnp.repeat(s[None, :, None], B, axis=0)  # [B, S, D_s=1]
-    valid_lens_ctx = jnp.array([N] * B)
-    valid_lens_test_1 = jnp.array([L] * B)
-    valid_lens_test_2 = jnp.array([L - 1] * B)
+    mask_ctx_1 = jnp.ones((B, N), dtype=bool)
+    mask_ctx_2 = jnp.ones((B, L), dtype=bool)
     f = 10 * random.normal(rng_data, s.shape)
-    batch_1 = (s, f, valid_lens_ctx, s, f, valid_lens_test_1)
-    batch_2 = (s, f, valid_lens_ctx, s, f, valid_lens_test_2)
+    batch_1 = SpatialBatch(s, f, mask_ctx_1, s, f)
+    batch_2 = (s, f, mask_ctx_2, s, f)
     for model in [
         NP,
         CNP,
         ANP,
         CANP,
         TNPD,
-        TNPND,
         TNPKR,
         ConvCNP,
         ScanTNPKR,
@@ -199,14 +185,12 @@ def test_train_step_loss():
     ]:
         m = model()
         print(m.__class__)
-        train_step, _ = tu.select_steps(m)
         kwargs = m.init(
             {"params": rng_params, "dropout": rng_dropout, "extra": rng_extra},
             s_ctx=s,
             f_ctx=f,
             s_test=s,
-            valid_lens_ctx=valid_lens_ctx,
-            valid_lens_test=valid_lens_test_1,
+            mask_ctx=mask_ctx_1,
         )
         params = kwargs.pop("params")
         learning_rate_fn = tu.cosine_annealing_lr()
@@ -216,8 +200,8 @@ def test_train_step_loss():
             tx=optax.yogi(learning_rate_fn),
             kwargs=kwargs,
         )
-        _, loss_1 = train_step(rng_step, state, batch_1)
-        _, loss_2 = train_step(rng_step, state, batch_2)
+        _, loss_1 = m.train_step(rng_step, state, batch_1)
+        _, loss_2 = m.train_step(rng_step, state, batch_2)
         assert jnp.not_equal(loss_1, loss_2)
 
 

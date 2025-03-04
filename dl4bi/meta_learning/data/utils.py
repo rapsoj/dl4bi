@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from jax import jit, random, vmap
 
 from ...core.data import Batch, Data, ElementSelectorMixin
-from ...core.utils import nan_pad
+from ...core.utils import mask_from_valid_lens, nan_pad
 
 
 class MetaLearningData(Data, ElementSelectorMixin):
@@ -84,9 +84,9 @@ def batch_BLD(
         test = [a[:, Nc : Nc + Nt] for a in arrays]
     return (
         *ctx,
-        valid_lens_ctx,
+        mask_from_valid_lens(num_ctx_max, valid_lens_ctx),
         *test,
-        valid_lens_test,
+        mask_from_valid_lens(num_test, valid_lens_test),
     )
 
 

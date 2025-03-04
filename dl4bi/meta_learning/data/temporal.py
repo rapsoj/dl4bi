@@ -96,11 +96,11 @@ class TemporalBatch(MetaLearningBatch):
     x_ctx: Optional[jax.Array]  # [B, L_ctx, D_x] or None
     t_ctx: jax.Array  # [B, L_ctx, 1]
     f_ctx: jax.Array  # [B, L_ctx, D_f]
-    valid_lens_ctx: jax.Array  # [B]
+    mask_ctx: jax.Array  # [B, L_ctx]
     x_test: Optional[jax.Array]  # [B, L_test, D_x]
     t_test: jax.Array  # [B, L_test, 1]
     f_test: jax.Array  # [B, L_test, D_f]
-    valid_lens_test: jax.Array  # [B]
+    mask_test: Optional[jax.Array]  # [B, L_test]
     inv_permute_idx: jax.Array  # [L]
 
     def plot_1d(
@@ -130,7 +130,7 @@ class TemporalBatch(MetaLearningBatch):
                 t_test[i],
                 f_lower[i],
                 f_upper[i],
-                alpha=0.4 / K,
+                alpha=0.4,
                 color="steelblue",
                 interpolate=True,
             )
@@ -146,11 +146,11 @@ jax.tree_util.register_pytree_node(
             d.x_ctx,
             d.t_ctx,
             d.f_ctx,
-            d.valid_lens_ctx,
+            d.mask_ctx,
             d.x_test,
             d.t_test,
             d.f_test,
-            d.valid_lens_test,
+            d.mask_test,
             d.inv_permute_idx,
         ),
         None,

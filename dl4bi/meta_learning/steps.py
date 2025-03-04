@@ -1,0 +1,81 @@
+from functools import partial
+
+import jax
+from jax import jit, random
+
+from ..core.train import TrainState
+from .data.utils import MetaLearningBatch
+
+
+@partial(jit, static_argnames=("is_categorical",))
+def likelihood_train_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: MetaLearningBatch,
+    **kwargs,
+):
+    rng_dropout, rng_extra = random.split(rng)
+
+    def loss_fn(params):
+        output = state.apply_fn(
+            {"params": params, **state.kwargs},
+            **batch,
+            training=True,
+            rngs={"dropout": rng_dropout, "extra": rng_extra},
+        )
+        return output.nll(batch.f_test, batch.mask_test)
+
+    nll, grads = jax.value_and_grad(loss_fn)(state.params)
+    return state.apply_gradients(grads=grads), nll
+
+
+@partial(jit, static_argnames=("is_categorical",))
+def likelihood_valid_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: MetaLearningBatch,
+    **kwargs,
+):
+    output = jit(state.apply_fn)(
+        {"params": state.params, **state.kwargs},
+        **batch,
+        training=False,
+        rngs={"extra": rng},
+    )
+    if isinstance(output[1], tuple):  # latent model
+        output, _ = output  # latent zs aren't used in validation
+    return output.metrics(batch.f_test, batch.mask_test)
+
+
+@partial(jit, static_argnames=("is_categorical",))
+def elbo_train_step(
+    rng: jax.Array,
+    state: TrainState,
+    batch: MetaLearningBatch,
+    **kwargs,
+):
+    rng_dropout, rng_extra = random.split(rng)
+
+    def loss_fn(params):
+        output, latent_output_ctx = state.apply_fn(
+            {"params": params, **state.kwargs},
+            **batch,
+            training=True,
+            rngs={"dropout": rng_dropout, "extra": rng_extra},
+        )
+        # used by NP family only during training for KL-div loss term
+        _, latent_output_test = state.apply_fn(
+            {"params": params, **state.kwargs},
+            batch.s_test,
+            batch.f_test,
+            batch.s_test,
+            batch.mask_test,
+            training=True,
+            rngs={"dropout": rng_dropout, "extra": rng_extra},
+        )
+        nll = output.nll(batch.f_test, batch.mask_test)
+        kl_div = latent_output_ctx.forward_kl_div(latent_output_test)
+        return nll + kl_div
+
+    elbo, grads = jax.value_and_grad(loss_fn)(state.params)
+    return state.apply_gradients(grads=grads), elbo

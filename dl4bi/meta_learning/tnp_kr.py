@@ -12,6 +12,7 @@ from ..core.dist import dist_spatial
 from ..core.mlp import MLP
 from ..core.transformer import KRBlock
 from .model_output import DiagonalMVNOutput
+from .steps import likelihood_train_step, likelihood_valid_step
 
 
 class TNPKR(nn.Module):
@@ -35,6 +36,8 @@ class TNPKR(nn.Module):
         head: Transforms the tokens into model output.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
+        train_step: What training step to use.
+        valid_step: What validation step to use.
 
     Returns:
         An instance of the `TNP-KR` model.
@@ -52,6 +55,8 @@ class TNPKR(nn.Module):
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
     output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    train_step: Callable = likelihood_train_step
+    valid_step: Callable = likelihood_valid_step
 
     @nn.compact
     def __call__(
@@ -132,6 +137,8 @@ class ScanTNPKR(nn.Module):
         head: Transforms the tokens into model output.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
+        train_step: What training step to use.
+        valid_step: What validation step to use.
 
     Returns:
         An instance of the `TNP-KR` model.
@@ -147,6 +154,8 @@ class ScanTNPKR(nn.Module):
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
     output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    train_step: Callable = likelihood_train_step
+    valid_step: Callable = likelihood_valid_step
 
     @nn.compact
     def __call__(

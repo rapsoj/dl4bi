@@ -99,18 +99,18 @@ class SpatialBatch(MetaLearningBatch):
     x_ctx: Optional[jax.Array]  # [B, L_ctx, D_x] or None
     s_ctx: jax.Array  # [B, L_ctx, D_s]
     f_ctx: jax.Array  # [B, L_ctx, D_f]
-    valid_lens_ctx: jax.Array  # [B]
+    mask_ctx: jax.Array  # [B, L_ctx]
     x_test: Optional[jax.Array]  # [B, L_test, D_x]
     s_test: jax.Array  # [B, L_test, D_s]
     f_test: jax.Array  # [B, L_test, D_f]
-    valid_lens_test: jax.Array  # [B]
+    mask_test: Optional[jax.Array]  # [B, L_test] or None
     inv_permute_idx: jax.Array  # [L]
     s_shape: tuple
 
     def plot_1d(
         self,
-        f_pred: jax.Array,  # [B, [K]?, L_test, 1]
-        f_std: jax.Array,  # [B, [K]?, L_test, 1]
+        f_pred: jax.Array,  # [B, L_test, 1]
+        f_std: jax.Array,  # [B, L_test, 1]
         hdi_prob: float = 0.95,
     ):
         B, L = self.f_test.shape[0], self.inv_permute_idx.shape[0]
@@ -129,23 +129,22 @@ class SpatialBatch(MetaLearningBatch):
             axs[i].set_ylabel(f"Sample {i+1}", rotation=90)
             axs[i].scatter(self.s_ctx[i, :, 0], self.f_ctx[i, :, 0], color="black")
             axs[i].plot(s_test[i], f_test[i], color="black")
-            for j in range(K):
-                axs[i].plot(s_test[i], f_pred[i], color="steelblue")
-                axs[i].fill_between(
-                    s_test[i],
-                    f_lower[i],
-                    f_upper[i],
-                    alpha=0.4 / K,
-                    color="steelblue",
-                    interpolate=True,
-                )
+            axs[i].plot(s_test[i], f_pred[i], color="steelblue")
+            axs[i].fill_between(
+                s_test[i],
+                f_lower[i],
+                f_upper[i],
+                alpha=0.4,
+                color="steelblue",
+                interpolate=True,
+            )
         plt.tight_layout()
         return plt.gcf()
 
     def plot_2d(
         self,
-        f_pred: jax.Array,  # [B, [K]?, L_test, D_f]
-        f_std: jax.Array,  # [B, [K]?, L_test, D_f]
+        f_pred: jax.Array,  # [B, L_test, D_f]
+        f_std: jax.Array,  # [B, L_test, D_f]
         cmap=mpl.colormaps.get_cmap("grey"),
         cmap_std=mpl.colormaps.get_cmap("Spectral_r"),
         norm=None,
@@ -154,9 +153,6 @@ class SpatialBatch(MetaLearningBatch):
     ):
         B, L = self.f_test.shape[0], self.inv_permute_idx.shape[0]
         reshape = jit(lambda v: v.reshape(*self.s_shape[:-1], v.shape[-1]))
-        if f_pred.ndim == 4:  # [B, K, L, D] boostrapped
-            f_pred = f_pred.mean(axis=1)
-            f_std = f_std.mean(axis=1)
         if f_std.shape[-1] > 1:  # e.g. uncertainty per RGB channel
             f_std = f_std.mean(axis=-1)
         arrays = unbatch_BLD([self.f_ctx, self.f_test, f_pred, f_std], L)
