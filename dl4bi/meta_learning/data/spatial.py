@@ -182,10 +182,10 @@ class SpatialBatch(MetaLearningBatch):
         reshape = jit(lambda v: v.reshape(self.s_shape[:-1]))
         if f_std.shape[-1] > 1:  # e.g. uncertainty per RGB channel
             f_std = f_std.mean(axis=-1)
-        f_ctx = jnp.where(self.mask_ctx, self.f_ctx, jnp.nan)
+        f_ctx = jnp.where(self.mask_ctx[..., None], self.f_ctx, jnp.nan)
         f_test = self.f_test
         if self.mask_test is not None:
-            f_test = jnp.where(self.mask_test, self.f_test, jnp.nan)
+            f_test = jnp.where(self.mask_test[..., None], self.f_test, jnp.nan)
         arrays = unbatch_BLD([f_ctx, f_test, f_pred, f_std], L)
         arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
         arrays = map(reshape, arrays)

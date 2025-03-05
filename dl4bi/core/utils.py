@@ -1,10 +1,7 @@
-from functools import partial
-from typing import Optional
-
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import jit, lax, random, vmap
+from jax import lax
 from jax.tree_util import Partial
 
 

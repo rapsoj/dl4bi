@@ -131,6 +131,7 @@ def build_2d_grid_dataloader(data: DictConfig, kernel: DictConfig):
     gp = instantiate(kernel)
     s_g = build_grid(data.s)
     s = jnp.repeat(s_g[None, ...], B, axis=0)
+    to_extra = lambda d: {k: v.item() for k, v in d.items() if v is not None}
 
     def dataloader(rng: jax.Array):
         while True:
@@ -146,12 +147,7 @@ def build_2d_grid_dataloader(data: DictConfig, kernel: DictConfig):
                 test_includes_ctx=True,
                 obs_noise=data.obs_noise,
             )
-            extra = {"var": var.item(), "ls": ls.item()}
-            if period is None:
-                yield b, extra
-            else:
-                extra["period"] = period.item()
-                yield b, extra
+            yield b, to_extra({"var": var, "ls": ls, "period": period})
 
     return dataloader
 
