@@ -5,6 +5,7 @@ from pathlib import Path
 import hydra
 import jax
 import jax.numpy as jnp
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import optax
 import wandb
@@ -158,7 +159,7 @@ def wandb_1d_plots(
     state: TrainState,
     batch: SpatialBatch,
     extra: dict,
-    num_plots: int = 5,
+    num_plots: int = 8,
 ):
     rng_dropout, rng_extra = random.split(rng_step)
     output = state.apply_fn(
@@ -182,7 +183,7 @@ def wandb_2d_plots(
     state: TrainState,
     batch: SpatialBatch,
     extra: dict,
-    num_plots: int = 4,
+    num_plots: int = 8,
 ):
     """Logs `num_plots` from the given batch for 2D GPs."""
     rng_dropout, rng_extra = random.split(rng_step)
@@ -194,8 +195,16 @@ def wandb_2d_plots(
     if isinstance(output, tuple):
         output, _ = output  # throw away latent samples
     path = f"/tmp/gp_2d_{datetime.now().isoformat()}.png"
+    cmap = mpl.colormaps.get_cmap("Spectral_r")
+    cmap.set_bad("grey")
     subtitle = ", ".join([f"{k}: {v:.2f}" for k, v in extra.items()])
-    fig = batch.plot_2d(output.mu, output.std, subtitle=subtitle, num_plots=num_plots)
+    fig = batch.plot_2d(
+        output.mu,
+        output.std,
+        cmap=cmap,
+        subtitle=subtitle,
+        num_plots=num_plots,
+    )
     fig.savefig(path)
     plt.close(fig)
     wandb.log({f"Step {step}": wandb.Image(path)})
