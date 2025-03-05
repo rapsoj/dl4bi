@@ -142,11 +142,15 @@ class SpatialBatch(MetaLearningBatch):
             if i == 0:
                 title = "Spatial Posterior Predictive"
                 title += f"\n{subtitle}" if subtitle else ""
-                axs[i].set_title(title, fontsize=30)
-            elif i == B - 1:
-                axs[i].set_xlabel("s", fontsize=30)
-            axs[i].set_ylabel(f"Sample {i+1}", fontsize=20, rotation=90)
-            axs[i].scatter(self.s_ctx[i, :, 0], self.f_ctx[i, :, 0], color="black")
+                axs[i].set_title(title, fontsize=16)
+            elif i == N - 1:
+                axs[i].set_xlabel("s", fontsize=14)
+            axs[i].set_ylabel(f"Sample {i+1}", fontsize=14, rotation=90)
+            axs[i].scatter(
+                self.s_ctx[i, self.mask_ctx[i], 0],
+                self.f_ctx[i, self.mask_ctx[i], 0],
+                color="black",
+            )
             axs[i].plot(s_test[i], f_test[i], color="black")
             axs[i].plot(s_test[i], f_pred[i], color="steelblue")
             axs[i].fill_between(
@@ -178,7 +182,11 @@ class SpatialBatch(MetaLearningBatch):
         reshape = jit(lambda v: v.reshape(self.s_shape[:-1]))
         if f_std.shape[-1] > 1:  # e.g. uncertainty per RGB channel
             f_std = f_std.mean(axis=-1)
-        arrays = unbatch_BLD([self.f_ctx, self.f_test, f_pred, f_std], L)
+        f_ctx = jnp.where(self.mask_ctx, self.f_ctx, jnp.nan)
+        f_test = self.f_test
+        if self.mask_test is not None:
+            f_test = jnp.where(self.mask_test, self.f_test, jnp.nan)
+        arrays = unbatch_BLD([f_ctx, f_test, f_pred, f_std], L)
         arrays = inv_permute_L_in_BLD(arrays, self.inv_permute_idx)
         arrays = map(reshape, arrays)
         f_ctx, f_test, f_pred, f_std = map(remap_colors, arrays)

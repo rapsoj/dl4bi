@@ -119,26 +119,31 @@ class TemporalBatch(MetaLearningBatch):
         f_std: jax.Array,  # [B, [K]?, L_test, 1]
         hdi_prob: float = 0.95,
         subtitle: Optional[str] = None,
+        num_plots: Optional[int] = None,
         **kwargs,
     ):
-        B, L = self.f_test.shape[0], self.inv_permute_idx.shape[0]
+        B = self.f_test.shape[0]
+        N = min(num_plots or B, B)
         order = jnp.argsort(self.t_test, axis=1)
         arrays = [self.t_test, self.f_test, f_pred, f_std]
         arrays = [jnp.take_along_axis(a, order, axis=1) for a in arrays]
         t_test, f_test, f_pred, f_std = map(lambda v: v[..., 0], arrays)
         z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
         f_lower, f_upper = f_pred - z_score * f_std, f_pred + z_score * f_std
-        _, axs = plt.subplots(B, 1, figsize=(8, B * 4))
-        for i in range(B):
+        _, axs = plt.subplots(N, 1, figsize=(8, N * 4))
+        for i in range(N):
             if i == 0:
-                if subtitle:
-                    axs[i].set_title(f"Spatial Posterior Predictive\n{subtitle}")
-                else:
-                    axs[i].set_title("Spatial Posterior Predictive")
+                title = "Spatial Posterior Predictive"
+                title += f"\n{subtitle}" if subtitle else ""
+                axs[i].set_title(title, fontsize=16)
             elif i == B - 1:
-                axs[i].set_xlabel("t")
-            axs[i].set_ylabel(f"Sample {i+1}", rotation=90)
-            axs[i].scatter(self.t_ctx[i, :, 0], self.f_ctx[i, :, 0], color="black")
+                axs[i].set_xlabel("t", fontsize=14)
+            axs[i].set_ylabel(f"Sample {i+1}", fontsize=14, rotation=90)
+            axs[i].scatter(
+                self.t_ctx[i, self.mask_ctx[i], 0],
+                self.f_ctx[i, self.mask_ctx[i], 0],
+                color="black",
+            )
             axs[i].plot(t_test[i], f_test[i], color="black")
             axs[i].plot(t_test[i], f_pred[i], color="steelblue")
             axs[i].fill_between(

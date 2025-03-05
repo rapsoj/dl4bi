@@ -76,7 +76,8 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
-    path = f"results/{cfg.project}/{cfg.data.name}/{cfg.kernel.kwargs.kernel.func}/{cfg.seed}/{run_name}"
+    kernel = cfg.kernel._target_.split(".")[-1]
+    path = f"results/{cfg.project}/{cfg.data.name}/{kernel}/{cfg.seed}/{run_name}"
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
@@ -91,7 +92,7 @@ def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = F
     s_min = jnp.array([axis["start"] for axis in data.s])
     s_max = jnp.array([axis["stop"] for axis in data.s])
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
-    to_extra = jit(lambda d: {k: v.item() for k, v in d.items() if v is not None})
+    to_extra = lambda d: {k: v.item() for k, v in d.items() if v is not None}
 
     def dataloader(rng: jax.Array):
         while True:
@@ -161,7 +162,7 @@ def wandb_1d_plots(
     state: TrainState,
     batch: SpatialBatch,
     extra: dict,
-    num_plots: int = 6,
+    num_plots: int = 5,
 ):
     rng_dropout, rng_extra = random.split(rng_step)
     output = state.apply_fn(
@@ -172,7 +173,7 @@ def wandb_1d_plots(
     if isinstance(output, tuple):
         output, _ = output  # throw away latent samples
     path = f"/tmp/gp_1d_{datetime.now().isoformat()}.png"
-    subtitle = ", ".join([f"{k}: {v:0.3f}" for k, v in extra.items()])
+    subtitle = ", ".join([f"{k}: {v:g}" for k, v in extra.items()])
     fig = batch.plot_1d(output.mu, output.std, subtitle=subtitle, num_plots=num_plots)
     fig.savefig(path)
     plt.close(fig)
@@ -197,7 +198,7 @@ def wandb_2d_plots(
     if isinstance(output, tuple):
         output, _ = output  # throw away latent samples
     path = f"/tmp/gp_2d_{datetime.now().isoformat()}.png"
-    subtitle = ", ".join([f"{k}: {v:0.3f}" for k, v in extra.items()])
+    subtitle = ", ".join([f"{k}: {v:g}" for k, v in extra.items()])
     fig = batch.plot_2d(output.mu, output.std, subtitle=subtitle, num_plots=num_plots)
     fig.savefig(path)
     plt.close(fig)
