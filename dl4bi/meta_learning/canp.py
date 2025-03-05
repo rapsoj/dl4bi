@@ -100,7 +100,6 @@ class CANP(nn.Module):
         s_ctx: jax.Array,  # [B, L_ctx, D_s]
         s_test: jax.Array,  # [B, L_test, D_s]
         mask_ctx: Optional[jax.Array],  # [B, L_ctx]
-        d_f: int,
         training: bool = False,
     ):
         r, _ = self.cross_attn(

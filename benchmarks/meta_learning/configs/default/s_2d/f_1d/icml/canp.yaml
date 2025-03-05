@@ -1,4 +1,4 @@
-_target: dl4bi.meta_learning.CANP
+_target_: dl4bi.meta_learning.CANP
 embed_s:
   _target_: dl4bi.mlp.MLP
   dims: [512, 128]
