@@ -173,7 +173,7 @@ def wandb_1d_plots(
     if isinstance(output, tuple):
         output, _ = output  # throw away latent samples
     path = f"/tmp/gp_1d_{datetime.now().isoformat()}.png"
-    subtitle = ", ".join([f"{k}: {v:g}" for k, v in extra.items()])
+    subtitle = ", ".join([f"{k}: {v:.2f}" for k, v in extra.items()])
     fig = batch.plot_1d(output.mu, output.std, subtitle=subtitle, num_plots=num_plots)
     fig.savefig(path)
     plt.close(fig)
@@ -198,7 +198,7 @@ def wandb_2d_plots(
     if isinstance(output, tuple):
         output, _ = output  # throw away latent samples
     path = f"/tmp/gp_2d_{datetime.now().isoformat()}.png"
-    subtitle = ", ".join([f"{k}: {v:g}" for k, v in extra.items()])
+    subtitle = ", ".join([f"{k}: {v:.2f}" for k, v in extra.items()])
     fig = batch.plot_2d(output.mu, output.std, subtitle=subtitle, num_plots=num_plots)
     fig.savefig(path)
     plt.close(fig)
