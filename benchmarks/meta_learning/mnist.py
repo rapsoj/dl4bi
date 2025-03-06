@@ -54,7 +54,8 @@ def main(cfg: DictConfig):
         optax.yogi(lr_schedule),
     )
     model = instantiate(cfg.model)
-    model = model.replace(output_fn=lambda x: model.output_fn(x, min_std=0.05))
+    output_fn = model.output_fn
+    model = model.copy(output_fn=lambda x: output_fn(x, min_std=0.05))
     cmap = mpl.colormaps.get_cmap("grey")
     cmap.set_bad("blue")
     clbk = partial(

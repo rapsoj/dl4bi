@@ -21,7 +21,7 @@ def likelihood_train_step(
             training=True,
             rngs={"dropout": rng_dropout, "extra": rng_extra},
         )
-        return output.nll(batch.f_test, batch.mask_test, min)
+        return output.nll(batch.f_test, batch.mask_test)
 
     nll, grads = jax.value_and_grad(loss_fn)(state.params)
     return state.apply_gradients(grads=grads), nll
