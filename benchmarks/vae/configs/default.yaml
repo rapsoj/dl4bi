@@ -6,7 +6,7 @@ defaults:
 exp_name: null
 seed: 42
 wandb: True
-project: priorcvae_v4
+project: deep_RV
 log_scale_plots: True
 approx_infer_guide: null
 mcmc:
