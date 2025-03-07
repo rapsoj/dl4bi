@@ -27,7 +27,7 @@ from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
 # Example command to evaluate only:
 # python sir.py \
 #   model=icml/tnp_kr_scan \
-#   data=128x128 \
+#   data=space_128x128 \
 #   data.batch_size=1 \
 #   valid_num_steps=100 \
 #   wandb=False \
