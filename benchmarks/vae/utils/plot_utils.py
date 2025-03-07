@@ -95,7 +95,7 @@ def plot_prevalence_scatter_comp(
     log: bool = False,
 ):
     if prev_real is not None:
-        _to_prev(prev_real, inference_model)
+        prev_real = _to_prev(prev_real, inference_model)
     elif inference_model == "binomial" and population is not None:
         population = population // population_scale
         prev_real = jnp.array(f_obs / population)
@@ -147,7 +147,7 @@ def plot_models_mean_prevalence(
     log: bool = False,
 ):
     if prev_real is not None:
-        _to_prev(prev_real, inference_model)
+        prev_real = _to_prev(prev_real, inference_model)
     elif inference_model == "binomial" and population is not None:
         population = population // population_scale
         prev_real = jnp.array(f_obs / population)
@@ -468,7 +468,7 @@ def plot_vae_reconstruction(
         f, z, conditionals = next(loader)
         f_hat = state.apply_fn(
             {"params": state.params, **state.kwargs},
-            z if model == "DeepRV" else f,
+            z if is_decoder_only else f,
             conditionals,
             **kwargs,
             rngs={"dropout": rng_drop, "extra": rng_extra},

@@ -45,7 +45,7 @@ def reproduce_plots(seeds: jax.Array):
         "poisson",
     )
     print_simulated_latex_table(pd.DataFrame(infer_summary), models_n)
-    summarize_inference_runs(
+    infer_summary = summarize_inference_runs(
         seed,
         models_n,
         ["matern_1_2", "matern_3_2"],
@@ -53,7 +53,8 @@ def reproduce_plots(seeds: jax.Array):
         "benchmarks/vae/maps/female_under_50_cancer_mortality_LAD_2023",
         "binomial",
     )
-    summarize_inference_runs(
+    print_simulated_latex_table(pd.DataFrame(infer_summary), models_n)
+    infer_summary = summarize_inference_runs(
         seed,
         models_n,
         ["matern_1_2", "matern_3_2"],
@@ -61,7 +62,8 @@ def reproduce_plots(seeds: jax.Array):
         "benchmarks/vae/maps/male_under_50_cancer_mortality_LAD_2023",
         "binomial",
     )
-    summarize_inference_runs(
+    print_simulated_latex_table(pd.DataFrame(infer_summary), models_n)
+    infer_summary = summarize_inference_runs(
         seed,
         models_n,
         ["matern_1_2"],
@@ -70,6 +72,7 @@ def reproduce_plots(seeds: jax.Array):
         "binomial",
         population_scale=1,
     )
+    print_simulated_latex_table(pd.DataFrame(infer_summary), models_n)
 
 
 def plot_vae_train_samples(seed: int, models: list[str], spatial_priors: list[str]):
@@ -168,8 +171,8 @@ def plot_empirical_bayes_comparison(
 ):
     exp_name = "UK_LTLA_sim"
     save_dir = Path("results/final_plots/EB/")
-    abs_min, abs_max = 10000, -10000
     for spatial_prior in spatial_priors:
+        abs_min, abs_max = 10000, -10000
         compare_var = "alpha" if spatial_prior == "car" else "ls"
         fig, axes = plt.subplots(1, len(models), figsize=(5 * len(models), 5))
         axes = axes.flatten() if len(models) > 1 else [axes]
@@ -254,8 +257,18 @@ def summarize_inference_runs(
                     "ESS Inferred var": ess[inferred_var].item(),
                     "Mean ESS GP": ess["mu"].mean().item(),
                     "MSE(f, f_pred)": ((f - f_hat.mean(axis=0)) ** 2).mean(),
+                    "Inferred fixed effects": None,
+                    "Inferred variance": None,
                 }
             )
+            variance = "tau" if spatial_prior == "car" else "var"
+            if exp_name != "UK_LTLA_sim":
+                infer_summary[-1].update(
+                    {
+                        "Inferred fixed effects": mcmc_sum.at["beta", "mean"].item(),
+                        "Inferred variance": mcmc_sum.at[variance, "mean"].item(),
+                    }
+                )
             plot_infer_obs_summary(
                 f,
                 f_hat,
@@ -267,8 +280,9 @@ def summarize_inference_runs(
                 samples,
                 mcmc,
                 conditionals=None,
-                var_names=["alpha" if spatial_prior == "car" else "ls"]
-                + (["var", "beta"] if model_type == "binomial" else []),
+                var_names=["alpha", "tau"]
+                if spatial_prior == "car"
+                else ["ls", "var", "beta"],
                 save_path=save_dir
                 / f"{exp_name}_{model}_{spatial_prior}_infer_trace.png",
             )
@@ -342,33 +356,6 @@ def plot_models_predictive_means(
     plt.close(fig)
 
 
-def plot_models_mean_lambda(
-    lambda_hats,
-    map_data,
-    models,
-    save_path: Path,
-    log=False,
-):
-    if log:
-        lambda_hats = [jnp.log(f_mean + 1) for f_mean in lambda_hats]
-    lambda_hat_means = [f_mean.mean(axis=0) for f_mean in lambda_hats]
-    vmin = jnp.min(jnp.array([f_mean.min() for f_mean in lambda_hat_means])).item()
-    vmax = jnp.max(jnp.array([f_mean.max() for f_mean in lambda_hat_means])).item()
-    fig, ax = plt.subplots(
-        1, len(lambda_hat_means), figsize=(6 * len(lambda_hat_means), 8)
-    )
-    log_str = " (Log scale)" if log else ""
-    for i, f_mean in enumerate(lambda_hat_means):
-        title = f"{models[i]}: Mean estimate"
-        plot_on_map(ax[i], map_data, f_mean, vmin, vmax, f"{title}{log_str}")
-    for axis in ax:
-        axis.set_axis_off()
-    plt.tight_layout()
-    fig.savefig(save_path, dpi=150)
-    plt.clf()
-    plt.close(fig)
-
-
 def plot_infer_obs_summary(f, f_hat, map_data, save_path: Path, log=True):
     if log:
         f, f_hat = jnp.log(f + 1), jnp.log(f_hat + 1)
@@ -389,47 +376,69 @@ def plot_infer_obs_summary(f, f_hat, map_data, save_path: Path, log=True):
     plt.close(fig)
 
 
-def print_simulated_latex_table(infer_summary, models_n):
-    spatial_priors = ["car", "matern_1_2", "matern_3_2", "matern_5_2", "rbf"]
-    latex_str = r"""\begin{table}
+def print_simulated_latex_table(infer_summary, models_n, spatial_priors=None):
+    if spatial_priors is None:
+        spatial_priors = ["car", "matern_1_2", "matern_3_2", "matern_5_2", "rbf"]
+    latex_str = (
+        r"""\begin{table}
 \small
 \centering
 \caption{Simulated data: inference results, single run}
 \label{table:sim_infer}
-\begin{tabular}{l|l l l l l l}
+\begin{tabular}{l|l """
+        + " l" * len(spatial_priors)
+        + r"""}
 \toprule
-\multirow{2}{*} &  & \textbf{CAR} & \textbf{Mat\'ern-1/2} & \textbf{Mat\'ern-3/2} & \textbf{Mat\'ern-5/2} & \textbf{RBF} \\
- & & ($\alpha$ - Eq \ref{eqaution:CAR}) & (length scale) & (length scale) & (length scale) & (length scale) \\
+\multirow{2}{*} &  & """
+        + " & ".join(
+            [rf"\textbf{{{prior.replace('_', '-')}}}" for prior in spatial_priors]
+        )
+        + r""" \\
+ & & """
+        + " & ".join(
+            [
+                r"($\alpha$ - Eq \ref{eqaution:CAR})"
+                if prior == "car"
+                else "(length scale)"
+                for prior in spatial_priors
+            ]
+        )
+        + r""" \\
 \midrule
 \multirow{1}{*}{\begin{sideways}\textbf{}\end{sideways}} 
-& Real Value & 0.95 & 0.2 & 0.2 & 0.2 & 0.2 \\
+& Real Value & """
+        + " & ".join(["0.95" if prior == "car" else "0.2" for prior in spatial_priors])
+        + r""" \\
 \midrule
 """
-
+    )
+    metrics = [
+        "Inferred var",
+        "ESS Inferred var",
+        "r_hat",
+        "MSE(f, f_pred)",
+        "Mean ESS GP",
+        "Runtime",
+        "Inferred fixed effects",
+        "Inferred variance",
+    ]
+    labels = [
+        "Inferred Value",
+        "ESS Inferred Variable",
+        r"$\hat{r}$",
+        r"MSE($f$, $\bar{f}_{\text{pred}}$)",
+        "Mean ESS GP",
+        "Runtime (s)",
+        "Inferred Fixed Effects",
+        "Inferred Variance",
+    ]
+    is_int = [False, True, False, False, True, True, False, False]
     for model in models_n:
         latex_str += (
-            rf"\multirow{{6}}{{*}}{{\begin{{sideways}}\textbf{{{model}}}\end{{sideways}}}} "
+            rf"\multirow{{{len(metrics)}}}{{*}}{{\begin{{sideways}}\textbf{{{model}}}\end{{sideways}}}} "
             + "\n"
         )
-        for metric, label, is_int in zip(
-            [
-                "Inferred var",
-                "ESS Inferred var",
-                "r_hat",
-                "MSE(f, f_pred)",
-                "Mean ESS GP",
-                "Runtime",
-            ],
-            [
-                "Inferred Value",
-                "ESS Inferred Variable",
-                r"$\hat{r}$",
-                r"MSE($f$, $\bar{f}_{\text{pred}}$)",
-                "Mean ESS GP",
-                "Runtime (s)",
-            ],
-            [False, True, False, False, True, True],  # Which columns should be int
-        ):
+        for metric, label, is_int_col in zip(metrics, labels, is_int):
             row_values = []
             for spatial_prior in spatial_priors:
                 if metric == "Runtime":
@@ -440,16 +449,18 @@ def print_simulated_latex_table(infer_summary, models_n):
                     & (infer_summary["spatial_prior"] == spatial_prior),
                     metric,
                 ]
-                if not value.empty:
-                    if is_int:
-                        row_values.append(f"{int(value.values[0])}")
-                    else:
-                        row_values.append(f"{value.values[0]:.3f}")
+                if not value.empty and value.values[0] is not None:
+                    row_values.append(
+                        f"{int(value.values[0])}"
+                        if is_int_col
+                        else f"{value.values[0]:.3f}"
+                    )
                 else:
                     row_values.append("-")  # Placeholder if no value exists
             latex_str += f" & {label} & " + " & ".join(row_values) + r" \\" + "\n"
         latex_str += r"\midrule" + "\n"
     latex_str += r"\bottomrule" + "\n\\end{tabular}\n\\end{table}"
+    print("\n\nInfer Summary Latex Table:\n\n")
     print(latex_str)
 
 
