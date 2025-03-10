@@ -106,7 +106,10 @@ def train(
                     batch, extra = batch if isinstance(batch, tuple) else (batch, None)
                 cbk.fn(i, rng_train_step, state, batch, extra)
         pbar.set_postfix(
-            {"Train Loss": f"{train_loss:.3f}", monitor_metric: f"{metric:.3f}"}
+            {
+                "Train Loss": f"{train_loss:.3f}",
+                f"Valid {monitor_metric}": f"{metric:.3f}",
+            }
         )
     return best_state
 

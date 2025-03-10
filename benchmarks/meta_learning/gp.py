@@ -87,9 +87,7 @@ def main(cfg: DictConfig):
 def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = False):
     """Generates batches of GP samples."""
     gp = instantiate(kernel)
-    B, D_s, Nc_max = data.batch_size, len(data.s), data.num_ctx.max
-    s_g = build_grid(data.s).reshape(-1, D_s)  # flatten spatial dims
-    L = Nc_max + s_g.shape[0]  # L = all points / num_test
+    B, L, D_s = data.batch_size, data.num_test, len(data.s)
     s_min = jnp.array([axis["start"] for axis in data.s])
     s_max = jnp.array([axis["stop"] for axis in data.s])
     batchify = jit(lambda x: jnp.repeat(x[None, ...], B, axis=0))
@@ -98,8 +96,7 @@ def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = F
     def dataloader(rng: jax.Array):
         while True:
             rng_s, rng_gp, rng_b, rng = random.split(rng, 4)
-            s_r = random.uniform(rng_s, (Nc_max, D_s), jnp.float32, s_min, s_max)
-            s = jnp.vstack([s_r, s_g])
+            s = random.uniform(rng_s, (L, D_s), jnp.float32, s_min, s_max)
             f, var, ls, period, *_ = gp.simulate(rng_gp, s, B)
             s = batchify(s)
             d = SpatialData(x=None, s=s, f=f)
