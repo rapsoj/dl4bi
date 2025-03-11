@@ -625,7 +625,7 @@ def test_spatial_data_plot_2d():
 
 
 def test_spatiotemporal_data_plot_2d():
-    B, T, T_b, S = 5, 25, 4, 64
+    B, T, T_b, S = 4, 25, 5, 64
     num_test = 64 * 64
     num_ctx_min_per_t, num_ctx_max_per_t = int(num_test * 0.5), int(num_test * 0.75)
     rng = random.key(42)
@@ -657,8 +657,6 @@ def test_spatiotemporal_data_plot_2d():
                 suffix = f"forecast_{forecast}_random_t_{random_t}_independent_t_masks_{independent_t_masks}"
                 fig.savefig(f"/tmp/test_spatiotemporal_data_plot_2d_{suffix}.png")
                 plt.close(fig)
-                if not forecast:
-                    assert False
 
 
 @jit

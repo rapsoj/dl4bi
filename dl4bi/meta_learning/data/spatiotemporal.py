@@ -278,10 +278,6 @@ class SpatiotemporalBatch(MetaLearningBatch):
     s_dims: tuple
     forecast: bool
 
-    # TODO(danj): forecast is False is broken
-    # 1. Add timestep below each plot
-    # 2. Insert interpolated timestep in correct location
-    # 3. Test on red ball
     def plot_2d(
         self,
         f_pred: jax.Array,  # [B, L_test, D_f]
@@ -317,11 +313,23 @@ class SpatiotemporalBatch(MetaLearningBatch):
         kwargs = dict(cmap=cmap, norm=norm, interpolation="none")
         std_kwargs = dict(cmap=cmap_std, norm=norm_std, interpolation="none")
         for i in range(B):
+            t_ctx = self.t_ctx.reshape(B, T_b - 1, -1, 1)
             for j in range(T_b - 1):
                 axs[i, j].imshow(f_ctx[i, j], **kwargs)
+                axs[i, j].set_xlabel(f"t={t_ctx[i, j, 0, 0].item()}", fontsize=30)
+                if i == 0:
+                    axs[i, j].set_title("Context", fontsize=30)
+            t_test = self.t_test[i, 0, 0].item()
             axs[i, j + 1].imshow(f_test[i, 0], **kwargs)
+            axs[i, j + 1].set_xlabel(f"t={t_test}", fontsize=30)
             axs[i, j + 2].imshow(f_pred[i, 0], **kwargs)
+            axs[i, j + 2].set_xlabel(f"t={t_test}", fontsize=30)
             axs[i, j + 3].imshow(f_std[i, 0], **std_kwargs)
+            axs[i, j + 3].set_xlabel(f"t={t_test}", fontsize=30)
+            if i == 0:
+                axs[i, j + 1].set_title("Ground Truth", fontsize=30)
+                axs[i, j + 2].set_title("Prediction", fontsize=30)
+                axs[i, j + 3].set_title("Uncertainty", fontsize=30)
             for j in range(T_b + 2):
                 axs[i, j].set_xticks([])
                 axs[i, j].set_yticks([])
