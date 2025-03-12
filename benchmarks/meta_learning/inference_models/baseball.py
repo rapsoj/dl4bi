@@ -1,21 +1,25 @@
+#!/usr/bin/env python3
 from pathlib import Path
 from typing import Callable
 
 import hydra
 import jax
+import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 import optax
+import pandas as pd
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random
 from jax.scipy.special import logsumexp
-from numpyro.examples.datasets import BASEBALL, load_dataset
 from numpyro.infer import MCMC, NUTS, Predictive, log_likelihood
 from omegaconf import DictConfig, OmegaConf
 
+from dl4bi.core.train import evaluate, save_ckpt, train
+from dl4bi.meta_learning.data.tabular import TabularData
+from dl4bi.meta_learning.tnp_kr import TNPKR
 from dl4bi.meta_learning.utils import cfg_to_run_name
-from dl4bi.train import evaluate, save_ckpt, train
 
 
 @hydra.main("configs/baseball", config_name="default", version_base=None)
@@ -31,7 +35,7 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    dataloader = build_dataloader()
+    dataloader = build_dataloader(cfg.data)
     print(next(dataloader(rng_train)))
     optimizer = optax.chain(
         optax.clip_by_global_norm(cfg.clip_max_norm),
@@ -64,15 +68,26 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def build_dataloader(batch_size: int):
-    prior_pred = jit(Predictive(partially_pooled, num_samples=batch_size))
+def build_dataloader(cfg: DictConfig):
+    B = cfg.batch_size
+    prior_pred = jit(Predictive(partially_pooled, num_samples=B))
     (at_bats, _), _ = load_baseball_dataset()
+    ids = jnp.arange(at_bats.shape[0])
+    x = jnp.stack([ids, at_bats], axis=0)
+    x = jnp.repeat(x[None, ...], B, axis=0)
 
     def dataloader(rng):
         while True:
-            rng_i, rng = random.split(rng)
-            samples = prior_pred(at_bats)
-            yield samples
+            rng_i, rng_b, rng = random.split(rng, 3)
+            samples = prior_pred(rng_i, at_bats)
+            d = TabularData(x=x, f=samples["obs"])
+            yield d.batch(
+                rng_b,
+                cfg.num_ctx_min,
+                cfg.num_ctx_max,
+                cfg.num_test,
+                cfg.test_includes_ctx,
+            )
 
     return dataloader
 
@@ -100,12 +115,15 @@ def partially_pooled(at_bats, hits=None):
 
 
 def load_baseball_dataset():
-    _, fetch_train = load_dataset(BASEBALL, split="train", shuffle=False)
-    train, player_names = fetch_train()
-    _, fetch_test = load_dataset(BASEBALL, split="test", shuffle=False)
-    test, _ = fetch_test()
-    at_bats, hits = train[:, 0], train[:, 1]
-    season_at_bats, season_hits = test[:, 0], test[:, 1]
+    url = "https://raw.githubusercontent.com/pyro-ppl/datasets/refs/heads/master/EfronMorrisBB.txt"
+    path = Path("cache/baseball.csv")
+    if path.exists():
+        df = pd.read_csv(path)
+    else:
+        df = pd.read_csv(url, sep="\t")
+        df.to_csv("cache/baseball.csv", index=False)
+    at_bats, hits = df["At-Bats"].values, df["Hits"].values
+    season_at_bats, season_hits = df["SeasonAt-Bats"].values, df["SeasonHits"].values
     return (at_bats, hits), (season_at_bats, season_hits)
 
 
@@ -125,3 +143,7 @@ def run_inference(
     )
     mcmc.run(rng, at_bats, hits)
     return mcmc.get_samples()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 import flax.linen as nn
 import jax
@@ -17,6 +17,12 @@ def identity_or_empty(x: Union[jax.Array, None]):
     if x is None:
         return jnp.array([])
     return x
+
+
+def first_shape(arrays: Sequence[Union[jax.Array, None]]):
+    for array in arrays:
+        if array is not None:
+            return array.shape
 
 
 class TNPKR(nn.Module):
@@ -106,7 +112,8 @@ class TNPKR(nn.Module):
         """
         norm = nn.LayerNorm()
         stack = jit(lambda *args: jnp.concat([x for x in args if x.size > 0], axis=-1))
-        f_test = jnp.zeros([*s_test.shape[:-1], f_ctx.shape[-1]])
+        test_shape = first_shape([x_test, s_test, t_test])
+        f_test = jnp.zeros((*test_shape[:-1], f_ctx.shape[-1]))
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
         unobs = jnp.zeros(f_test.shape[:-1], dtype=jnp.uint8)
         ctx = stack(
