@@ -186,6 +186,7 @@ class TNPKR(nn.Module):
 
 
 # TODO(danj): expand to support (x, s, t) input
+# TODO(danj): regression test slightly less perf than TNPKR vanilla
 class ScanTNPKR(nn.Module):
     """Transformer Neural Process - Kernel Regression (TNP-KR) using memory efficient
     scanning.

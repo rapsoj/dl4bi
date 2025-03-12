@@ -21,6 +21,9 @@ from dl4bi.meta_learning.data.tabular import TabularData
 from dl4bi.meta_learning.tnp_kr import TNPKR
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
+# TODO(danj): run inference
+# TODO(danj): calculate pointwise log likelihood
+
 
 @hydra.main("configs/baseball", config_name="default", version_base=None)
 def main(cfg: DictConfig):
