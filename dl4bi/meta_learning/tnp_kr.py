@@ -7,8 +7,6 @@ import jax.numpy as jnp
 from jax import jit, vmap
 
 from ..core.attention import MultiHeadAttention, RBFNetworkBiasedScanAttention
-from ..core.bias import RBFNetworkBias
-from ..core.dist import dist_spatial
 from ..core.mlp import MLP
 from ..core.transformer import KRBlock
 from .model_output import DiagonalMVNOutput
@@ -28,9 +26,9 @@ class TNPKR(nn.Module):
         embed_obs: A module that creates embeddings for observed (context) and
             unobserved (test) points.
         embed_all: A module that jointly embeds `obs`, `s`, and `f` embeddings.
-        dist: A distance function used to calculate pairwise distances between
-            two arrays.
-        bias: A bias module that consumes pairwise distances.
+        x_bias: Bias module for fixed effects.
+        s_bias: Bias module for spatial effects.
+        t_bias: Bias module for temporal effects.
         blk: A block to use for each layer and each repetition.
         norm: A module used for normalization between blocks.
         head: Transforms the tokens into model output.
@@ -49,8 +47,9 @@ class TNPKR(nn.Module):
     embed_f: Callable = lambda x: x
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
-    dist: Optional[Callable] = dist_spatial
-    bias: Optional[nn.Module] = RBFNetworkBias()
+    x_bias: Optional[Callable] = None
+    s_bias: Optional[Callable] = None
+    t_bias: Optional[Callable] = None
     blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
@@ -61,10 +60,14 @@ class TNPKR(nn.Module):
     @nn.compact
     def __call__(
         self,
-        s_ctx: jax.Array,  # [B, L_ctx, D_S]
-        f_ctx: jax.Array,  # [B, L_ctx, D_F]
-        s_test: jax.Array,  # [B, L_test, D_S]
+        x_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_x]
+        s_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_s]
+        t_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_s]
+        f_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_f]
         mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
+        x_test: Optional[jax.Array] = None,  # [B, L_test, D_x]
+        s_test: Optional[jax.Array] = None,  # [B, L_test, D_s]
+        t_test: Optional[jax.Array] = None,  # [B, L_test, D_t]
         training: bool = False,
         **kwargs,
     ):
@@ -72,21 +75,20 @@ class TNPKR(nn.Module):
 
         Args:
             rng: A psuedo-random number generator.
-            s_ctx: An index set array of shape `[B, L_ctx, D_S]` where
-                `B` is batch size, `L_ctx` is number of context
-                locations, and `L_ctx` is the dimension of each location.
-            f_ctx: A function value array of shape `[B, L_ctx, D_F]` where `B` is
-                batch size, `L_ctx` is number of context locations, and `D_F` is
-                the dimension of each function value.
-            s_test: A location array of shape `[B, L_test, D_S]` where `B` is
-                batch size, `L_test` is number of test locations, and `D_S`
-                is the dimension of each location.
-            mask_ctx: An optional array of shape `[B, L_ctx]`
+            x_ctx: Optional fixed effects for context points.
+            t_ctx: Optional temporal values for context points.
+            s_ctx: Optional spatial values for context points.
+            f_ctx: Function values for context points.
+            mask_ctx: A mask for context points.
+            x_test: Optional fixed effects for test points.
+            t_test: Optional temporal values for test points.
+            s_test: Optional spatial values for test points.
+            f_test: Function values for test points.
             training: A boolean indicating whether this call is performed during
                 training.
 
         Returns:
-            $\mu_f,\sigma_f\in\mathbb{R}^{B\times L_\text{test}\times D_F}$.
+            `ModelOutput`.
         """
         norm = nn.LayerNorm()
         stack = lambda *args: jnp.concatenate([x for x in args if x.size > 0], axis=-1)
@@ -160,9 +162,9 @@ class ScanTNPKR(nn.Module):
     @nn.compact
     def __call__(
         self,
-        s_ctx: jax.Array,  # [B, L_ctx, D_S]
-        f_ctx: jax.Array,  # [B, L_ctx, D_F]
-        s_test: jax.Array,  # [B, L_test, D_S]
+        s_ctx: jax.Array,  # [B, L_ctx, D_s]
+        f_ctx: jax.Array,  # [B, L_ctx, D_f]
+        s_test: jax.Array,  # [B, L_test, D_s]
         mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         training: bool = False,
         **kwargs,

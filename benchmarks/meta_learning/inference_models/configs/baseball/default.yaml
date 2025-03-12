@@ -1,0 +1,15 @@
+defaults:
+  - _self_ # use default global values below
+  - model: tnp_kr
+seed: 42
+wandb: True
+project: BML - Baseball
+train_num_steps: 100000
+valid_num_steps: 5000
+valid_interval: 10000
+lr_peak: 1.0e-3
+clip_max_norm: 3.0
+infer:
+  num_warmup: 1000
+  num_samples: 1000
+  num_chains: 1
