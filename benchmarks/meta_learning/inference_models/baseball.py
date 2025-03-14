@@ -84,11 +84,12 @@ def build_dataloaders(cfg: DictConfig):
         lambda rng, z, x: Predictive(partially_pooled, z, num_samples=B)(rng, x)
     )
     batchify = jit(lambda x: jnp.repeat(x[None, :, None], B, axis=0))
+    max_val = 650
 
     def train_dataloader(rng):
         while True:
             rng_x, rng_p1, rng_p2, rng = random.split(rng, 4)
-            x_ctx, x_test = random.randint(rng_x, (2, L), minval=40, maxval=650)
+            x_ctx, x_test = random.uniform(rng_x, (2, L))
             ctx_samples = prior_pred(rng_p1, x_ctx)
             f_ctx = ctx_samples.pop("obs")[..., None]  # [B, L, 1]
             test_samples = post_pred(rng_p2, ctx_samples, x_test)
@@ -101,13 +102,13 @@ def build_dataloaders(cfg: DictConfig):
 
     def test_dataloader(rng):
         ids = jnp.arange(L)[None, :, None]
-        x_ctx = train_at_bats[None, :, None]
-        x_test = test_at_bats[None, :, None]
+        x_ctx = train_at_bats[None, :, None] / max_val
+        x_test = test_at_bats[None, :, None] / max_val
         x_ctx = jnp.concat([ids, x_ctx], axis=-1)  # [B=1, L, 2]
         x_test = jnp.concat([ids, x_test], axis=-1)
         mask_ctx = jnp.ones((1, L), dtype=bool)
-        f_ctx = train_hits[None, :, None]  # [B=1, L, 1]
-        f_test = test_hits[None, :, None]
+        f_ctx = train_hits[None, :, None] / max_val  # [B=1, L, 1]
+        f_test = test_hits[None, :, None] / max_val
         yield TabularBatch(x_ctx, f_ctx, mask_ctx, x_test, f_test)
 
     return train_dataloader, test_dataloader
