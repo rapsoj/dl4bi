@@ -20,9 +20,6 @@ from dl4bi.core.train import evaluate, save_ckpt, train
 from dl4bi.meta_learning.data.tabular import TabularBatch, TabularData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
-# TODO(danj): finish this - how can you meta-learn non-iid data?
-# need to create (ctx, test) that share the same parameters, but use different counts
-# TODO(danj): run inference
 # TODO(danj): calculate pointwise log likelihood
 
 
@@ -65,6 +62,9 @@ def main(cfg: DictConfig):
         test_dataloader,
         num_steps=1,
     )
+    batch = next(test_dataloader(rng_test))
+    output = state.apply_fn({"params": state.params}, **batch)
+    print(jnp.concat([batch.f_test, output.p, output.std], axis=1))
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,7 +73,7 @@ def main(cfg: DictConfig):
 
 def build_dataloaders(cfg: DictConfig):
     (train_at_bats, train_hits), (test_at_bats, test_hits) = load_baseball_dataset()
-    B, L = cfg.batch_size, train_at_bats.shape[0]
+    B, L = cfg.batch_size, cfg.num_players
     ids = jnp.repeat(jnp.arange(L)[None, :, None], B, axis=0)  # [B, L, 1]
     prior_pred = jit(Predictive(partially_pooled, num_samples=B))
     post_pred = jit(
@@ -102,9 +102,30 @@ def build_dataloaders(cfg: DictConfig):
         mask_ctx = None
         return TabularBatch(x_ctx, f_ctx, mask_ctx, x_test, f_test)
 
+    # @jit
+    # def gen_batch(rng):
+    #     rng_x, rng_p1, rng_p2 = random.split(rng, 3)
+    #     hits_ctx, hits_test = random.randint(rng_x, (2, L), min_val, max_val)
+    #     ctx_samples = prior_pred(rng_p1, hits_ctx)
+    #     f_ctx = ctx_samples.pop("phi")[..., None]  # [B, L, 1]
+    #     ctx_samples.pop("obs")
+    #     test_samples = post_pred(rng_p2, ctx_samples, hits_test)
+    #     f_test = test_samples["phi"][..., None]  # [B, L, 1]
+    #     mask_ctx = None
+    #     return TabularBatch(ids, f_ctx, mask_ctx, ids, f_test)
+
+    # def test_dataloader(rng):
+    #     L = train_at_bats.shape[0]
+    #     ids = jnp.arange(L)[None, :, None]
+    #     f_ctx = (train_hits / train_at_bats)[None, :, None]  # phi
+    #     f_test = (test_hits / test_at_bats)[None, :, None]  # phi
+    #     mask_ctx = None
+    #     yield TabularBatch(ids, f_ctx, mask_ctx, ids, f_test)
+
     def test_dataloader(rng):
+        L = train_at_bats.shape[0]
         ids = jnp.arange(L)[None, :, None]
-        x_ctx = train_at_bats[None, :, None]  # normalize
+        x_ctx = train_at_bats[None, :, None]
         x_test = test_at_bats[None, :, None]
         f_ctx = train_hits[None, :, None] / x_ctx  # phi
         f_test = test_hits[None, :, None] / x_test  # phi
