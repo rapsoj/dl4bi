@@ -7,11 +7,8 @@ import jax
 import jax.numpy as jnp
 from jax import jit
 from jax.nn import softmax, softplus
-from jax.scipy.stats import norm
+from jax.scipy import stats
 from optax.losses import safe_softmax_cross_entropy
-
-# TODO(danj):
-# Support Binomial and Poisson
 
 
 @dataclass(frozen=True)
@@ -42,24 +39,24 @@ class DiagonalMVNOutput(DistributionOutput):
     std: jax.Array
 
     @classmethod
-    def from_conditional_np(cls, params: jax.Array, min_std: float = 0.0, **kwargs):
-        mu, std = jnp.split(params, 2, axis=-1)
+    def from_conditional_np(cls, output: jax.Array, min_std: float = 0.0, **kwargs):
+        mu, std = jnp.split(output, 2, axis=-1)
         std = min_std + (1 - min_std) * softplus(std)
         return DiagonalMVNOutput(mu, std)
 
     @classmethod
-    def from_latent_np(cls, params: jax.Array, min_std: float = 0.0, **kwargs):
-        mu, std = jnp.split(params, 2, axis=-1)
+    def from_latent_np(cls, output: jax.Array, min_std: float = 0.0, **kwargs):
+        mu, std = jnp.split(output, 2, axis=-1)
+        mu, std = mu.mean(axis=1), std.mean(axis=1)  # average over latent n_z samples
         std = min_std + (1 - min_std) * softplus(std)
-        # average over latent n_z samples
-        return DiagonalMVNOutput(mu.mean(axis=1), std.mean(axis=1))
+        return DiagonalMVNOutput(mu, std)
 
     def nll(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
-        return -norm.logpdf(x, self.mu, self.std).mean(where=mask)
+        return -stats.norm.logpdf(x, self.mu, self.std).mean(where=mask)
 
     def metrics(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
         hdi_prob = kwargs.get("hdi_prob", 0.95)
-        z_score = jnp.abs(norm.ppf((1 - hdi_prob) / 2))
+        z_score = jnp.abs(stats.norm.ppf((1 - hdi_prob) / 2))
         rmse = jnp.sqrt(jnp.square(x - self.mu).mean(where=mask))
         mae = jnp.abs(x - self.mu).mean(where=mask)
         f_lower, f_upper = self.mu - z_score * self.std, self.mu + z_score * self.std
@@ -129,4 +126,45 @@ jax.tree_util.register_pytree_node(
     MultinomialOutput,
     lambda d: ((d.logits,), None),
     lambda _aux, children: MultinomialOutput(*children),
+)
+
+
+@dataclass(frozen=True)
+class BetaOutput(DistributionOutput):
+    alpha: jax.Array
+    beta: jax.Array
+
+    @classmethod
+    def from_conditional_np(cls, output: jax.Array, min_std: float = 0.0, **kwargs):
+        alpha, beta = jnp.split(output, 2, axis=-1)
+        return BetaOutput(softplus(alpha), softplus(beta))
+
+    @classmethod
+    def from_latent_np(cls, output: jax.Array, min_std: float = 0.0, **kwargs):
+        alpha, beta = jnp.split(output, 2, axis=-1)
+        alpha, beta = (alpha.mean(axis=1), beta.mean(axis=1))  # average latent samples
+        return BetaOutput(softplus(alpha), softplus(beta))
+
+    @property
+    def p(self):
+        return self.alpha / (self.alpha + self.beta)
+
+    @property
+    def std(self):
+        a, b = self.alpha, self.beta
+        return jnp.sqrt(a * b / (jnp.square(a + b) * (a + b + 1)))
+
+    def nll(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
+        mask = None if mask is None else mask[..., 0]
+        return -stats.beta.logpdf(x, self.alpha, self.beta).mean(where=mask)
+
+    def metrics(self, x: jax.Array, mask: Optional[jax.Array]):
+        return {"NLL": self.nll(x, mask)}
+
+
+# register to use in jitted functions
+jax.tree_util.register_pytree_node(
+    BetaOutput,
+    lambda d: ((d.alpha, d.beta), None),
+    lambda _aux, children: BetaOutput(*children),
 )

@@ -4,17 +4,14 @@ defaults:
 seed: 42
 wandb: True
 project: MLBI - Baseball
-train_num_steps: 1000
-valid_num_steps: 250
-valid_interval: 250
+train_num_steps: 100000
+valid_num_steps: 1000
+valid_interval: 10000
 lr_peak: 1.0e-3
 clip_max_norm: 3.0
 data:
   batch_size: 32
-  num_ctx_min: 3
-  num_ctx_max: 12
-  num_test: 18
-  test_includes_ctx: True
+  num_players: 50
 infer:
   num_warmup: 1000
   num_samples: 1000
