@@ -65,10 +65,6 @@ def main(cfg: DictConfig):
         test_dataloader,
         num_steps=1,
     )
-    batch = next(test_dataloader(rng_test))
-    output = state.apply_fn({"params": state.params, **state.kwargs}, **batch)
-    print(int(output.mu * 650))
-    print(int(batch.f_test * 650))
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     path = Path(f"results/{cfg.project}/{cfg.seed}/{run_name}")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,7 +80,7 @@ def build_dataloaders(cfg: DictConfig):
         lambda rng, z, x: Predictive(partially_pooled, z, num_samples=B)(rng, x)
     )
     batchify = jit(lambda x: jnp.repeat(x[None, :, None], B, axis=0))
-    min_val, max_val = 40, 650
+    min_val, max_val = 25, 650
 
     def train_dataloader(rng):
         while True:
@@ -96,12 +92,11 @@ def build_dataloaders(cfg: DictConfig):
         rng_x, rng_p1, rng_p2 = random.split(rng, 3)
         x_ctx, x_test = random.randint(rng_x, (2, L), min_val, max_val)
         ctx_samples = prior_pred(rng_p1, x_ctx)
-        f_ctx = ctx_samples.pop("obs")[..., None]  # [B, L, 1]
+        f_ctx = ctx_samples.pop("phi")[..., None]  # [B, L, 1]
+        ctx_samples.pop("obs")
         test_samples = post_pred(rng_p2, ctx_samples, x_test)
-        f_test = test_samples["obs"][..., None]  # [B, L, 1]
-        x_ctx, x_test = batchify(x_ctx), batchify(x_test)
-        x_ctx, x_test = x_ctx / max_val, x_test / max_val  # normalize
-        f_ctx, f_test = f_ctx / max_val, f_test / max_val  # normalize
+        f_test = test_samples["phi"][..., None]  # [B, L, 1]
+        x_ctx, x_test = batchify(x_ctx / max_val), batchify(x_test / max_val)
         x_ctx = jnp.concat([ids, x_ctx], axis=-1)  # [B, L, 2]
         x_test = jnp.concat([ids, x_test], axis=-1)  # [B, L, 2]
         mask_ctx = None
@@ -109,13 +104,13 @@ def build_dataloaders(cfg: DictConfig):
 
     def test_dataloader(rng):
         ids = jnp.arange(L)[None, :, None]
-        x_ctx = train_at_bats[None, :, None] / max_val
-        x_test = test_at_bats[None, :, None] / max_val
-        x_ctx = jnp.concat([ids, x_ctx], axis=-1)  # [B=1, L, 2]
-        x_test = jnp.concat([ids, x_test], axis=-1)
-        mask_ctx = jnp.ones((1, L), dtype=bool)
-        f_ctx = train_hits[None, :, None] / max_val  # [B=1, L, 1]
-        f_test = test_hits[None, :, None] / max_val
+        x_ctx = train_at_bats[None, :, None]  # normalize
+        x_test = test_at_bats[None, :, None]
+        f_ctx = train_hits[None, :, None] / x_ctx  # phi
+        f_test = test_hits[None, :, None] / x_test  # phi
+        x_ctx = jnp.concat([ids, x_ctx / max_val], axis=-1)  # [B=1, L, 2]
+        x_test = jnp.concat([ids, x_test / max_val], axis=-1)
+        mask_ctx = None
         yield TabularBatch(x_ctx, f_ctx, mask_ctx, x_test, f_test)
 
     return train_dataloader, test_dataloader
