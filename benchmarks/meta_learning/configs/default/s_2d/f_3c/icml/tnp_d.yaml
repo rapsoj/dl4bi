@@ -29,5 +29,5 @@ head:
   _target_: dl4bi.mlp.MLP
   dims: [256, 64, 3]
 output_fn:
-  _target_: dl4bi.meta_learning.model_output.MultinomialOutput.from_conditional_np
+  _target_: dl4bi.core.model_output.MultinomialOutput.from_activations
   _partial_: true

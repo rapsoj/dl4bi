@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 from ..core.attention import MultiHeadAttention
 from ..core.mlp import MLP
-from .model_output import DiagonalMVNOutput
+from ..core.model_output import DiagonalMVNOutput
 from .steps import likelihood_train_step, likelihood_valid_step
 
 
@@ -59,7 +59,7 @@ class CANP(nn.Module):
         num_heads=8,
     )
     dec: nn.Module = MLP([128] * 4 + [2])
-    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    output_fn: Callable = DiagonalMVNOutput.from_activations
     train_step: Callable = likelihood_train_step
     valid_step: Callable = likelihood_valid_step
 

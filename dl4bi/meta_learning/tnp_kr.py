@@ -9,7 +9,7 @@ from jax import jit, vmap
 from ..core.attention import MultiHeadAttention, RBFNetworkBiasedScanAttention
 from ..core.mlp import MLP
 from ..core.transformer import KRBlock
-from .model_output import DiagonalMVNOutput
+from ..core.model_output import DiagonalMVNOutput
 from .steps import likelihood_train_step, likelihood_valid_step
 
 
@@ -73,7 +73,7 @@ class TNPKR(nn.Module):
     blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
-    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    output_fn: Callable = DiagonalMVNOutput.from_activations
     train_step: Callable = likelihood_train_step
     valid_step: Callable = likelihood_valid_step
 
@@ -222,7 +222,7 @@ class ScanTNPKR(nn.Module):
     blk: nn.Module = KRBlock(MultiHeadAttention(RBFNetworkBiasedScanAttention()))
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
-    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    output_fn: Callable = DiagonalMVNOutput.from_activations
     train_step: Callable = likelihood_train_step
     valid_step: Callable = likelihood_valid_step
 

@@ -8,7 +8,7 @@ from sps.utils import build_grid
 
 from ..core.conv import ConvCNPNet, ConvDeepSet
 from ..core.mlp import MLP
-from .model_output import DiagonalMVNOutput
+from ..core.model_output import DiagonalMVNOutput
 from .steps import likelihood_train_step, likelihood_valid_step
 
 
@@ -43,7 +43,7 @@ class ConvCNP(nn.Module):
     conv_net: nn.Module = ConvCNPNet()
     dec: nn.Module = ConvDeepSet()
     head: nn.Module = MLP([128] * 3 + [2])
-    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    output_fn: Callable = DiagonalMVNOutput.from_activations
     train_step: Callable = likelihood_train_step
     valid_step: Callable = likelihood_valid_step
 

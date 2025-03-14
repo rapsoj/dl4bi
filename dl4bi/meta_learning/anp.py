@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from jax import random
 
 from ..core.attention import MLP, MultiHeadAttention
-from .model_output import DiagonalMVNOutput
+from ..core.model_output import DiagonalMVNOutput
 from .steps import elbo_train_step, likelihood_valid_step
 
 
@@ -77,7 +77,7 @@ class ANP(nn.Module):
     )
     dec: nn.Module = MLP([128] * 4 + [2])
     n_z: int = 1
-    output_fn: Callable = DiagonalMVNOutput.from_latent_np
+    output_fn: Callable = DiagonalMVNOutput.from_latent_activations
     train_step: Callable = elbo_train_step
     valid_step: Callable = likelihood_valid_step
 

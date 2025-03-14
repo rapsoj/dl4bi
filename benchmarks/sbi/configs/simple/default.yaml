@@ -1,0 +1,18 @@
+defaults:
+  - _self_ # use default global values below
+  - model: npe
+seed: 42
+wandb: True
+project: SBI
+train_num_steps: 1000
+valid_num_steps: 100
+valid_interval: 250
+data:
+  batch_size: 32
+  theta:
+    min: -3.0
+    max: 3.0
+  noise: 0.5
+lr_peak: 1.0e-3
+lr_pct_warmup: 0.0
+clip_max_norm: 3.0

@@ -10,7 +10,7 @@ from jraph import GraphsTuple
 from ..core.gnn import EdgeBiasedGAT
 from ..core.knn import STkNN, kNN
 from ..core.mlp import MLP
-from .model_output import DiagonalMVNOutput
+from ..core.model_output import DiagonalMVNOutput
 from .steps import likelihood_train_step, likelihood_valid_step
 
 
@@ -53,7 +53,7 @@ class SGNP(nn.Module):
     norm: nn.Module = nn.LayerNorm()
     gnn: nn.Module = EdgeBiasedGAT()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
-    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    output_fn: Callable = DiagonalMVNOutput.from_activations
     train_step: Callable = likelihood_train_step
     valid_step: Callable = likelihood_valid_step
 

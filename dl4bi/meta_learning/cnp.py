@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 
 from ..core.mlp import MLP
-from .model_output import DiagonalMVNOutput
+from ..core.model_output import DiagonalMVNOutput
 from .steps import likelihood_train_step, likelihood_valid_step
 
 
@@ -33,7 +33,7 @@ class CNP(nn.Module):
 
     enc_det: nn.Module = MLP([128] * 6)
     dec: nn.Module = MLP([128] * 4 + [2])
-    output_fn: Callable = DiagonalMVNOutput.from_conditional_np
+    output_fn: Callable = DiagonalMVNOutput.from_activations
     train_step: Callable = likelihood_train_step
     valid_step: Callable = likelihood_valid_step
 

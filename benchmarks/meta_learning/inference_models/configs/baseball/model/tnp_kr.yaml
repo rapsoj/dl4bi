@@ -40,5 +40,5 @@ head:
     _target_: jax.nn.gelu
     _partial_: true
 output_fn:
-  _target_: dl4bi.meta_learning.model_output.BetaOutput.from_conditional_np
+  _target_: dl4bi.core.model_output.BetaOutput.from_activations
   _partial_: true

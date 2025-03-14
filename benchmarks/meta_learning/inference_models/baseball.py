@@ -53,13 +53,12 @@ def main(cfg: DictConfig):
         model,
         optimizer,
         model.train_step,
-        model.valid_step,
-        dataloader,
-        dataloader,
-        dataloader,
         cfg.train_num_steps,
-        cfg.valid_num_steps,
+        dataloader,
+        model.valid_step,
         cfg.valid_interval,
+        cfg.valid_num_steps,
+        dataloader,
     )
     metrics = evaluate(
         rng_test,

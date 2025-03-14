@@ -38,17 +38,17 @@ def train(
     model: nn.Module,
     optimizer: optax.GradientTransformation,
     train_step: Callable,
-    valid_step: Callable,
+    train_num_steps: int,
     train_dataloader: Callable,
-    valid_dataloader: Callable,
-    callback_dataloader: Optional[Callable] = None,
-    train_num_steps: int = 100000,
+    valid_step: Optional[Callable] = None,
+    valid_interval: Optional[int] = None,
     valid_num_steps: Optional[int] = None,
-    valid_interval: int = 25000,
-    log_loss_interval: int = 100,
-    callbacks: list[Callback] = [],
-    monitor_metric: str = "NLL",  # validation metric to monitor
+    valid_dataloader: Optional[Callable] = None,
+    valid_monitor_metric: str = "NLL",
     early_stop_patience: Optional[int] = None,
+    callbacks: list[Callback] = [],
+    callback_dataloader: Optional[Callable] = None,
+    log_loss_interval: int = 100,
     state: Optional[TrainState] = None,
 ):
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
@@ -80,7 +80,8 @@ def train(
             train_loss = np.mean(losses)
             losses = []
             wandb.log({"Train Loss": train_loss})
-        if i % valid_interval == 0:
+        postfix = {"Train Loss": f"{train_loss:.3f}"}
+        if valid_interval and i % valid_interval == 0:
             rng_valid, rng_train = random.split(rng_train)
             metrics = evaluate(
                 rng_valid,
@@ -89,7 +90,8 @@ def train(
                 valid_dataloader,
                 valid_num_steps,
             )
-            metric = metrics[monitor_metric]
+            metric = metrics[valid_monitor_metric]
+            postfix[f"Valid {valid_monitor_metric}"] = f"{metric:0.3f}"
             wandb.log({f"Valid {m}": v for m, v in metrics.items()})
             patience += 1
             if metric < best_metric:
@@ -105,12 +107,7 @@ def train(
                     batch = next(callback_dataloader(rng_train_step))
                     batch, extra = batch if isinstance(batch, tuple) else (batch, None)
                 cbk.fn(i, rng_train_step, state, batch, extra)
-        pbar.set_postfix(
-            {
-                "Train Loss": f"{train_loss:.3f}",
-                f"Valid {monitor_metric}": f"{metric:.3f}",
-            }
-        )
+        pbar.set_postfix(postfix)
     return best_state
 
 

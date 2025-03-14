@@ -39,22 +39,22 @@ class DiagonalMVNOutput(DistributionOutput):
     std: jax.Array
 
     @classmethod
-    def from_conditional_np(cls, output: jax.Array, min_std: float = 0.0, **kwargs):
-        mu, std = jnp.split(output, 2, axis=-1)
+    def from_activations(cls, act: jax.Array, min_std: float = 0.0, **kwargs):
+        mu, std = jnp.split(act, 2, axis=-1)
         std = min_std + (1 - min_std) * softplus(std)
         return DiagonalMVNOutput(mu, std)
 
     @classmethod
-    def from_latent_np(cls, output: jax.Array, min_std: float = 0.0, **kwargs):
-        mu, std = jnp.split(output, 2, axis=-1)
+    def from_latent_activations(cls, act: jax.Array, min_std: float = 0.0, **kwargs):
+        mu, std = jnp.split(act, 2, axis=-1)
         mu, std = mu.mean(axis=1), std.mean(axis=1)  # average over latent n_z samples
         std = min_std + (1 - min_std) * softplus(std)
         return DiagonalMVNOutput(mu, std)
 
-    def nll(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
+    def nll(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
         return -stats.norm.logpdf(x, self.mu, self.std).mean(where=mask)
 
-    def metrics(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
+    def metrics(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
         hdi_prob = kwargs.get("hdi_prob", 0.95)
         z_score = jnp.abs(stats.norm.ppf((1 - hdi_prob) / 2))
         rmse = jnp.sqrt(jnp.square(x - self.mu).mean(where=mask))
@@ -105,19 +105,19 @@ class MultinomialOutput(DistributionOutput):
         return jnp.sqrt(self.p * (1 - self.p))
 
     @classmethod
-    def from_conditional_np(cls, logits: jax.Array, **kwargs):
-        return MultinomialOutput(logits)
+    def from_activations(cls, act: jax.Array, **kwargs):
+        return MultinomialOutput(act)
 
     @classmethod
-    def from_latent_np(cls, logits: jax.Array, **kwargs):
+    def from_latent_activations(cls, act: jax.Array, **kwargs):
         # average over n_z latent samples
-        return MultinomialOutput(logits.mean(axis=1))
+        return MultinomialOutput(act.mean(axis=1))
 
-    def nll(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
+    def nll(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
         mask = None if mask is None else mask[..., 0]
         return safe_softmax_cross_entropy(self.logits, x).mean(where=mask)
 
-    def metrics(self, x: jax.Array, mask: Optional[jax.Array]):
+    def metrics(self, x: jax.Array, mask: Optional[jax.Array] = None):
         return {"NLL": self.nll(x, mask)}
 
 
@@ -135,13 +135,13 @@ class BetaOutput(DistributionOutput):
     beta: jax.Array
 
     @classmethod
-    def from_conditional_np(cls, output: jax.Array, min_std: float = 0.0, **kwargs):
-        alpha, beta = jnp.split(output, 2, axis=-1)
+    def from_activations(cls, act: jax.Array, min_std: float = 0.0, **kwargs):
+        alpha, beta = jnp.split(act, 2, axis=-1)
         return BetaOutput(softplus(alpha), softplus(beta))
 
     @classmethod
-    def from_latent_np(cls, output: jax.Array, min_std: float = 0.0, **kwargs):
-        alpha, beta = jnp.split(output, 2, axis=-1)
+    def from_latent_activations(cls, act: jax.Array, min_std: float = 0.0, **kwargs):
+        alpha, beta = jnp.split(act, 2, axis=-1)
         alpha, beta = (alpha.mean(axis=1), beta.mean(axis=1))  # average latent samples
         return BetaOutput(softplus(alpha), softplus(beta))
 
@@ -154,11 +154,11 @@ class BetaOutput(DistributionOutput):
         a, b = self.alpha, self.beta
         return jnp.sqrt(a * b / (jnp.square(a + b) * (a + b + 1)))
 
-    def nll(self, x: jax.Array, mask: Optional[jax.Array], **kwargs):
+    def nll(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
         mask = None if mask is None else mask[..., 0]
         return -stats.beta.logpdf(x, self.alpha, self.beta).mean(where=mask)
 
-    def metrics(self, x: jax.Array, mask: Optional[jax.Array]):
+    def metrics(self, x: jax.Array, mask: Optional[jax.Array] = None):
         return {"NLL": self.nll(x, mask)}
 
 
