@@ -3,6 +3,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Optional
 
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from jax import jit
@@ -117,7 +118,7 @@ class MultinomialOutput(DistributionOutput):
         mask = None if mask is None else mask[..., 0]
         return safe_softmax_cross_entropy(self.logits, x).mean(where=mask)
 
-    def metrics(self, x: jax.Array, mask: Optional[jax.Array] = None):
+    def metrics(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
         return {"NLL": self.nll(x, mask)}
 
 
@@ -158,7 +159,7 @@ class BetaOutput(DistributionOutput):
         mask = None if mask is None else mask[..., 0]
         return -stats.beta.logpdf(x, self.alpha, self.beta).mean(where=mask)
 
-    def metrics(self, x: jax.Array, mask: Optional[jax.Array] = None):
+    def metrics(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
         return {"NLL": self.nll(x, mask)}
 
 
@@ -168,3 +169,25 @@ jax.tree_util.register_pytree_node(
     lambda d: ((d.alpha, d.beta), None),
     lambda _aux, children: BetaOutput(*children),
 )
+
+
+@dataclass(frozen=True)
+class MDNOutput(DistributionOutput):
+    pi: jax.Array  # [B, K]
+    mu: jax.Array  # [B, K]
+    std: jax.Array  # [B, K]
+
+    @classmethod
+    def from_activations(cls, act: jax.Array, min_std: float = 0.0, **kwargs):
+        pi_logits, mu, std = jnp.split(act, 3, axis=-1)
+        pi = nn.softmax(pi_logits, axis=-1)
+        std = min_std + (1 - min_std) * nn.softplus(std)
+        return MDNOutput(pi, mu, std)
+
+    def nll(self, x: jax.Array, **kwargs):
+        x = x[:, None] if x.ndim == 1 else x  # x: [B, 1]
+        lik = jnp.sum(self.pi * stats.norm.pdf(x, self.mu, self.std), axis=-1)
+        return -jnp.log(lik).mean()
+
+    def metrics(self, x: jax.Array, **kwargs):
+        return {"NLL": self.nll(x)}
