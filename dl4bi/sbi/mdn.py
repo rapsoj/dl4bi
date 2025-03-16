@@ -11,6 +11,6 @@ class MLPMDN(nn.Module):
     num_layers: int = 3
 
     @nn.compact
-    def __call__(self, x: jax.Array):
+    def __call__(self, x: jax.Array, **kwargs):
         params = MLP([self.num_hidden] * self.num_layers + [3 * self.k])(x)
         return MDNOutput.from_activations(params)

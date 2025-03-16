@@ -178,7 +178,7 @@ class MDNOutput(DistributionOutput):
     std: jax.Array  # [B, K]
 
     @classmethod
-    def from_activations(cls, act: jax.Array, min_std: float = 0.0, **kwargs):
+    def from_activations(cls, act: jax.Array, min_std: float = 1e-5, **kwargs):
         pi_logits, mu, std = jnp.split(act, 3, axis=-1)
         pi = nn.softmax(pi_logits, axis=-1)
         std = min_std + (1 - min_std) * nn.softplus(std)

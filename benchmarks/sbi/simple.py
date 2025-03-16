@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 import hydra
@@ -26,6 +27,7 @@ def main(cfg: DictConfig):
         project=cfg.project,
         reinit=True,  # allows reinitialization for multiple runs
     )
+    print(cfg.data.simulator)
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     dataloader = build_dataloader(cfg.data)
@@ -51,30 +53,52 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
         dataloader,
     )
-    path = f"results/{cfg.project}/{cfg.model}/{cfg.seed}/{run_name}"
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save_ckpt(state, cfg, path.with_suffix(".ckpt"))
+    batch = next(dataloader(rng))
+    output = state.apply_fn({"params": state.params}, batch["x"])
+    if output.mu.shape == batch["theta"].shape:
+        print(jnp.stack([batch["theta"], output.mu, output.std], axis=-1)[:10])
+    if cfg.save_ckpt:
+        path = f"results/{cfg.project}/{cfg.model}/{cfg.seed}/{run_name}"
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        save_ckpt(state, cfg, path.with_suffix(".ckpt"))
+
+
+@partial(jit, static_argnames=("cfg",))
+def simple_gaussian(rng: jax.Array, cfg: DictConfig):
+    rng_theta, rng_noise = random.split(rng, 2)
+    theta = random.uniform(
+        rng_theta,
+        (cfg.batch_size, 1),
+        jnp.float32,
+        cfg.theta.min,
+        cfg.theta.max,
+    )
+    noise = cfg.noise * random.normal(rng_noise, theta.shape)
+    return {"x": theta + noise, "theta": theta}
+
+
+@partial(jit, static_argnames=("cfg",))
+def theta_cubed(rng: jax.Array, cfg: DictConfig):
+    rng_theta, rng_noise = random.split(rng, 2)
+    theta = random.uniform(
+        rng_theta,
+        (cfg.batch_size, 1),
+        jnp.float32,
+        cfg.theta.min,
+        cfg.theta.max,
+    )
+    noise = cfg.noise * random.normal(rng_noise, theta.shape)
+    return {"x": theta**3 + noise, "theta": theta}
 
 
 def build_dataloader(cfg: DictConfig):
-    @jit
-    def gen_batch(rng: jax.Array):
-        rng_theta, rng_noise, rng = random.split(rng, 3)
-        theta = random.uniform(
-            rng_theta,
-            (cfg.batch_size, 1),
-            jnp.float32,
-            cfg.theta.min,
-            cfg.theta.max,
-        )
-        noise = cfg.noise * random.normal(rng_noise, theta.shape)
-        return {"x": theta + noise, "theta": theta}
+    simulator = globals()[cfg.simulator]
 
     def dataloader(rng: jax.Array):
         while True:
             rng_i, rng = random.split(rng)
-            yield gen_batch(rng_i)
+            yield simulator(rng_i, cfg)
 
     return dataloader
 
