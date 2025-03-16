@@ -168,7 +168,7 @@ def load_ckpt(path: Union[str, Path]):
 def cosine_annealing_lr(
     num_steps: int = 100000,
     peak_lr: float = 1e-3,
-    pct_warmup: float = 0.0,
+    pct_warmup: float = 0.01,
     num_cycles: int = 1,
 ):
     """Create an n-cycle cosine annealing schedule."""

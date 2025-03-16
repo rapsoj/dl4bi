@@ -13,7 +13,7 @@ from jax import jit, random
 from omegaconf import DictConfig, OmegaConf
 
 from dl4bi.core.train import cosine_annealing_lr, save_ckpt, train
-from dl4bi.sbi.steps import train_step, valid_step
+from dl4bi.sbi.steps import TrainState, train_step, valid_step
 
 
 @hydra.main("configs/simple", config_name="default", version_base=None)
@@ -53,10 +53,6 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
         dataloader,
     )
-    batch = next(dataloader(rng))
-    output = state.apply_fn({"params": state.params}, batch["x"])
-    if output.mu.shape == batch["theta"].shape:
-        print(jnp.stack([batch["theta"], output.mu, output.std], axis=-1)[:10])
     if cfg.save_ckpt:
         path = f"results/{cfg.project}/{cfg.model}/{cfg.seed}/{run_name}"
         path = Path(path)
@@ -101,6 +97,17 @@ def build_dataloader(cfg: DictConfig):
             yield simulator(rng_i, cfg)
 
     return dataloader
+
+
+# TODO(danj): plot these...
+def sample(rng: jax.Array, state: TrainState, x: jax.Array, num_samples: int):
+    rng_id, rng_eps = random.split(rng)
+    output = state.apply_fn({"params": state.params}, x)
+    id = random.categorical(rng_id, output.pi, shape=(num_samples,))
+    mu = output.mu[id]
+    std = output.std[id]
+    eps = random.normal(rng_eps, shape=(n_samples,))
+    return mu + eps * std
 
 
 if __name__ == "__main__":

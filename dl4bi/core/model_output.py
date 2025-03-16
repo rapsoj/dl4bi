@@ -6,6 +6,7 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from jax.scipy.special import logsumexp
 from jax import jit
 from jax.nn import softmax, softplus
 from jax.scipy import stats
@@ -186,8 +187,9 @@ class MDNOutput(DistributionOutput):
 
     def nll(self, x: jax.Array, **kwargs):
         x = x[:, None] if x.ndim == 1 else x  # x: [B, 1]
-        lik = jnp.sum(self.pi * stats.norm.pdf(x, self.mu, self.std), axis=-1)
-        return -jnp.log(lik).mean()
+        ll = stats.norm.logpdf(x, self.mu, self.std)
+        ll = logsumexp(ll, axis=-1, b=self.pi)
+        return -ll.mean()
 
     def metrics(self, x: jax.Array, **kwargs):
         return {"NLL": self.nll(x)}
