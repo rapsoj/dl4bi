@@ -6,7 +6,9 @@ from pathlib import Path
 import hydra
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import optax
+import seaborn as sns
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random
@@ -30,6 +32,7 @@ def main(cfg: DictConfig):
     print(cfg.data.simulator)
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
+    rng_train, rng_sample = random.split(rng)
     dataloader = build_dataloader(cfg.data)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
@@ -42,7 +45,7 @@ def main(cfg: DictConfig):
     )
     model = instantiate(cfg.model)
     state = train(
-        rng,
+        rng_train,
         model,
         optimizer,
         train_step,
@@ -53,6 +56,9 @@ def main(cfg: DictConfig):
         cfg.valid_num_steps,
         dataloader,
     )
+    samples = sample(rng_sample, state, x=jnp.array([[cfg.sample.x]]))
+    sns.kdeplot(samples, fill=True)
+    plt.savefig("/tmp/hist.png", dpi=300)
     if cfg.save_ckpt:
         path = f"results/{cfg.project}/{cfg.model}/{cfg.seed}/{run_name}"
         path = Path(path)
@@ -100,13 +106,13 @@ def build_dataloader(cfg: DictConfig):
 
 
 # TODO(danj): plot these...
-def sample(rng: jax.Array, state: TrainState, x: jax.Array, num_samples: int):
+def sample(rng: jax.Array, state: TrainState, x: jax.Array, num_samples: int = 10000):
     rng_id, rng_eps = random.split(rng)
     output = state.apply_fn({"params": state.params}, x)
-    id = random.categorical(rng_id, output.pi, shape=(num_samples,))
-    mu = output.mu[id]
-    std = output.std[id]
-    eps = random.normal(rng_eps, shape=(n_samples,))
+    id = random.categorical(rng_id, output.pi_logits[0], shape=(num_samples,))
+    mu = output.mu[0, id]
+    std = output.std[0, id]
+    eps = random.normal(rng_eps, shape=(num_samples,))
     return mu + eps * std
 
 

@@ -6,10 +6,10 @@ from typing import Optional
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from jax.scipy.special import logsumexp
 from jax import jit
 from jax.nn import softmax, softplus
 from jax.scipy import stats
+from jax.scipy.special import logsumexp
 from optax.losses import safe_softmax_cross_entropy
 
 
@@ -174,9 +174,13 @@ jax.tree_util.register_pytree_node(
 
 @dataclass(frozen=True)
 class MDNOutput(DistributionOutput):
-    pi: jax.Array  # [B, K]
+    pi_logits: jax.Array  # [B, K]
     mu: jax.Array  # [B, K]
     std: jax.Array  # [B, K]
+
+    @property
+    def pi(self):
+        return nn.softmax(self.pi_logits, axis=-1)
 
     @classmethod
     def from_activations(cls, act: jax.Array, min_std: float = 1e-5, **kwargs):
@@ -186,9 +190,9 @@ class MDNOutput(DistributionOutput):
         return MDNOutput(pi, mu, std)
 
     def nll(self, x: jax.Array, **kwargs):
-        x = x[:, None] if x.ndim == 1 else x  # x: [B, 1]
+        x = x[None, :] if x.ndim == 1 else x  # x: [B, 1]
         ll = stats.norm.logpdf(x, self.mu, self.std)
-        ll = logsumexp(ll, axis=-1, b=self.pi)
+        ll = logsumexp(self.pi_logits + ll, axis=-1)
         return -ll.mean()
 
     def metrics(self, x: jax.Array, **kwargs):
