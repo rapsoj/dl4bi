@@ -1,5 +1,5 @@
-name: space_128x128
-type: space
+name: spatial_128x128
+type: spatial
 s:
   - start: -4
     stop: 4

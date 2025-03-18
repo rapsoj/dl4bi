@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap
 
-from .sim import dist_spatial, dist_spatiotemporal
+from .sim import dist_spatiotemporal, l2_dist
 
 
 @partial(jit, static_argnames=("k", "num_q_parallel", "recall_target"))
@@ -36,7 +36,7 @@ def approx_knn(
     def process_batch(q_i: jax.Array):
         # add leading dim to q_i since map processes each q_i individually,
         # even when batch_size is >= 1
-        d = dist_spatial(q_i[None, :], r).flatten()
+        d = l2_dist(q_i[None, :], r).flatten()
         d, idx = jax.lax.approx_min_k(d, k, recall_target=recall_target)
         return idx, d[:, None]
 
@@ -67,7 +67,7 @@ def bf_knn(
     def process_batch(q_i: jax.Array):
         # add leading dim to q_i since map processes each q_i individually,
         # even when batch_size is >= 1
-        d = dist_spatial(q_i[None, ...], r).flatten()
+        d = l2_dist(q_i[None, ...], r).flatten()
         idx = jnp.argsort(d)[:k]
         return idx, d[idx, None]
 

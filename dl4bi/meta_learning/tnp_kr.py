@@ -8,8 +8,8 @@ from jax import jit, vmap
 
 from ..core.attention import MultiHeadAttention, RBFNetworkBiasedScanAttention
 from ..core.mlp import MLP
-from ..core.transformer import KRBlock
 from ..core.model_output import DiagonalMVNOutput
+from ..core.transformer import KRBlock
 from .steps import likelihood_train_step, likelihood_valid_step
 
 
@@ -82,7 +82,7 @@ class TNPKR(nn.Module):
         self,
         x_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_x]
         s_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_s]
-        t_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_s]
+        t_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_t]
         f_ctx: Optional[jax.Array] = None,  # [B, L_ctx, D_f]
         mask_ctx: Optional[jax.Array] = None,  # [B, L_ctx]
         x_test: Optional[jax.Array] = None,  # [B, L_test, D_x]

@@ -1,5 +1,5 @@
-name: space_1024x1024
-type: space
+name: spatial_1024x1024
+type: spatial
 s:
   - start: -32
     stop: 32

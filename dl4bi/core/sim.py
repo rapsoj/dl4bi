@@ -24,7 +24,7 @@ def dist_spatiotemporal(
     For example, for `q[i] = [x=2, y=3, t=1]` and `r[j] = [x=1, y=0, t=0]`,
     this will return `m[i, j] = [sqrt(10), -1]`.
     """
-    d_s = dist_spatial(q[..., :-1], r[..., :-1])  # [Q, R, 1] L2 dist
+    d_s = l2_dist(q[..., :-1], r[..., :-1])  # [Q, R, 1] L2 dist
     d_t = -q[..., [-1]] + r[..., [-1]].T  # [Q, R] L1 temporal dist
     d = jnp.concatenate([d_s, d_t[..., None]], axis=-1)  # [Q, R, 2]
     if causal_t:  # set distances to inf for future timesteps
@@ -33,5 +33,9 @@ def dist_spatiotemporal(
 
 
 @jit
-def dist_spatial(q: jax.Array, r: jax.Array):
-    return l2_dist(q, r)
+def causal_time(
+    q: jax.Array,  # [Q, 1]
+    r: jax.Array,  # [R, 1]
+):
+    d = r.T - q
+    return jnp.where(d > 0, jnp.inf, d)

@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 from jax import jit, vmap
 
-from .sim import dist_spatial
+from .sim import l2_dist
 
 
 class DistanceBias(nn.Module):
@@ -52,7 +52,7 @@ class RBFNetworkBias(nn.Module):
     @nn.compact
     def __call__(
         self,
-        d: jax.Array,  # [B, Q, K, D] or [E, D]
+        d: jax.Array,  # [B, Q, K] or [E]
         mask: Optional[jax.Array] = None,  # None or [B, Q, K] or [E]
     ):
         a = self.param("a", init.constant(1), (self.num_heads, self.num_basis))
@@ -93,7 +93,7 @@ def scanned_rbf_network_bias(
     ks_meta: jax.Array,  # [B, K, M]
     a: jax.Array,  # [H, F]
     b: jax.Array,  # [H, F]
-    func: Callable = dist_spatial,
+    func: Callable = l2_dist,
 ):
     d = vmap(func)(qs_meta, ks_meta)  # [B, Q, K]
     mask = jnp.isfinite(d)
@@ -154,7 +154,7 @@ def scanned_tisa_bias(
     a: jax.Array,  # [H, F]
     b: jax.Array,  # [H, F]
     c: jax.Array,  # [H, F]
-    func: Callable = dist_spatial,
+    func: Callable = l2_dist,
 ):
     d = vmap(func)(qs_meta, ks_meta)  # [B, Q, K]
     mask = jnp.isfinite(d)

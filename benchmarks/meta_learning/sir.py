@@ -23,6 +23,7 @@ from dl4bi.core.train import (
     train,
 )
 from dl4bi.meta_learning.data.spatial import SpatialData
+from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData
 from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
 
 # Example command to evaluate only:
@@ -49,9 +50,10 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader, valid_dataloader, clbk_dataloader = build_dataloader(
-        cfg.data, cfg.sim
-    )
+    build = build_spatial_dataloader
+    if cfg.data.type == "spatiotemporal":
+        build = build_spatiotemporal_dataloader
+    train_dataloader, valid_dataloader, clbk_dataloader = build(cfg.data, cfg.sim)
     lr_schedule = cosine_annealing_lr(
         cfg.train_num_steps,
         cfg.lr_peak,
@@ -109,7 +111,7 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def build_dataloader(data: DictConfig, priors: DictConfig):
+def build_spatial_dataloader(data: DictConfig, priors: DictConfig):
     """A 2D Lattice SIR dataloader over space only."""
     B = data.batch_size
     sir = instantiate(priors)
@@ -134,6 +136,40 @@ def build_dataloader(data: DictConfig, priors: DictConfig):
                     L if is_callback else data.num_test,
                     test_includes_ctx=True,
                     batch_size=B,
+                )
+
+    return dataloader, dataloader, partial(dataloader, is_callback=True)
+
+
+def build_spatiotemporal_dataloader(data: DictConfig, priors: DictConfig):
+    """A 2D Lattice SIR dataloader over space and time."""
+    B = data.batch_size
+    sir = instantiate(priors)
+    s = build_grid(data.s)
+    s = jnp.repeat(s[None, ...], data.num_steps, axis=0)
+    t = jnp.arange(data.num_steps)
+    dims = tuple(axis.num for axis in data.s)
+    L = math.prod(dims)
+
+    def dataloader(rng: jax.Array, is_callback: bool = False):
+        while True:
+            steps = None  # signal garbage collection
+            rng_i, rng = random.split(rng)
+            steps, *_ = sir.simulate(rng_i, dims, data.num_steps)
+            steps = rsi_to_rgb(steps)
+            d = SpatiotemporalData(x=None, s=s, t=t, f=steps)
+            for b in range(data.num_steps // B):
+                rng_b, rng = random.split(rng)
+                yield d.batch(
+                    rng_b,
+                    data.num_t,
+                    data.random_t,
+                    data.num_ctx_per_t.min,
+                    data.num_ctx_per_t.max,
+                    data.independent_t_masks,
+                    L if is_callback else data.num_test,
+                    data.forecast,
+                    data.batch_size,
                 )
 
     return dataloader, dataloader, partial(dataloader, is_callback=True)

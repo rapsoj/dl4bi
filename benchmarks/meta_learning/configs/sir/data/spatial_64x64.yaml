@@ -1,5 +1,5 @@
-name: space_64x64
-type: space
+name: spatial_64x64
+type: spatial
 s:
   - start: -2
     stop: 2
