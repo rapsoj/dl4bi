@@ -279,11 +279,11 @@ def approx_knn(
     def process_batch(i):
         d_x = d_s = d_t = 0
         if exists(q_x, x_sim):
-            d_x = x_sim(q_x[[i]], r_x).squeeze()  # [R]
+            d_x = x_sim(q_x[[i], :], r_x).squeeze()  # [R]
         if exists(q_s, s_sim):
-            d_s = s_sim(q_s[[i]], r_s).squeeze()  # [R]
+            d_s = s_sim(q_s[[i], :], r_s).squeeze()  # [R]
         if exists(q_t, t_sim):
-            d_t = t_sim(q_t[[i]], r_t).squeeze()  # [R]
+            d_t = t_sim(q_t[[i], :], r_t).squeeze()  # [R]
             if causal_t:
                 d_t = jnp.where(d_t <= 0, d_t, jnp.inf)
         k_x, k_s, k_t = scale_x_sim, scale_s_sim, scale_t_sim
