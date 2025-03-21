@@ -100,7 +100,6 @@ class TNPKR(nn.Module):
         Returns:
             `ModelOutput`.
         """
-        norm = nn.LayerNorm()
         test_shape = first_shape([x_test, s_test, t_test])
         f_test = jnp.zeros((*test_shape[:-1], f_ctx.shape[-1]))
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
@@ -119,6 +118,7 @@ class TNPKR(nn.Module):
             self.embed_t(t_test),
             self.embed_f(f_test),
         )
+        norm = nn.LayerNorm()
         qvs, kvs = map(lambda x: norm(self.embed_all(x)), (test, ctx))
         qk_kwargs = dict(
             qs_x=x_test,
