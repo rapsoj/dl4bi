@@ -107,7 +107,6 @@ class SGNP(nn.Module):
         training: bool = False,
         **kwargs,
     ):
-        norm = nn.LayerNorm()
         test_shape = first_shape([x_test, s_test, t_test])
         f_test = jnp.zeros((*test_shape[:-1], f_ctx.shape[-1]))
         obs = jnp.ones(f_ctx.shape[:-1], dtype=jnp.uint8)
@@ -126,7 +125,8 @@ class SGNP(nn.Module):
             self.embed_t(t_test),
             self.embed_f(f_test),
         )
-        test, ctx = map(lambda x: norm(self.embed_all(x)), (test, ctx))
+        norm = nn.LayerNorm()
+        ctx, test = map(lambda x: norm(self.embed_all(x)), (ctx, test))
         # nodes for the graph are all the context nodes followed by all test nodes
         (B, N_t), N_c = test_shape[:-1], f_ctx.shape[1]
         nodes = jnp.vstack([ctx.reshape(B * N_c, -1), test.reshape(B * N_t, -1)])
@@ -164,8 +164,7 @@ class SGNP(nn.Module):
                 # NOTE: bucket_size is for numerical stability in
                 # jax.ops.segment_* calls; this is typically only needed for
                 # testing implementation correctness
-                # g = blk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
-                g = blk(g, training, bucket_size=kwargs.get("bucket_size"))
+                g = blk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
         nodes_test = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         output = self.head(nodes_test, training)
         return self.output_fn(output)
@@ -280,11 +279,11 @@ def approx_knn(
     def process_batch(i):
         d_x = d_s = d_t = 0
         if exists(q_x, x_sim):
-            d_x = x_sim(q_x[[i], :], r_x).squeeze()  # [R]
+            d_x = x_sim(q_x[[i]], r_x).squeeze()  # [R]
         if exists(q_s, s_sim):
-            d_s = s_sim(q_s[[i], :], r_s).squeeze()  # [R]
+            d_s = s_sim(q_s[[i]], r_s).squeeze()  # [R]
         if exists(q_t, t_sim):
-            d_t = t_sim(q_t[[i], :], r_t).squeeze()  # [R]
+            d_t = t_sim(q_t[[i]], r_t).squeeze()  # [R]
             if causal_t:
                 d_t = jnp.where(d_t <= 0, d_t, jnp.inf)
         k_x, k_s, k_t = scale_x_sim, scale_s_sim, scale_t_sim

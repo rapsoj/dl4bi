@@ -2,7 +2,6 @@ import flax.linen as nn
 from jraph import GraphsTuple
 
 from .attention import MultiHeadGraphAttention
-from .bias import RBFNetworkBias
 from .mlp import MLP
 
 
