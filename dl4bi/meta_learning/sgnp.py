@@ -14,8 +14,6 @@ from ..core.utils import exists, safe_stack
 from .steps import likelihood_train_step, likelihood_valid_step
 from .utils import first_shape
 
-# TODO(danj): debug!!
-
 
 class SGNP(nn.Module):
     r"""Sparse Graph Neural Process (SGNP).
@@ -66,7 +64,7 @@ class SGNP(nn.Module):
         $d^2 = (k_x\cdot d_x)^2+(k_s\cdot d_s)^2+(k_t\cdot d_t)^2$
     """
 
-    k: int = 16
+    k: int = 32
     num_blks: int = 6
     num_reps: int = 1
     embed_x: Callable = lambda x: x
