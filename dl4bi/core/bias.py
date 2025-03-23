@@ -45,6 +45,18 @@ def scalar_bias(
     return d_a  # [B, H, Q, K]
 
 
+@partial(jit, static_argnames=("func",))
+def scanned_scalar_bias(
+    qs_meta: jax.Array,  # [B, Q, M]
+    ks_meta: jax.Array,  # [B, K, M]
+    a: jax.Array,  # [H, F]
+    func: Callable = l2_dist,
+):
+    d = vmap(func)(qs_meta, ks_meta)  # [B, Q, K]
+    mask = jnp.isfinite(d)
+    return scalar_bias(d, mask, a)
+
+
 class RBFNetworkBias(nn.Module):
     num_heads: int = 4
     num_basis: int = 5

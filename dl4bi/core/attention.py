@@ -12,8 +12,9 @@ from einops import rearrange
 from jax import jit, lax, random
 from jax.lax import scan
 
-from .bias import scanned_rbf_network_bias, scanned_tisa_bias
+from .bias import scanned_rbf_network_bias, scanned_scalar_bias, scanned_tisa_bias
 from .mlp import MLP
+from .utils import exists
 
 
 def gaussian_orf(key: jax.Array, m: int, d: int, structured: bool = True):
@@ -420,6 +421,51 @@ def scan_ks(
     return os / row_sums
 
 
+# TODO(danj): finish
+class BiasedScanAttention(nn.Module):
+    r"""Performs query-key-value attention with arbitrary bias functions.
+
+    Args:
+        qs_chunk_size: Number of queries to process in each chunk of scan.
+        ks_chunk_size: Number of keys to process in each chunk of scan.
+
+    Returns:
+        An `BiasedScanAttention` module.
+    """
+
+    x_bias_func: Optional[Callable] = None
+    s_bias_func: Optional[Callable] = None
+    t_bias_func: Optional[Callable] = None
+    qs_chunk_size: int = 1024
+    ks_chunk_size: int = 1024
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, H, Q, D_qk]
+        ks: jax.Array,  # [B, H, K, D_qk]
+        vs: jax.Array,  # [B, H, K, D_v]
+        mask: Optional[jax.Array] = None,  # [B, K]
+        training: bool = False,
+        **kwargs,
+    ):
+        r"""Performs forward pass of network.
+
+        Args:
+            qs: Queries of shape [B, H, Q, D_qk].
+            ks: Keys of shape [B, H, Q, D_qk].
+            vs: Values of shape [B, H, K, D_v].
+            mask: Mask for keys and values of shape [B, K].
+            training: Boolean indicating whether currently training.
+            qs_s: Query locations of shape [B, Q, D_s].
+            ks_s: Key locations of shape [B, K, D_s].
+
+        Returns:
+            `ctx` and `attn`, the updated values and None, respectively,
+            since scanned attention never materializes the attention matrix.
+        """
+
+
 class RBFNetworkBiasedScanAttention(nn.Module):
     r"""Performs query-key-value attention with a scan and an RBF network bias
         for reduced memory usage.
@@ -455,8 +501,8 @@ class RBFNetworkBiasedScanAttention(nn.Module):
             vs: Values of shape [B, H, K, D_v].
             mask: Mask for keys and values of shape [B, K].
             training: Boolean indicating whether currently training.
-            qs_locs: Query locations of shape [B, Q, D_s].
-            ks_locs: Key locations of shape [B, K, D_s].
+            qs_s: Query locations of shape [B, Q, D_s].
+            ks_s: Key locations of shape [B, K, D_s].
 
         Returns:
             `ctx` and `attn`, the updated values and None, respectively,
@@ -469,13 +515,13 @@ class RBFNetworkBiasedScanAttention(nn.Module):
             qs,
             ks,
             vs,
-            kwargs["qs_s"],  # [B, Q, D_s]
-            kwargs["ks_s"],  # [B, Q, D_s]
             mask,
-            self.qs_chunk_size,
-            self.ks_chunk_size,
-            bias_func=scanned_rbf_network_bias,
-            bias_kwargs={"a": a, "b": b},
+            qs_s=kwargs["qs_s"],  # [B, Q, D_s]
+            ks_s=kwargs["ks_s"],  # [B, Q, D_s]
+            s_bias_func=scanned_rbf_network_bias,
+            s_bias_kwargs={"a": a, "b": b},
+            qs_chunk_size=self.qs_chunk_size,
+            ks_chunk_size=self.ks_chunk_size,
         ), None
 
 
@@ -514,8 +560,8 @@ class TISABiasedScanAttention(nn.Module):
             vs: Values of shape [B, H, K, D_v].
             mask: Mask for keys and values of shape [B, K].
             training: Boolean indicating whether currently training.
-            qs_locs: Query locations of shape [B, Q, D_s].
-            ks_locs: Key locations of shape [B, K, D_s].
+            qs_s: Query locations of shape [B, Q, D_s].
+            ks_s: Key locations of shape [B, K, D_s].
 
         Returns:
             `ctx` and `attn`, the updated values and None, respectively,
@@ -529,53 +575,89 @@ class TISABiasedScanAttention(nn.Module):
             qs,
             ks,
             vs,
-            kwargs["qs_s"],  # [B, Q, D_s]
-            kwargs["ks_s"],  # [B, Q, D_s]
             mask,
-            self.qs_chunk_size,
-            self.ks_chunk_size,
-            bias_func=scanned_tisa_bias,
-            bias_kwargs={"a": a, "b": b, "c": c},
+            qs_s=kwargs["qs_s"],  # [B, Q, D_s]
+            ks_s=kwargs["ks_s"],  # [B, Q, D_s]
+            s_bias_func=scanned_tisa_bias,
+            s_bias_kwargs={"a": a, "b": b, "c": c},
+            qs_chunk_size=self.qs_chunk_size,
+            ks_chunk_size=self.ks_chunk_size,
         ), None
 
 
-@partial(jit, static_argnames=("qs_chunk_size", "ks_chunk_size", "bias_func"))
+@partial(
+    jit,
+    static_argnames=(
+        "x_bias_func",
+        "s_bias_func",
+        "t_bias_func",
+        "qs_chunk_size",
+        "ks_chunk_size",
+    ),
+)
 def biased_scan_attention(
     qs: jax.Array,  # [B, H, Q, D_qk]
     ks: jax.Array,  # [B, H, K, D_qk]
     vs: jax.Array,  # [B, H, K, D_v]
-    qs_meta: jax.Array,  # [B, Q, M]
-    ks_meta: jax.Array,  # [B, K, M]
     mask: Optional[jax.Array] = None,  # [B, K]
+    qs_x: Optional[jax.Array] = None,  # [B, Q, D_x]
+    ks_x: Optional[jax.Array] = None,  # [B, K, D_x]
+    x_bias_func: Optional[Callable] = scanned_rbf_network_bias,
+    x_bias_kwargs: dict = {},
+    qs_s: Optional[jax.Array] = None,  # [B, Q, D_s]
+    ks_s: Optional[jax.Array] = None,  # [B, K, D_s]
+    s_bias_func: Optional[Callable] = scanned_rbf_network_bias,
+    s_bias_kwargs: dict = {},
+    qs_t: Optional[jax.Array] = None,  # [B, Q, D_t]
+    ks_t: Optional[jax.Array] = None,  # [B, K, D_t]
+    t_bias_func: Optional[Callable] = scanned_scalar_bias,
+    t_bias_kwargs: dict = {},
     qs_chunk_size: int = 1024,
     ks_chunk_size: int = 1024,
-    bias_func: Callable = scanned_tisa_bias,  # (q_meta, k_meta, **bias_kwargs) -> bias
-    bias_kwargs: dict = {},
 ):
-    (B, H, Q, D), M = qs.shape, qs_meta.shape[-1]
+    B, H, Q, D = qs.shape
     Q_c = min(Q, qs_chunk_size)
 
     # JAX/numpy store data in row major format, so (theoretically) putting the
     # scanned axes first improves cache locality
     qs, ks, vs = map(lambda x: rearrange(x, "B H L D -> L B H D"), (qs, ks, vs))
-    qs_meta, ks_meta = map(lambda x: rearrange(x, "B L M -> L B M"), (qs_meta, ks_meta))
+    reshape_meta = jit(lambda x: rearrange(x, "B L M -> L B M") if exists(x) else None)
+    meta = (qs_x, ks_x, qs_s, ks_s, qs_t, ks_t)
+    qs_x, ks_x, qs_s, ks_s, qs_t, ks_t = map(reshape_meta, meta)
     if mask is not None:
         mask = rearrange(mask, "B K -> K B")
 
     @jit
     def qs_scanner(i, _):
         qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (Q_c, B, H, D))
-        qs_meta_chunk = lax.dynamic_slice(qs_meta, (i, 0, 0), (Q_c, B, M))
+        qs_x_chunk = qs_s_chunk = qs_t_chunk = None
+        if qs_x is not None:
+            D_x = qs_x.shape[-1]
+            qs_x_chunk = lax.dynamic_slice(qs_x, (i, 0, 0), (Q_c, B, D_x))
+        if qs_s is not None:
+            D_s = qs_s.shape[-1]
+            qs_s_chunk = lax.dynamic_slice(qs_s, (i, 0, 0), (Q_c, B, D_s))
+        if qs_t is not None:
+            D_t = qs_t.shape[-1]
+            qs_t_chunk = lax.dynamic_slice(qs_t, (i, 0, 0), (Q_c, B, D_t))
         return i + Q_c, biased_scan_ks(
             qs_chunk,
             ks,
             vs,
-            qs_meta_chunk,
-            ks_meta,
             mask,
+            qs_x_chunk,
+            ks_x,
+            x_bias_func,
+            x_bias_kwargs,
+            qs_s_chunk,
+            ks_s,
+            s_bias_func,
+            s_bias_kwargs,
+            qs_t_chunk,
+            ks_t,
+            t_bias_func,
+            t_bias_kwargs,
             ks_chunk_size,
-            bias_func,
-            bias_kwargs,
         )
 
     i, os = scan(
@@ -590,17 +672,34 @@ def biased_scan_attention(
     remainder = Q % Q_c
     if remainder:
         qs_chunk = lax.dynamic_slice(qs, (i, 0, 0, 0), (remainder, B, H, D))
-        qs_meta_chunk = lax.dynamic_slice(qs_meta, (i, 0, 0), (remainder, B, M))
+        qs_x_chunk = qs_s_chunk = qs_t_chunk = None
+        if qs_x is not None:
+            D_x = qs_x.shape[-1]
+            qs_x_chunk = lax.dynamic_slice(qs_x, (i, 0, 0), (remainder, B, D_x))
+        if qs_s is not None:
+            D_s = qs_s.shape[-1]
+            qs_s_chunk = lax.dynamic_slice(qs_s, (i, 0, 0), (remainder, B, D_s))
+        if qs_t is not None:
+            D_t = qs_t.shape[-1]
+            qs_s_chunk = lax.dynamic_slice(qs_t, (i, 0, 0), (remainder, B, D_t))
         os_chunk = biased_scan_ks(
             qs_chunk,
             ks,
             vs,
-            qs_meta_chunk,
-            ks_meta,
             mask,
+            qs_x_chunk,
+            ks_x,
+            x_bias_func,
+            x_bias_kwargs,
+            qs_s_chunk,
+            ks_s,
+            s_bias_func,
+            s_bias_kwargs,
+            qs_t_chunk,
+            ks_t,
+            t_bias_func,
+            t_bias_kwargs,
             ks_chunk_size,
-            bias_func,
-            bias_kwargs,
         )
         os_chunk = rearrange(os_chunk, "Q B H D -> B H Q D")
         os = jnp.concatenate([os, os_chunk], axis=2)
@@ -612,14 +711,22 @@ def biased_scan_ks(
     qs_chunk: jax.Array,  # [Q_c, B, H, D]
     ks: jax.Array,  # [K, B, H, D]
     vs: jax.Array,  # [K, B, H, D]
-    qs_meta_chunk: jax.Array,  # [Q_c, B, M]
-    ks_meta: jax.Array,  # [K, B, M]
     mask: Optional[jax.Array] = None,  # [K, B]
+    qs_x_chunk: Optional[jax.Array] = None,  # [Q_c, B, D_x]
+    ks_x: Optional[jax.Array] = None,  # [K, B, D_x]
+    x_bias_func: Optional[Callable] = None,
+    x_bias_kwargs: dict = {},
+    qs_s_chunk: Optional[jax.Array] = None,  # [Q_c, B, D_s]
+    ks_s: Optional[jax.Array] = None,  # [K, B, D_s]
+    s_bias_func: Optional[Callable] = None,
+    s_bias_kwargs: dict = {},
+    qs_t_chunk: Optional[jax.Array] = None,  # [Q_c, B, D_t]
+    ks_t: Optional[jax.Array] = None,  # [K, B, D_t]
+    t_bias_func: Optional[Callable] = None,
+    t_bias_kwargs: dict = {},
     ks_chunk_size: int = 1024,
-    bias_func: Callable = scanned_tisa_bias,  # (q_meta, k_meta, **bias_kwargs) -> bias
-    bias_kwargs: dict = {},
 ):
-    (Q_c, B, H, D), (K, _, M) = qs_chunk.shape, ks_meta.shape
+    (Q_c, B, H, D), K = qs_chunk.shape, ks.shape[0]
     K_c = min(K, ks_chunk_size)
     D_v = vs.shape[-1]
     qs_chunk /= jnp.sqrt(D)
@@ -627,30 +734,47 @@ def biased_scan_ks(
     @jit
     def ks_scanner(carry: tuple, _):
         i, os, row_maxs, row_sums = carry
-        ks_chunk, vs_chunk, ks_meta_chunk, mask_chunk = chunk_ks(i, K_c)
+        ks_chunk, vs_chunk, mask_chunk, ks_x_chunk, ks_s_chunk, ks_t_chunk = chunk_ks(
+            i, K_c
+        )
         _carry = update(
             qs_chunk,
             ks_chunk,
             vs_chunk,
-            qs_meta_chunk,
-            ks_meta_chunk,
             mask_chunk,
+            qs_x_chunk,
+            ks_x_chunk,
+            x_bias_kwargs,
+            qs_s_chunk,
+            ks_s_chunk,
+            s_bias_kwargs,
+            qs_t_chunk,
+            ks_t_chunk,
+            t_bias_kwargs,
             os,
             row_maxs,
             row_sums,
-            bias_kwargs,
         )
         return (i + K_c, *_carry), None
 
     def chunk_ks(i, k_c):
         ks_chunk = lax.dynamic_slice(ks, (i, 0, 0, 0), (k_c, B, H, D))
         vs_chunk = lax.dynamic_slice(vs, (i, 0, 0, 0), (k_c, B, H, D_v))
-        ks_meta_chunk = lax.dynamic_slice(ks_meta, (i, 0, 0), (k_c, B, M))
         mask_chunk = jnp.array(True)
         if mask is not None:
             mask_chunk = lax.dynamic_slice(mask, (i, 0), (k_c, B))
             mask_chunk = rearrange(mask_chunk, "K B -> 1 B 1 K")
-        return ks_chunk, vs_chunk, ks_meta_chunk, mask_chunk
+        ks_x_chunk = ks_s_chunk = ks_t_chunk = None
+        if ks_x is not None:
+            D_x = ks_x.shape[-1]
+            ks_x_chunk = lax.dynamic_slice(ks_x, (i, 0, 0), (k_c, B, D_x))
+        if ks_s is not None:
+            D_s = ks_s.shape[-1]
+            ks_s_chunk = lax.dynamic_slice(ks_s, (i, 0, 0), (k_c, B, D_s))
+        if ks_t is not None:
+            D_t = ks_t.shape[-1]
+            ks_t_chunk = lax.dynamic_slice(ks_t, (i, 0, 0), (k_c, B, D_t))
+        return ks_chunk, vs_chunk, mask_chunk, ks_x_chunk, ks_s_chunk, ks_t_chunk
 
     @jit
     @partial(jax.remat, prevent_cse=False)
@@ -658,20 +782,36 @@ def biased_scan_ks(
         qs_chunk,
         ks_chunk,
         vs_chunk,
-        qs_meta_chunk,
-        ks_meta_chunk,
         mask_chunk,
+        qs_x_chunk,
+        ks_x_chunk,
+        x_bias_kwargs,
+        qs_s_chunk,
+        ks_s_chunk,
+        s_bias_kwargs,
+        qs_t_chunk,
+        ks_t_chunk,
+        t_bias_kwargs,
         os,
         row_maxs,
         row_sums,
-        bias_kwargs,
     ):
-        qs_meta_chunk_ = rearrange(qs_meta_chunk, "Q B M -> B Q M")
-        ks_meta_chunk_ = rearrange(ks_meta_chunk, "K B M -> B K M")
-        bias = bias_func(qs_meta_chunk_, ks_meta_chunk_, **bias_kwargs)
-        bias = rearrange(bias, "B H Q K -> Q B H K")
+        to_BLM = lambda x: rearrange(x, "L B M -> B L M")
+        to_QBHK = lambda x: rearrange(x, "B H Q K -> Q B H K")
+        bias = jnp.array(0.0)
+        if qs_x_chunk is not None:
+            qs_x_chunk_, ks_x_chunk_ = map(to_BLM, (qs_x_chunk, ks_x_chunk))
+            x_bias = x_bias_func(qs_x_chunk_, ks_x_chunk_, **x_bias_kwargs)
+            bias += to_QBHK(x_bias)
+        if qs_s_chunk is not None:
+            qs_s_chunk_, ks_s_chunk_ = map(to_BLM, (qs_s_chunk, ks_s_chunk))
+            s_bias = s_bias_func(qs_s_chunk_, ks_s_chunk_, **s_bias_kwargs)
+            bias += to_QBHK(s_bias)
+        if qs_t_chunk is not None:
+            qs_t_chunk_, ks_t_chunk_ = map(to_BLM, (qs_t_chunk, ks_t_chunk))
+            bias += t_bias_func(qs_t_chunk_, ks_t_chunk_, **t_bias_kwargs)
         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk) + bias
-        scores = jnp.where(mask_chunk, scores, -float("inf"))
+        scores = jnp.where(mask_chunk, scores, -jnp.inf)
         row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
         new_row_maxs = jnp.maximum(row_maxs_chunk, row_maxs)
         exp_scores = jnp.exp(scores - new_row_maxs)
@@ -697,18 +837,26 @@ def biased_scan_ks(
     # last block
     remainder = K % K_c
     if remainder:
-        ks_chunk, vs_chunk, ks_meta_chunk, mask_chunk = chunk_ks(i, remainder)
+        ks_chunk, vs_chunk, mask_chunk, ks_x_chunk, ks_s_chunk, ks_t_chunk = chunk_ks(
+            i, remainder
+        )
         os, row_maxs, row_sums = update(
             qs_chunk,
             ks_chunk,
             vs_chunk,
-            qs_meta_chunk,
-            ks_meta_chunk,
             mask_chunk,
+            qs_x_chunk,
+            ks_x_chunk,
+            x_bias_kwargs,
+            qs_s_chunk,
+            ks_s_chunk,
+            s_bias_kwargs,
+            qs_t_chunk,
+            ks_t_chunk,
+            t_bias_kwargs,
             os,
             row_maxs,
             row_sums,
-            bias_kwargs,
         )
 
     return os / row_sums
