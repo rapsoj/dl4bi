@@ -10,21 +10,6 @@ from jax import jit, vmap
 from .sim import l2_dist
 
 
-class ScalarBias(nn.Module):
-    num_heads: int = 4
-
-    @nn.compact
-    def __call__(
-        self,
-        d: jax.Array,  # [B, Q, K] or [E, D]
-        mask: Optional[jax.Array] = None,  # None or [B, Q, K] or [E]
-    ):
-        a = self.param("a", init.constant(-1), (self.num_heads,))
-        if mask is None:
-            mask = jnp.array([True])
-        return scalar_bias(d, mask, a)  # [B, H, Q, K]
-
-
 @jit
 def scalar_bias(
     d: jax.Array,  # [B, Q, K] or [E]
@@ -55,6 +40,28 @@ def scanned_scalar_bias(
     d = vmap(func)(qs_meta, ks_meta)  # [B, Q, K]
     mask = jnp.isfinite(d)
     return scalar_bias(d, mask, a)
+
+
+class ScalarBias(nn.Module):
+    num_heads: int = 4
+    bias_func: Callable = scalar_bias
+    scanned_bias_func: Callable = scanned_scalar_bias
+
+    @nn.compact
+    def __call__(
+        self,
+        d: jax.Array,  # [B, Q, K] or [E, D]
+        mask: Optional[jax.Array] = None,  # None or [B, Q, K] or [E]
+    ):
+        a = self.param("a", init.constant(-1), (self.num_heads,))
+        if mask is None:
+            mask = jnp.array([True])
+        return self.bias_func(d, mask, a)  # [B, H, Q, K]
+
+    @classmethod
+    def init_params(cls, module: nn.Module, num_heads: int):
+        a = module.param("a", init.constant(-1), (num_heads,))
+        return {"a": a}
 
 
 class RBFNetworkBias(nn.Module):

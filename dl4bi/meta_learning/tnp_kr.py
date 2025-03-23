@@ -214,12 +214,6 @@ class ScanTNPKR(nn.Module):
     embed_obs: nn.Module = nn.Embed(2, 4)
     embed_all: nn.Module = MLP([256, 128, 64], nn.gelu)
     # TODO(danj): update this through blk
-    x_sim: Optional[Callable] = None
-    s_sim: Optional[Callable] = None
-    t_sim: Optional[Callable] = None
-    x_bias: Optional[Callable] = None
-    s_bias: Optional[Callable] = None
-    t_bias: Optional[Callable] = None
     blk: nn.Module = KRBlock()
     norm: nn.Module = nn.LayerNorm()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
