@@ -9,7 +9,6 @@ import hydra
 import jax
 import jax.numpy as jnp
 import numpy as np
-import optax
 import pandas as pd
 import wandb
 from hydra.utils import instantiate
@@ -21,7 +20,6 @@ from tqdm import tqdm
 
 from dl4bi.core.train import (
     Callback,
-    cosine_annealing_lr,
     evaluate,
     save_ckpt,
     train,
@@ -50,15 +48,7 @@ def main(cfg: DictConfig):
     train_dataloader, valid_dataloader, test_dataloader, clbk_dataloader = (
         build_dataloaders()
     )
-    lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps,
-        cfg.lr_peak,
-        cfg.lr_pct_warmup,
-    )
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(cfg.clip_max_norm),
-        optax.yogi(lr_schedule),
-    )
+    optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     output_fn = model.output_fn
     model = model.copy(output_fn=lambda x: output_fn(x, min_std=0.05))

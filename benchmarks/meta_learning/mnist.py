@@ -17,7 +17,6 @@ from sps.utils import build_grid
 
 from dl4bi.core.train import (
     Callback,
-    cosine_annealing_lr,
     evaluate,
     save_ckpt,
     train,
@@ -44,15 +43,7 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
     train_dataloader, valid_dataloader, clbk_dataloader = build_dataloaders()
-    lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps,
-        cfg.lr_peak,
-        cfg.lr_pct_warmup,
-    )
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(cfg.clip_max_norm),
-        optax.yogi(lr_schedule),
-    )
+    optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     output_fn = model.output_fn
     model = model.copy(output_fn=lambda x: output_fn(x, min_std=0.05))

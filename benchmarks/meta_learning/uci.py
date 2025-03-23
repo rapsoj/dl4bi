@@ -45,15 +45,7 @@ def main(cfg: DictConfig):
         cfg.data,
         cfg.kernel,
     )
-    lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps,
-        cfg.lr_peak,
-        cfg.lr_pct_warmup,
-    )
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(cfg.clip_max_norm),
-        optax.yogi(lr_schedule),
-    )
+    optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     train_step, valid_step = select_steps(model)
     state = train(

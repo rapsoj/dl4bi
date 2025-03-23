@@ -16,7 +16,7 @@ data:
   noise: 0.5
 sample:
   x: 0.5
-lr_peak: 1.0e-3
-lr_pct_warmup: 0.01
+lr_max: 1.0e-3
+lr_min: 1.0e-4
 clip_max_norm: 3.0
 save_ckpt: False

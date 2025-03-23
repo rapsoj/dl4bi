@@ -49,6 +49,7 @@ def train(
     callbacks: list[Callback] = [],
     callback_dataloader: Optional[Callable] = None,
     log_loss_interval: int = 100,
+    return_state: str = "best",  # best, last, both
     state: Optional[TrainState] = None,
 ):
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
@@ -100,7 +101,7 @@ def train(
                 best_metric = metric
                 best_state = state
             if patience >= early_stop_patience:
-                return best_state
+                return best_state, state
         for cbk in callbacks:
             if i % cbk.interval == 0:
                 extra = None
@@ -109,7 +110,8 @@ def train(
                     batch, extra = batch if isinstance(batch, tuple) else (batch, None)
                 cbk.fn(i, rng_train_step, state, batch, extra)
         pbar.set_postfix(postfix)
-    return best_state
+    both = (best_state, state)
+    return {"best": best_state, "last": state, "both": both}[return_state]
 
 
 def evaluate(
@@ -168,18 +170,7 @@ def load_ckpt(path: Union[str, Path]):
 
 def cosine_annealing_lr(
     num_steps: int = 100000,
-    peak_lr: float = 1e-3,
-    pct_warmup: float = 0.01,
-    num_cycles: int = 1,
+    lr_max: float = 1e-3,
+    lr_min: float = 1e-4,
 ):
-    """Create an n-cycle cosine annealing schedule."""
-    n = num_steps // num_cycles
-    sched = optax.cosine_onecycle_schedule(
-        n,
-        peak_lr,
-        pct_warmup,
-        div_factor=10,
-        final_div_factor=10,
-    )
-    boundaries = n * jnp.arange(1, num_cycles)
-    return optax.join_schedules([sched] * num_cycles, boundaries)
+    return optax.cosine_decay_schedule(lr_max, num_steps, lr_min)

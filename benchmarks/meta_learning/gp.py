@@ -7,7 +7,6 @@ import jax
 import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import optax
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random
@@ -17,7 +16,6 @@ from sps.utils import build_grid
 from dl4bi.core.train import (
     Callback,
     TrainState,
-    cosine_annealing_lr,
     evaluate,
     save_ckpt,
     train,
@@ -41,15 +39,7 @@ def main(cfg: DictConfig):
     rng_train, rng_test = random.split(rng)
     train_dataloader = valid_dataloader = build_dataloader(cfg.data, cfg.kernel)
     clbk_dataloader = build_dataloader(cfg.data, cfg.kernel, is_callback=True)
-    lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps,
-        cfg.lr_peak,
-        cfg.lr_pct_warmup,
-    )
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(cfg.clip_max_norm),
-        optax.yogi(lr_schedule),
-    )
+    optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     clbk = wandb_1d_plots
     if cfg.data.name == "2d":

@@ -49,11 +49,7 @@ def main(cfg: DictConfig):
     rng = random.key(cfg.seed)
     dataloader, *_ = collect_infer_funcs(cfg.infer_model, cfg.data)
     rng_train, rng_test = random.split(rng)
-    lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps,
-        cfg.lr_peak,
-        cfg.lr_pct_warmup,
-    )
+    lr_schedule = cosine_annealing_lr(cfg.train_num_steps, cfg.lr_max, cfg.lr_min)
     optimizer = optax.chain(
         optax.clip_by_global_norm(cfg.clip_max_norm),
         optax.yogi(lr_schedule),

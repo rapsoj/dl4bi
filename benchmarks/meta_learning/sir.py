@@ -7,7 +7,6 @@ from time import time
 import hydra
 import jax
 import jax.numpy as jnp
-import optax
 import wandb
 from hydra.utils import instantiate
 from jax import jit, random
@@ -16,7 +15,6 @@ from sps.utils import build_grid
 
 from dl4bi.core.train import (
     Callback,
-    cosine_annealing_lr,
     evaluate,
     load_ckpt,
     save_ckpt,
@@ -54,15 +52,7 @@ def main(cfg: DictConfig):
     if cfg.data.type == "spatiotemporal":
         build = build_spatiotemporal_dataloader
     train_dataloader, valid_dataloader, clbk_dataloader = build(cfg.data, cfg.sim)
-    lr_schedule = cosine_annealing_lr(
-        cfg.train_num_steps,
-        cfg.lr_peak,
-        cfg.lr_pct_warmup,
-    )
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(cfg.clip_max_norm),
-        optax.yogi(lr_schedule),
-    )
+    optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     if cfg.evaluate_only:
         state, _ = load_ckpt(path.with_suffix(".ckpt"))
