@@ -314,7 +314,6 @@ def summarize_inference_runs(
         plot_models_predictive_means(
             f_hats,
             map_data,
-            models,
             save_dir / f"{spatial_prior}_predictive_means.png",
             log=log_plot,
         )
@@ -358,7 +357,7 @@ def plot_posterior_predictive_comparisons(
     baseline_index = model_names.index("Baseline_GP")
     for var_name in var_names:
         actual_val = conditionals[var_name]
-        fig, ax = plt.subplots(figsize=(8, 6))
+        fig, ax = plt.subplots(figsize=(4, 4))
         min_val, max_val = 1000, -1000
         for model_name in model_names:
             model_idx = model_names.index(model_name)
@@ -385,29 +384,26 @@ def plot_posterior_predictive_comparisons(
         if actual_val is not None:
             ax.axvline(actual_val, color="red", linestyle="--", linewidth=2, label="GT")
         ax.set_xlabel(var_name)
-        ax.legend()
+        ax.legend(fontsize=6)
         plt.tight_layout()
-        plt.savefig(f"{save_prefix}_histogram_{var_name}.png", dpi=150)
+        plt.savefig(f"{save_prefix}_histogram_{var_name}.png", dpi=200)
         plt.clf()
         plt.close(fig)
 
 
-def plot_models_predictive_means(f_hats, map_data, models, save_path: Path, log=True):
+def plot_models_predictive_means(f_hats, map_data, save_path: Path, log=True):
     if log:
         f_hats = [jnp.log(f_mean + 1) for f_mean in f_hats]
     f_hat_means = [f_hats[0]] + [f_mean.mean(axis=0) for f_mean in f_hats[1:]]
     vmin = jnp.min(jnp.array([f_mean.min() for f_mean in f_hat_means])).item()
     vmax = jnp.max(jnp.array([f_mean.max() for f_mean in f_hat_means])).item()
-    fig, ax = plt.subplots(1, len(f_hat_means), figsize=(9 * len(f_hat_means), 12))
-    log_str = " (Log scale)" if log else ""
+    fig, ax = plt.subplots(
+        1, len(f_hat_means), figsize=(6 * len(f_hat_means), 7), constrained_layout=True
+    )
     for i, f_mean in enumerate(f_hat_means):
-        model_n = models[i - 1].replace("Baseline_", "").replace("_", " + ")
-        title = "Observed counts" if i == 0 else f"{model_n}: Mean estimate"
-        plot_on_map(ax[i], map_data, f_mean, vmin, vmax, f"{title}{log_str}")
-    for axis in ax:
-        axis.set_title(axis.get_title(), fontsize=20)
-        axis.set_axis_off()
-    plt.tight_layout()
+        legend = i == len(f_hat_means) - 1
+        plot_on_map(ax[i], map_data, f_mean, vmin, vmax, legend=legend)
+        ax[i].set_axis_off()
     fig.savefig(save_path, dpi=200)
     plt.clf()
     plt.close(fig)

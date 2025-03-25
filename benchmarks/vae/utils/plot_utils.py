@@ -164,19 +164,24 @@ def plot_models_mean_prevalence(
     vmin = jnp.min(jnp.array([prev_mean.min() for prev_mean in prev_hat_means])).item()
     vmax = jnp.max(jnp.array([prev_mean.max() for prev_mean in prev_hat_means])).item()
     fig, axes = plt.subplots(
-        1, len(prev_hat_means), figsize=(9 * len(prev_hat_means), 12)
+        1,
+        len(prev_hat_means),
+        figsize=(6 * len(prev_hat_means), 7),
+        constrained_layout=True,
     )
     log_str = " (Log scale)" if log else ""
     for i, prev_mean in enumerate(prev_hat_means):
         model_n = models[i - 1].replace("Baseline_", "").replace("_", " + ")
+        legend = i == len(prev_hat_means) - 1
         title = f"{model_n}: Mean {val_n.lower()}"
         if i == 0 and use_real:
-            title = f"Observed {val_n.lower()}"
+            title = f"Observed {val_n.lower()}{log_str}"
+        if save_path is not None:
+            title = ""
         ax = axes if len(prev_hat_means) == 1 else axes[i]
-        plot_on_map(ax, map_data, prev_mean, vmin, vmax, f"{title}{log_str}")
+        plot_on_map(ax, map_data, prev_mean, vmin, vmax, title, legend=legend)
         ax.set_axis_off()
-        ax.set_title(ax.get_title(), fontsize=20)
-    plt.tight_layout()
+        ax.set_title(ax.get_title(), fontsize=16)
     if save_path is None:
         save_path = f"/tmp/Observed prevalence{datetime.now().isoformat()}.png"
     fig.savefig(save_path, dpi=200)
