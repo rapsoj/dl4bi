@@ -13,6 +13,14 @@ train_num_steps: 1000000
 valid_num_steps: 5000
 valid_interval: 10000
 plot_interval: 100000
-lr_peak: 1.0e-3
-lr_pct_warmup: 0.0
-clip_max_norm: 3.0
+optimizer:
+  _target_: optax.chain
+  _args_:
+    - _target_: optax.clip_by_global_norm
+      max_norm: 3.0
+    - _target_: optax.yogi
+      learning_rate:
+        _target_: optax.cosine_decay_schedule
+        init_value: 1.0e-3
+        decay_steps: ${train_num_steps}
+        alpha: 1.0e-4
