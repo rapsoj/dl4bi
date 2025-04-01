@@ -472,15 +472,21 @@ class BiasedScanAttention(nn.Module):
         x_bias_func = x_bias_kwargs = None
         if self.x_bias is not None:
             x_bias_func = self.x_bias.scanned_bias_func
-            x_bias_kwargs = self.x_bias.init_params(self, **self.x_bias.init_kwargs)
+            x_bias_kwargs = self.x_bias.init_params(
+                self, "x_bias", **self.x_bias.init_kwargs
+            )
         s_bias_func = s_bias_kwargs = None
         if self.s_bias is not None:
             s_bias_func = self.s_bias.scanned_bias_func
-            s_bias_kwargs = self.s_bias.init_params(self, **self.s_bias.init_kwargs)
+            s_bias_kwargs = self.s_bias.init_params(
+                self, "s_bias", **self.s_bias.init_kwargs
+            )
         t_bias_func = t_bias_kwargs = None
         if self.t_bias is not None:
             t_bias_func = self.t_bias.scanned_bias_func
-            t_bias_kwargs = self.t_bias.init_params(self, **self.t_bias.init_kwargs)
+            t_bias_kwargs = self.t_bias.init_params(
+                self, "t_bias", **self.t_bias.init_kwargs
+            )
         return biased_scan_attention(
             qs,
             ks,
@@ -722,7 +728,8 @@ def biased_scan_ks(
             bias += to_QBHK(s_bias)
         if qs_t_chunk is not None:
             qs_t_chunk_, ks_t_chunk_ = map(to_BLM, (qs_t_chunk, ks_t_chunk))
-            bias += t_bias_func(qs_t_chunk_, ks_t_chunk_, **t_bias_kwargs)
+            t_bias = t_bias_func(qs_t_chunk_, ks_t_chunk_, **t_bias_kwargs)
+            bias += to_QBHK(t_bias)
         scores = jnp.einsum("Q B H D, K B H D -> Q B H K", qs_chunk, ks_chunk) + bias
         scores = jnp.where(mask_chunk, scores, -jnp.inf)
         row_maxs_chunk = jnp.max(scores, axis=-1, keepdims=True)
