@@ -181,6 +181,36 @@ class SGNP(nn.Module):
         output = self.head(nodes_test, training)
         return self.output_fn(output)
 
+    def add_fixed_graph(
+        self,
+        x_ctx: Optional[jax.Array] = None,
+        s_ctx: Optional[jax.Array] = None,
+        t_ctx: Optional[jax.Array] = None,
+        mask_ctx: Optional[jax.Array] = None,
+        x_test: Optional[jax.Array] = None,
+        s_test: Optional[jax.Array] = None,
+        t_test: Optional[jax.Array] = None,
+        **kwargs,
+    ):
+        g = build_graph(
+            x_ctx,
+            s_ctx,
+            t_ctx,
+            mask_ctx,
+            x_test,
+            s_test,
+            t_test,
+            self.k,
+            self.x_sim,
+            self.s_sim,
+            self.t_sim,
+            self.causal_t,
+            self.scale_x_sim,
+            self.scale_s_sim,
+            self.scale_t_sim,
+        )
+        return self.copy(updates={"graph": g})
+
 
 @partial(
     jit,
