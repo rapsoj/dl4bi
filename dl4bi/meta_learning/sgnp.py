@@ -138,11 +138,11 @@ class SGNP(nn.Module):
         g = g._replace(nodes=nodes)
         edge_mask = g.globals.get("edge_mask")
         D = nodes.shape[-1]
-        # vnode = self.param("vnode", nn.initializers.constant(1), (D,))
-        # vnodes = jnp.tile(vnode, (B, 1, 1))  # [B, L=1, D]
+        vnode = self.param("vnode", nn.initializers.constant(1), (D,))
+        vnodes = jnp.tile(vnode, (B, 1, 1))  # [B, L=1, D]
         for _ in range(self.num_blks):
             gblk = self.gblk.copy()
-            # vblk = self.vblk.copy()
+            vblk = self.vblk.copy()
             for _ in range(self.num_reps):
                 bias = 0
                 if self.x_bias is not None:
@@ -155,12 +155,12 @@ class SGNP(nn.Module):
                 # jax.ops.segment_* calls; this is typically only needed for
                 # testing implementation correctness
                 g = gblk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
-                # ctx_nodes = g.nodes[: B * N_c].reshape(B, N_c, -1)
-                # vnodes, _ = vblk(vnodes, ctx_nodes, ctx_nodes, mask_ctx)
-                # vnodes_rep = jnp.repeat(vnodes, N_c, axis=1)
-                # ctx_nodes = MLP([D])(jnp.concat([ctx_nodes, vnodes_rep], axis=-1))
-                # nodes = g.nodes.at[: B * N_c].set(ctx_nodes.reshape(B * N_c, -1))
-                # g = g._replace(nodes=nodes)
+                ctx_nodes = g.nodes[: B * N_c].reshape(B, N_c, -1)
+                vnodes, _ = vblk(vnodes, ctx_nodes, ctx_nodes, mask_ctx)
+                vnodes_rep = jnp.repeat(vnodes, N_c, axis=1)
+                ctx_nodes = MLP([D])(jnp.concat([ctx_nodes, vnodes_rep], axis=-1))
+                nodes = g.nodes.at[: B * N_c].set(ctx_nodes.reshape(B * N_c, -1))
+                g = g._replace(nodes=nodes)
         nodes_test = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         output = self.head(nodes_test, training)
         return self.output_fn(output)
