@@ -67,7 +67,7 @@ class SGNP(nn.Module):
         $d^2 = (k_x\cdot d_x)^2+(k_s\cdot d_s)^2+(k_t\cdot d_t)^2$
     """
 
-    k: int = 32
+    k: int = 16
     num_blks: int = 6
     num_reps: int = 1
     embed_x: Callable = lambda x: x
@@ -134,23 +134,7 @@ class SGNP(nn.Module):
         nodes = jnp.vstack([ctx.reshape(B * N_c, -1), test.reshape(B * N_t, -1)])
         g = self.graph  # if a graph is provided, reuse it, updating only nodes
         if g is None:
-            g = build_graph(
-                x_ctx,
-                s_ctx,
-                t_ctx,
-                mask_ctx,
-                x_test,
-                s_test,
-                t_test,
-                self.k,
-                self.x_sim,
-                self.s_sim,
-                self.t_sim,
-                self.causal_t,
-                self.scale_x_sim,
-                self.scale_s_sim,
-                self.scale_t_sim,
-            )
+            g = self.build_graph(x_ctx, s_ctx, t_ctx, mask_ctx, x_test, s_test, t_test)
         g = g._replace(nodes=nodes)
         edge_mask = g.globals.get("edge_mask")
         D = nodes.shape[-1]
@@ -181,7 +165,7 @@ class SGNP(nn.Module):
         output = self.head(nodes_test, training)
         return self.output_fn(output)
 
-    def add_fixed_graph(
+    def build_graph(
         self,
         x_ctx: Optional[jax.Array] = None,
         s_ctx: Optional[jax.Array] = None,
@@ -192,7 +176,7 @@ class SGNP(nn.Module):
         t_test: Optional[jax.Array] = None,
         **kwargs,
     ):
-        g = build_graph(
+        return build_graph(
             x_ctx,
             s_ctx,
             t_ctx,
@@ -209,7 +193,6 @@ class SGNP(nn.Module):
             self.scale_s_sim,
             self.scale_t_sim,
         )
-        return self.copy(updates={"graph": g})
 
 
 @partial(

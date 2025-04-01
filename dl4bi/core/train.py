@@ -50,14 +50,12 @@ def train(
     log_loss_interval: int = 100,
     return_state: str = "best",  # best, last, both
     state: Optional[TrainState] = None,
-    post_init: Callable = lambda model, batch: model,
 ):
     rng_data, rng_params, rng_extra, rng_train = random.split(rng, 4)
     batches = train_dataloader(rng_data)
     batch = next(batches)
     rngs = {"params": rng_params, "extra": rng_extra}
     kwargs = model.init(rngs, **batch)
-    model = post_init(model, batch)
     params = kwargs.pop("params")
     param_count = nn.tabulate(model, rngs)(**batch)
     print(param_count)
