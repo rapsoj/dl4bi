@@ -156,7 +156,8 @@ class SGNP(nn.Module):
                 # testing implementation correctness
                 g = gblk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
                 ctx_nodes = g.nodes[: B * N_c].reshape(B, N_c, -1)
-                vnodes, _ = vblk(vnodes, ctx_nodes, ctx_nodes, mask_ctx)
+                vnodes_new, _ = vblk(vnodes, ctx_nodes, ctx_nodes, mask_ctx)
+                vnodes = MLP([D])(jnp.concat([vnodes, vnodes_new], axis=-1))
                 vnodes_rep = jnp.repeat(vnodes, N_c, axis=1)
                 ctx_nodes = MLP([D])(jnp.concat([ctx_nodes, vnodes_rep], axis=-1))
                 nodes = g.nodes.at[: B * N_c].set(ctx_nodes.reshape(B * N_c, -1))
