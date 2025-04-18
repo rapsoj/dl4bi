@@ -7,8 +7,6 @@ import jax.numpy as jnp
 from jax import jit, vmap
 from jraph import GraphsTuple
 
-from dl4bi.core.attention import MultiHeadAttention
-
 from ..core.gnn import GraphAttentionBlock
 from ..core.mlp import MLP
 from ..core.model_output import DiagonalMVNOutput
@@ -46,7 +44,6 @@ class SGNP(nn.Module):
         t_bias: Bias module for temporal similarity values.
         norm: A module used for normalization between blocks.
         gblk: A block to use for the graph in each layer.
-        vblk: A block to use for the global virtual node attention.
         head: Transforms the tokens into model output.
         output_fn: A function that transforms the model output into
             a form that can be consumed by loss functions.
@@ -67,7 +64,7 @@ class SGNP(nn.Module):
         $d^2 = (k_x\cdot d_x)^2+(k_s\cdot d_s)^2+(k_t\cdot d_t)^2$
     """
 
-    k: int = 32
+    k: int = 16
     num_blks: int = 6
     num_reps: int = 1
     embed_x: Callable = lambda x: x
@@ -88,7 +85,6 @@ class SGNP(nn.Module):
     t_bias: Optional[Callable] = None
     norm: nn.Module = nn.LayerNorm()
     gblk: nn.Module = GraphAttentionBlock()
-    vblk: nn.Module = MultiHeadAttention()
     head: nn.Module = MLP([256, 64, 2], nn.gelu)
     output_fn: Callable = DiagonalMVNOutput.from_activations
     graph: Optional[GraphsTuple] = None
@@ -134,31 +130,12 @@ class SGNP(nn.Module):
         nodes = jnp.vstack([ctx.reshape(B * N_c, -1), test.reshape(B * N_t, -1)])
         g = self.graph  # if a graph is provided, reuse it, updating only nodes
         if g is None:
-            g = build_graph(
-                x_ctx,
-                s_ctx,
-                t_ctx,
-                mask_ctx,
-                x_test,
-                s_test,
-                t_test,
-                self.k,
-                self.x_sim,
-                self.s_sim,
-                self.t_sim,
-                self.causal_t,
-                self.scale_x_sim,
-                self.scale_s_sim,
-                self.scale_t_sim,
-            )
+            g = self.build_graph(x_ctx, s_ctx, t_ctx, mask_ctx, x_test, s_test, t_test)
         g = g._replace(nodes=nodes)
         edge_mask = g.globals.get("edge_mask")
         D = nodes.shape[-1]
-        # vnode = self.param("vnode", nn.initializers.constant(1), (D,))
-        # vnodes = jnp.tile(vnode, (B, 1, 1))  # [B, L=1, D]
         for _ in range(self.num_blks):
             gblk = self.gblk.copy()
-            # vblk = self.vblk.copy()
             for _ in range(self.num_reps):
                 bias = 0
                 if self.x_bias is not None:
@@ -171,15 +148,38 @@ class SGNP(nn.Module):
                 # jax.ops.segment_* calls; this is typically only needed for
                 # testing implementation correctness
                 g = gblk(g, training, bias=bias, bucket_size=kwargs.get("bucket_size"))
-                # ctx_nodes = g.nodes[: B * N_c].reshape(B, N_c, -1)
-                # vnodes, _ = vblk(vnodes, ctx_nodes, ctx_nodes, mask_ctx)
-                # vnodes_rep = jnp.repeat(vnodes, N_c, axis=1)
-                # ctx_nodes = MLP([D])(jnp.concat([ctx_nodes, vnodes_rep], axis=-1))
-                # nodes = g.nodes.at[: B * N_c].set(ctx_nodes.reshape(B * N_c, -1))
-                # g = g._replace(nodes=nodes)
         nodes_test = g.nodes[-B * N_t :, :].reshape(B, N_t, -1)
         output = self.head(nodes_test, training)
         return self.output_fn(output)
+
+    def build_graph(
+        self,
+        x_ctx: Optional[jax.Array] = None,
+        s_ctx: Optional[jax.Array] = None,
+        t_ctx: Optional[jax.Array] = None,
+        mask_ctx: Optional[jax.Array] = None,
+        x_test: Optional[jax.Array] = None,
+        s_test: Optional[jax.Array] = None,
+        t_test: Optional[jax.Array] = None,
+        **kwargs,
+    ):
+        return build_graph(
+            x_ctx,
+            s_ctx,
+            t_ctx,
+            mask_ctx,
+            x_test,
+            s_test,
+            t_test,
+            self.k,
+            self.x_sim,
+            self.s_sim,
+            self.t_sim,
+            self.causal_t,
+            self.scale_x_sim,
+            self.scale_s_sim,
+            self.scale_t_sim,
+        )
 
 
 @partial(

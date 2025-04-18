@@ -18,6 +18,7 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
+from dl4bi.meta_learning import SGNP
 from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData
 from dl4bi.meta_learning.utils import (
     cfg_to_run_name,
@@ -43,6 +44,10 @@ def main(cfg: DictConfig):
     dataloader = build_dataloader(cfg.data)
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
+    if not cfg.data.random_t and isinstance(model, SGNP):
+        batch = next(dataloader(rng))
+        g = model.build_graph(**batch)
+        model = instantiate(cfg.model, graph=g)
     output_fn = model.output_fn
     model = model.copy(output_fn=lambda x: output_fn(x, min_std=0.05))
     clbk = partial(
