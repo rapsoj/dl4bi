@@ -130,7 +130,7 @@ def build_dataloaders(data: DictConfig, kernel: DictConfig, test: DictConfig):
             )
 
     def valid_dataloader(rng: jax.Array):
-        num_ctx_min, num_ctx_max = int(L_obs * 0.05), int(L_obs * 0.5)
+        num_ctx_min, num_ctx_max = int(L_obs * 0.05), int(L_obs * 0.25)
         num_test = int(L_obs * 0.25)
         d = SpatialData(x=None, s=s_obs[None, ...], f=f_obs[None, ...])
         while True:
@@ -141,7 +141,7 @@ def build_dataloaders(data: DictConfig, kernel: DictConfig, test: DictConfig):
                 num_ctx_max,
                 num_test,
                 test_includes_ctx=False,
-                batch_size=4,
+                batch_size=1,
             )
 
     def test_dataloader(rng: jax.Array):
