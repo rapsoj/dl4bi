@@ -107,7 +107,7 @@ def build_dataloaders(data: DictConfig, kernel: DictConfig, test: DictConfig):
         inv_permute_idx = jnp.arange(L_train)
         gp = instantiate(kernel)
         while True:
-            rng_s, rng_f, rng_eps, rng = random.split(rng, 4)
+            rng_s, rng_f, rng = random.split(rng, 3)
             s = random_subgrid(rng_s, data.s, data.min_axes_pct, data.max_axes_pct)
             s = s.reshape(-1, s.shape[-1])  # [L, D_s]
             f, *_ = gp.simulate(rng_f, s, B)  # [B, L, D_f]

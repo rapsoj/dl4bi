@@ -7,10 +7,10 @@ var:
   dist: normal
   kwargs:
     mu: 1.0
-    sigma: 0.25
+    sigma: 0.1
 ls:
   _target_: sps.priors.Prior
   dist: normal
   kwargs:
     mu: 1.0
-    sigma: 0.25
+    sigma: 0.15
