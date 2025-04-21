@@ -8,13 +8,10 @@ import jax
 import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import optax
 import pandas as pd
 import wandb
-from flax.traverse_util import flatten_dict, unflatten_dict
 from hydra.utils import instantiate
 from jax import random
-from jax.scipy.stats import norm
 from matplotlib.axes import Axes
 from omegaconf import DictConfig, OmegaConf
 from sps.utils import random_subgrid
@@ -62,10 +59,6 @@ def main(cfg: DictConfig):
     if finetune_path:
         state, _ = load_ckpt(Path(finetune_path))
         return_state = "last"
-        cfg.optimizer._args_[1].learning_rate = cfg.lr_finetune
-        optimizer = instantiate(cfg.optimizer)
-        # mask = unflatten_dict({k: "head" in k for k in flatten_dict(state.params)})
-        # optimizer = optax.masked(optimizer, mask)
         train_num_steps = cfg.finetune_num_steps
         if cfg.finetune_on_real:
             train_dataloader = valid_dataloader
@@ -174,7 +167,7 @@ def build_dataloaders(data: DictConfig, kernel: DictConfig, test: DictConfig):
 
 
 def load_data(path):
-    df = pd.read_csv(path)
+    df = pd.read_csv(path).dropna(subset=["TrueTemp"])
     df.Lat -= df.Lat.mean()
     df.Lon -= df.Lon.mean()
     mean, std = df.MaskTemp.mean(), df.MaskTemp.std()
@@ -196,29 +189,6 @@ def split_observed(df: pd.DataFrame):
         jnp.float16(s_unobs),
         jnp.float16(f_unobs),
     )
-
-
-def sample_constrained_s_f(rng: jax.Array, kernel: DictConfig, data: DictConfig):
-    threshold = norm.ppf(1 - data.mask_pct)
-    s, f = sample_s_f(rng, kernel, data)
-    pct_masked = (f > threshold).mean(axis=(1, 2))
-    while jnp.logical_or(
-        pct_masked < data.min_masked_pct,
-        pct_masked > data.max_masked_pct,
-    ).any():
-        rng, _ = random.split(rng)
-        s, f = sample_s_f(rng, kernel, data)
-        pct_masked = (f > threshold).mean(axis=(1, 2))
-    return s, f
-
-
-def sample_s_f(rng: jax.Array, kernel: DictConfig, data: DictConfig):
-    rng_s, rng_f = random.split(rng)
-    s = random_subgrid(rng_s, data.s, data.min_axes_pct, data.max_axes_pct)
-    s = s.reshape(-1, s.shape[-1])
-    gp = instantiate(kernel)
-    f, *_ = gp.simulate(rng_f, s, data.batch_size)
-    return s, f
 
 
 # TODO(danj): udpate
