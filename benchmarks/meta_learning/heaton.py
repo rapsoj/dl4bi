@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import optax
 import pandas as pd
 import wandb
+from flax.traverse_util import flatten_dict, unflatten_dict
 from hydra.utils import instantiate
 from jax import random
 from jax.scipy.stats import norm
@@ -61,7 +62,9 @@ def main(cfg: DictConfig):
     if finetune_path:
         state, _ = load_ckpt(Path(finetune_path))
         return_state = "last"
-        optimizer = optax.chain(optax.zero_nans(), optax.yogi(cfg.lr_finetune))
+        optimizer = optax.yogi(cfg.lr_finetune)
+        # mask = unflatten_dict({k: "head" in k for k in flatten_dict(state.params)})
+        # optimizer = optax.masked(optimizer, mask)
         train_num_steps = cfg.finetune_num_steps
         if cfg.finetune_on_real:
             train_dataloader = valid_dataloader
