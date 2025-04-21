@@ -62,7 +62,8 @@ def main(cfg: DictConfig):
     if finetune_path:
         state, _ = load_ckpt(Path(finetune_path))
         return_state = "last"
-        optimizer = optax.yogi(cfg.lr_finetune)
+        cfg.optimizer._args_[1].learning_rate = cfg.lr_finetune
+        optimizer = instantiate(cfg.optimizer)
         # mask = unflatten_dict({k: "head" in k for k in flatten_dict(state.params)})
         # optimizer = optax.masked(optimizer, mask)
         train_num_steps = cfg.finetune_num_steps
@@ -137,7 +138,7 @@ def build_dataloaders(data: DictConfig, kernel: DictConfig, test: DictConfig):
 
     def valid_dataloader(rng: jax.Array):
         num_ctx_min, num_ctx_max = int(L_obs * 0.05), int(L_obs * 0.25)
-        num_test = int(L_obs * 0.25)
+        num_test = int(L_obs * 0.20)
         d = SpatialData(x=None, s=s_obs[None, ...], f=f_obs[None, ...])
         while True:
             rng_i, rng = random.split(rng)
