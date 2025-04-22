@@ -3,6 +3,7 @@ from pathlib import Path
 
 import hydra
 import jax
+import jax.numpy as jnp
 import pandas as pd
 import wandb
 from hydra.utils import instantiate
@@ -15,7 +16,7 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
-from dl4bi.meta_learning.data.tabular import TabularData
+from dl4bi.meta_learning.data.tabular import TabularBatch, TabularData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
@@ -67,28 +68,41 @@ def build_dataloaders(
     num_ctx_max: int = 128,
     num_test: int = 256,
 ):
-    def build_dataloader(y, X):
-        def dataloader(rng: jax.Array):
-            while True:
-                rng_i, rng = random.split(rng)
-                yield TabularData(x=X, f=y).batch(
-                    rng_i,
-                    num_ctx_min,
-                    num_ctx_max,
-                    num_test,
-                    obs_noise=None,
-                    test_includes_ctx=False,
-                    batch_size=batch_size,
-                )
+    (f_train, X_train), (f_valid, X_valid), (f_test, X_test) = load_data(rng)
 
-        return dataloader
+    def train_dataloader(rng: jax.Array):
+        while True:
+            rng_i, rng = random.split(rng)
+            yield TabularData(x=X_train, f=f_train).batch(
+                rng_i,
+                num_ctx_min,
+                num_ctx_max,
+                num_test,
+                obs_noise=None,
+                test_includes_ctx=False,
+                batch_size=batch_size,
+            )
 
-    (y_train, X_train), (y_valid, X_valid), (y_test, X_test) = load_data(rng)
-    return (
-        build_dataloader(y_train, X_train),
-        build_dataloader(y_valid, X_valid),
-        build_dataloader(y_test, X_test),
-    )
+    def valid_dataloader(rng: jax.Array):
+        yield TabularBatch(
+            x_ctx=X_train[None, ...],
+            f_ctx=f_train[None, ...],
+            mask_ctx=jnp.ones((1, X_train.shape[0]), dtype=bool),
+            x_test=X_valid[None, ...],
+            f_test=f_valid[None, ...],
+        )
+
+    def test_dataloader(rng: jax.Array):
+        N = X_train.shape[0] + X_valid.shape[0]
+        yield TabularBatch(
+            x_ctx=jnp.concat([X_train, X_valid], axis=0)[None, ...],
+            f_ctx=jnp.concat([f_train, f_valid], axis=0)[None, ...],
+            mask_ctx=jnp.ones((1, N), dtype=bool),
+            x_test=X_test[None, ...],
+            f_test=f_test[None, ...],
+        )
+
+    return train_dataloader, valid_dataloader, test_dataloader
 
 
 def load_data(rng: jax.Array):
@@ -99,25 +113,25 @@ def load_data(rng: jax.Array):
     df["month"] = df.dt.dt.month
     df["day"] = df.dt.dt.day
     df = df.drop(columns=["Date", "Time", "dt"])
-    yX = df.values
-    N = yX.shape[0]
+    fX = df.values
+    N = fX.shape[0]
     pct_train, pct_test = 0.8, 0.1
     num_train, num_test = int(pct_train * N), int(pct_test * N)
     perm = random.permutation(rng, N)
-    yX = yX[perm]
-    yX_train, yX_valid, yX_test = (
-        yX[:num_train],
-        yX[num_train:-num_test],
-        yX[-num_test:],
+    fX = fX[perm]
+    fX_train, fX_valid, fX_test = (
+        fX[:num_train],
+        fX[num_train:-num_test],
+        fX[-num_test:],
     )
     scaler = StandardScaler()
-    yX_train = scaler.fit_transform(yX_train)
-    yX_valid = scaler.transform(yX_valid)
-    yX_test = scaler.transform(yX_test)
-    y_train, X_train = yX_train[:, [0]], yX_train[:, 1:]
-    y_valid, X_valid = yX_valid[:, [0]], yX_valid[:, 1:]
-    y_test, X_test = yX_test[:, [0]], yX_test[:, 1:]
-    return (y_train, X_train), (y_valid, X_valid), (y_test, X_test)
+    fX_train = scaler.fit_transform(fX_train)
+    fX_valid = scaler.transform(fX_valid)
+    fX_test = scaler.transform(fX_test)
+    f_train, X_train = fX_train[:, [0]], fX_train[:, 1:]
+    f_valid, X_valid = fX_valid[:, [0]], fX_valid[:, 1:]
+    f_test, X_test = fX_test[:, [0]], fX_test[:, 1:]
+    return (f_train, X_train), (f_valid, X_valid), (f_test, X_test)
 
 
 if __name__ == "__main__":
