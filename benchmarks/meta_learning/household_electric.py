@@ -67,9 +67,6 @@ def build_dataloaders(
     num_ctx_max: int = 128,
     num_test: int = 256,
 ):
-    B = batch_size
-    (y_train, X_train), (y_valid, X_valid), (y_test, X_test) = load_data(rng)
-
     def build_dataloader(y, X):
         def dataloader(rng: jax.Array):
             while True:
@@ -81,11 +78,12 @@ def build_dataloaders(
                     num_test,
                     obs_noise=None,
                     test_includes_ctx=False,
-                    batch_size=B,
+                    batch_size=batch_size,
                 )
 
         return dataloader
 
+    (y_train, X_train), (y_valid, X_valid), (y_test, X_test) = load_data(rng)
     return (
         build_dataloader(y_train, X_train),
         build_dataloader(y_valid, X_valid),
