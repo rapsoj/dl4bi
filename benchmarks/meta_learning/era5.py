@@ -73,8 +73,6 @@ def build_dataloaders(
     ds_train = load_data("central_europe")
     ds_test_1 = load_data("western_europe")
     ds_test_2 = load_data("northern_europe")
-    s = build_grid([dict(start=-2.0, stop=2.0, num=32)] * 2)
-    s = jnp.repeat(s[None], B, axis=0)  # [B, S, S, 2]
 
     def build_dataloader(dataset, is_callback: bool = False):
         N = dataset.shape[0]
