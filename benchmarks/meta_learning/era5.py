@@ -5,7 +5,6 @@ from pathlib import Path
 import cdsapi
 import hydra
 import jax
-import jax.numpy as jnp
 import wandb
 import xarray as xr
 from hydra.utils import instantiate
@@ -17,7 +16,7 @@ from dl4bi.core.train import (
     save_ckpt,
     train,
 )
-from dl4bi.meta_learning.data.spatial import SpatialData
+from dl4bi.meta_learning.data.spatiotemporal import SpatiotemporalData
 from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
@@ -65,11 +64,15 @@ def main(cfg: DictConfig):
 # TODO(danj): update
 def build_dataloaders(
     batch_size: int = 16,
-    num_ctx_min: int = 16,
-    num_ctx_max: int = 128,
-    num_test: int = 256,
+    num_ctx_min: int = 56,  # ~5% of 1,125
+    num_ctx_max: int = 287,  # ~25.5% of 1,125
+    num_test: int = 225,  # 287 + 225 = 512 = L
 ):
     B = batch_size
+    # TODO(danj):
+    # 1. Sample [15, 15, 4] from data
+    # 2. Sample 5 frames, each 6 hours apart
+    # 3. Randomly mask and predict 6th frame
     ds_train = load_data("central_europe")
     ds_test_1 = load_data("western_europe")
     ds_test_2 = load_data("northern_europe")
