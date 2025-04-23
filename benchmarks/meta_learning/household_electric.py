@@ -84,13 +84,27 @@ def build_dataloaders(
             )
 
     def valid_dataloader(rng: jax.Array):
-        yield TabularBatch(
-            x_ctx=X_train[None, ...],
-            f_ctx=f_train[None, ...],
-            mask_ctx=jnp.ones((1, X_train.shape[0]), dtype=bool),
-            x_test=X_valid[None, ...],
-            f_test=f_valid[None, ...],
-        )
+        while True:
+            rng_i, rng = random.split(rng)
+            yield TabularData(x=X_valid, f=f_valid).batch(
+                rng_i,
+                num_ctx_min,
+                num_ctx_max,
+                num_test,
+                obs_noise=None,
+                test_includes_ctx=False,
+                batch_size=batch_size,
+            )
+
+    # NOTE: uncomment to use _entire_ valid set, similar to test set (much slower)
+    # def valid_dataloader(rng: jax.Array):
+    #     yield TabularBatch(
+    #         x_ctx=X_train[None, ...],
+    #         f_ctx=f_train[None, ...],
+    #         mask_ctx=jnp.ones((1, X_train.shape[0]), dtype=bool),
+    #         x_test=X_valid[None, ...],
+    #         f_test=f_valid[None, ...],
+    #     )
 
     def test_dataloader(rng: jax.Array):
         N = X_train.shape[0] + X_valid.shape[0]
