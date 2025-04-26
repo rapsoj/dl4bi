@@ -80,7 +80,7 @@ def main(cfg: DictConfig):
 
 
 def build_dataloaders(
-    batch_size: int = 4,
+    batch_size: int = 16,
     num_ctx_min_per_t: int = 12,  # ~5% of 225 = 15 * 15
     num_ctx_max_per_t: int = 56,  # ~25% of 225 = 15 * 15
     num_test: int = 225,  # 225 = 15 * 15 = predicted frame
@@ -276,7 +276,7 @@ def plot(
     f_max = max(batch.f_ctx.max(), batch.f_test.max(), f_pred.max())
     norm = Normalize(f_min, f_max)
     norm_std = Normalize(f_std.min(), f_std.max())
-    cmap = mpl.colormaps.get_cmap("GnBu")
+    cmap = mpl.colormaps.get_cmap("viridis")
     cmap.set_bad("grey")
     path = f"/tmp/era5_{step}_{datetime.now().isoformat()}.png"
     fig = batch.plot_2d(

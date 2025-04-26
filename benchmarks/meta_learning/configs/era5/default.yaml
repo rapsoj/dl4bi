@@ -7,7 +7,7 @@ project: ERA5
 train_num_steps: 100000
 valid_num_steps: 5000 # exhaust valid dataloader
 valid_interval: 10000
-plot_interval: 100000
+plot_interval: 50000
 optimizer:
   _target_: optax.chain
   _args_:
@@ -15,10 +15,14 @@ optimizer:
       max_norm: 1.0
     - _target_: optax.adamw
       learning_rate:
-        _target_: optax.cosine_decay_schedule
-        init_value: 5.0e-4
-        decay_steps: ${train_num_steps}
-        alpha: 5.0e-5
+        _target_: optax.cosine_onecycle_schedule
+        transition_steps: ${train_num_steps}
+        peak_value: 1.0e-3
+        pct_start: 0.3
+        # _target_: optax.cosine_decay_schedule
+        # init_value: 1.0e-3
+        # decay_steps: ${train_num_steps}
+        # alpha: 5.0e-5
       b1: 0.9
       b2: 0.999
       weight_decay: 1.0e-4
