@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 import os
+from dataclasses import replace
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 
 import cdsapi
 import hydra
 import jax
+import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import wandb
 import xarray as xr
 from hydra.utils import instantiate
 from jax import random
+from matplotlib.colors import Normalize
 from omegaconf import DictConfig, OmegaConf
 
 from dl4bi.core.train import (
@@ -27,7 +30,7 @@ from dl4bi.meta_learning.data.spatiotemporal import (
     SpatiotemporalBatch,
     SpatiotemporalData,
 )
-from dl4bi.meta_learning.utils import cfg_to_run_name, wandb_2d_img_callback
+from dl4bi.meta_learning.utils import cfg_to_run_name
 
 
 @hydra.main("configs/era5", config_name="default", version_base=None)
@@ -43,28 +46,25 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    dataloader, test_dataloader = build_dataloaders()
+    train_dataloader, valid_dataloader, test_dataloader, callback_dataloader = (
+        build_dataloaders()
+    )
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
-    cmap = mpl.colormaps.get_cmap("GnBu")
-    cmap.set_bad("grey")
-    clbk = Callback(
-        partial(wandb_2d_img_callback, cmap=cmap),
-        cfg.plot_interval,
-    )
+    clbk = Callback(plot, cfg.plot_interval)
     state = train(
         rng_train,
         model,
         optimizer,
         model.train_step,
         cfg.train_num_steps,
-        dataloader,
+        train_dataloader,
         model.valid_step,
         cfg.valid_interval,
         cfg.valid_num_steps,
-        dataloader,
+        valid_dataloader,
         callbacks=[clbk],
-        callback_dataloader=dataloader,
+        callback_dataloader=callback_dataloader,
     )
     metrics = evaluate(
         rng_test,
@@ -79,7 +79,6 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-# TODO(danj): update
 def build_dataloaders(
     batch_size: int = 4,
     num_ctx_min_per_t: int = 12,  # ~5% of 225 = 15 * 15
@@ -91,7 +90,7 @@ def build_dataloaders(
 ):
     grid_res, H_deg, W_deg, T_hrs, T_hrs_delta = 0.5, 7.5, 7.5, 30, 6
     H, W = int(H_deg / grid_res), int(W_deg / grid_res)
-    df_train, df_test = load_data(train_region, test_region)
+    df_train, df_test, revert = load_data(train_region, test_region)
     data_cols = ["hour_std", "lat_std", "lng_std", "elev_std", "temp_std"]
 
     def build_dataloader(df: pd.DataFrame, is_callback: bool = False):
@@ -138,11 +137,16 @@ def build_dataloaders(
                         forecast=True,
                         batch_size=batch_size,
                     )
-                    yield (batch, dft) if is_callback else batch
+                    yield (batch, revert) if is_callback else batch
 
         return dataloader
 
-    return build_dataloader(df_train), build_dataloader(df_test)
+    return (
+        build_dataloader(df_train),  # train
+        build_dataloader(df_test),  # valid
+        build_dataloader(df_test),  # test
+        build_dataloader(df_test, is_callback=True),  # callback
+    )
 
 
 def load_data(
@@ -228,7 +232,20 @@ def standardize_using_train(df_train: pd.DataFrame, df_test: pd.DataFrame):
         )
         return df.drop(columns=["z", "hour"]).reset_index(drop=True)
 
-    return standardize(df_train), standardize(df_test)
+    def revert_t(t: jax.Array):
+        hours = np.rint(t * hour_std + hour_mu).astype(int).astype("timedelta64[h]")
+        return t_min + hours
+
+    def revert_s(s: jax.Array):  # s: [T, H * W, 2]
+        std = jnp.array([lat_std, lng_std]).reshape(1, 1, 2)
+        mu = jnp.array([lat_mu, lng_mu]).reshape(1, 1, 2)
+        return jnp.round(s * std + mu, decimals=1)
+
+    return (
+        standardize(df_train),
+        standardize(df_test),
+        {"t": revert_t, "s": revert_s},
+    )
 
 
 def plot(
@@ -236,7 +253,7 @@ def plot(
     rng_step: int,
     state: TrainState,
     batch: SpatiotemporalBatch,
-    extra: dict,
+    revert: dict,
     **kwargs,
 ):
     """Logs `num_plots` from the given batch for 2D GPs."""
@@ -246,14 +263,39 @@ def plot(
         **batch,
         rngs={"dropout": rng_dropout, "extra": rng_extra},
     )
-    if isinstance(output, tuple):
-        output, _ = output  # throw away latent samples
+    # revert standardized locations and times for plotting
+    batch = replace(
+        batch,
+        s_ctx=revert["s"](batch.s_ctx),
+        s_test=revert["s"](batch.s_test),
+        t_ctx=t_to_label(revert["t"](batch.t_ctx)),
+        t_test=t_to_label(revert["t"](batch.t_test)),
+    )
+    f_pred, f_std = output.mu, output.std
+    f_min = min(batch.f_ctx.min(), batch.f_test.min(), f_pred.min())
+    f_max = max(batch.f_ctx.max(), batch.f_test.max(), f_pred.max())
+    norm = Normalize(f_min, f_max)
+    norm_std = Normalize(f_std.min(), f_std.max())
+    cmap = mpl.colormaps.get_cmap("GnBu")
+    cmap.set_bad("grey")
     path = f"/tmp/era5_{step}_{datetime.now().isoformat()}.png"
-    fig = batch.plot_2d(output.f_mu, output.f_std, **kwargs)
-    # TODO(danj): fix axes and labels
+    fig = batch.plot_2d(
+        f_pred,
+        f_std,
+        cmap=cmap,
+        norm=norm,
+        norm_std=norm_std,
+        **kwargs,
+    )
+    # TODO(danj): add tick labels for lat/lng
     fig.savefig(path)
     plt.close(fig)
     wandb.log({f"Step {step}": wandb.Image(path)})
+
+
+def t_to_label(t: jax.Array):
+    t = t.astype("M8[s]").astype(object)
+    return np.vectorize(lambda x: x.strftime("%H:%M, %b %d"))(t)
 
 
 if __name__ == "__main__":
