@@ -63,9 +63,9 @@ def main(cfg: DictConfig):
         cfg.valid_interval,
         cfg.valid_num_steps,
         valid_dataloader,
-        return_state="best",
         callbacks=[clbk],
         callback_dataloader=callback_dataloader,
+        return_state="best",
     )
     metrics = evaluate(
         rng_test,
