@@ -15,11 +15,11 @@ s_bias:
   num_basis: 5
   num_heads: 4
 t_sim:
-  _target_: dl4bi.sim.delta_time
+  _target_: dl4bi.sim.l2_dist
   _partial_: true
-  causal: True
 t_bias:
-  _target_: dl4bi.bias.Bias.build_scalar_bias
+  _target_: dl4bi.bias.Bias.build_rbf_network_bias
+  num_basis: 5
   num_heads: 4
 blk:
   _target_: dl4bi.transformer.KRBlock
