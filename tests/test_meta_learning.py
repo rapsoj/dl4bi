@@ -39,7 +39,7 @@ def test_models():
     valid_lens = jnp.array([22, 44, 97, 32])
     mask_ctx = mask_from_valid_lens(L, valid_lens)
     f = random.normal(rng_data, s.shape)
-    kr_block = KRBlock(
+    scanned_kr_block = KRBlock(
         MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
     )
     for model in [
@@ -54,7 +54,8 @@ def test_models():
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
-        lambda: ScanTNPKR(blk=kr_block),
+        lambda: TNPKR(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
+        lambda: ScanTNPKR(blk=scanned_kr_block),
         lambda: SGNP(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
     ]:
         m = model()
@@ -107,7 +108,7 @@ def test_context_data_leaks():
     # set second half to large value (different from using half the array because of attn)
     s2 = s.at[:, V:, :].set(jnp.full((B, L - V, 1), 10000))
     f2 = f.at[:, V:, :].set(jnp.full((B, L - V, 1), 10000))
-    kr_block = KRBlock(
+    scanned_kr_block = KRBlock(
         MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
     )
     for model in [
@@ -118,10 +119,11 @@ def test_context_data_leaks():
         ConvCNP,
         TETNP,
         TNPD,
-        lambda: ScanTNPKR(blk=kr_block),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
         lambda: TNPKR(blk=KRBlock(DeepKernelAttention())),
+        lambda: ScanTNPKR(blk=scanned_kr_block),
+        lambda: TNPKR(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
         lambda: SGNP(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
     ]:
         m = model()
@@ -184,7 +186,7 @@ def test_train_step_loss():
     batch_1 = d.batch(rng_b1, 1, N, L, True)
     batch_2 = d.batch(rng_b2, 1, N, L, True)
     rng_init, rng_drop, rng_extra, rng_step = random.split(rng, 4)
-    kr_block = KRBlock(
+    scanned_kr_block = KRBlock(
         MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
     )
     for model in [
@@ -196,7 +198,8 @@ def test_train_step_loss():
         TETNP,
         TNPKR,
         ConvCNP,
-        lambda: ScanTNPKR(blk=kr_block),
+        lambda: TNPKR(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
+        lambda: ScanTNPKR(blk=scanned_kr_block),
         lambda: SGNP(s_sim=l2_dist, s_bias=Bias.build_rbf_network_bias()),
     ]:
         m = model()
