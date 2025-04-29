@@ -21,6 +21,7 @@ from dl4bi.meta_learning import (
     CNP,
     NP,
     SGNP,
+    TETNP,
     TNPD,
     TNPKR,
     ConvCNP,
@@ -48,6 +49,7 @@ def test_models():
         CANP,
         ConvCNP,
         TNPD,
+        TETNP,
         TNPKR,
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(FastAttention()))),
@@ -103,6 +105,7 @@ def test_context_data_leaks():
     s = 4 * (random.uniform(rng_s, (B, L, 1)) - 0.5)  # [0, 1] -> [-0.5, 0.5] -> [-2, 2]
     f = random.normal(rng_f, s.shape)
     # set second half to large value (different from using half the array because of attn)
+    s2 = s.at[:, V:, :].set(jnp.full((B, L - V, 1), 10000))
     f2 = f.at[:, V:, :].set(jnp.full((B, L - V, 1), 10000))
     kr_block = KRBlock(
         MultiHeadAttention(BiasedScanAttention(s_bias=Bias.build_rbf_network_bias()))
@@ -113,6 +116,7 @@ def test_context_data_leaks():
         ANP,
         CANP,
         ConvCNP,
+        TETNP,
         TNPD,
         lambda: ScanTNPKR(blk=kr_block),
         lambda: TNPKR(blk=KRBlock(MultiHeadAttention(Attention()))),
@@ -143,7 +147,7 @@ def test_context_data_leaks():
         # with jax.profiler.trace("/tmp/tensorboard"):
         output_half = jit_m(
             params,
-            s_ctx=s,
+            s_ctx=s2,
             f_ctx=f2,
             s_test=s,
             mask_ctx=mask_ctx,
@@ -189,6 +193,7 @@ def test_train_step_loss():
         ANP,
         CANP,
         TNPD,
+        TETNP,
         TNPKR,
         ConvCNP,
         lambda: ScanTNPKR(blk=kr_block),
