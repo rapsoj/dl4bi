@@ -42,25 +42,25 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     ]
 
     # TRANSLATION INVARIANCE
-    # gp_benchmark(
-    #     seeds,
-    #     "2d",
-    #     gp_kernels_2d,
-    #     [f"2d/{m}" for m in models],
-    #     gp_main,
-    #     overrides,
-    #     "NeurIPS TNP-KR - Gaussian Processes",
-    #     dry_run=dry_run,
-    # )
-    img_benchmark(
+    gp_benchmark(
         seeds,
-        "configs/sir",
-        models,
-        sir_main,
+        "2d",
+        gp_kernels_2d,
+        [f"2d/{m}" for m in models],
+        gp_main,
         overrides,
-        "NeurIPS TNP-KR - SIR",
+        "NeurIPS TNP-KR - Gaussian Processes",
         dry_run=dry_run,
     )
+    # img_benchmark(
+    #     seeds,
+    #     "configs/sir",
+    #     models,
+    #     sir_main,
+    #     overrides,
+    #     "NeurIPS TNP-KR - SIR",
+    #     dry_run=dry_run,
+    # )
     # TODO(danj): look in plot_samples
     # test_translation(...)
     # test_multiresolution(...)
@@ -230,7 +230,5 @@ if __name__ == "__main__":
     match args.paper:
         case "tnp_kr":
             tnp_kr_paper(seeds, args.dry_run)
-        case "lore":
-            lore_paper(seeds, args.dry_run)
         case _:
             pass
