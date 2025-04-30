@@ -88,6 +88,7 @@ def main(cfg: DictConfig):
         valid_dataloader,
         callbacks=[Callback(clbk, cfg.plot_interval)],
         callback_dataloader=clbk_dataloader,
+        return_state="last",
     )
     metrics = evaluate(
         rng_test,
