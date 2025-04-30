@@ -1,4 +1,7 @@
 _target_: dl4bi.meta_learning.TETNP
+embed_f:
+  _target_: dl4bi.mlp.MLP
+  dims: [128, 128]
 encoder:
   _target_: dl4bi.transformer.TEISTEncoder
   num_blks: 5
@@ -76,9 +79,6 @@ encoder:
 decoder:
   _target_: dl4bi.mlp.MLP
   dims: [128, 128, 3]
-embed_f:
-  _target_: dl4bi.mlp.MLP
-  dims: [128, 128]
 output_fn:
-  _target_: dl4bi.model_output.DiagonalMVNOutput.from_activations
+  _target_: dl4bi.core.model_output.MultinomialOutput.from_activations
   _partial_: true
