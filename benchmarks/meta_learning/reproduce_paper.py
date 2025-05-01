@@ -52,15 +52,15 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     #     "NeurIPS TNP-KR - Gaussian Processes",
     #     dry_run=dry_run,
     # )
-    img_benchmark(
-        seeds,
-        "configs/sir",
-        models,
-        sir_main,
-        overrides,
-        "NeurIPS TNP-KR - SIR",
-        dry_run=dry_run,
-    )
+    # img_benchmark(
+    #     seeds,
+    #     "configs/sir",
+    #     models,
+    #     sir_main,
+    #     overrides,
+    #     "NeurIPS TNP-KR - SIR",
+    #     dry_run=dry_run,
+    # )
     # TODO(danj): look in plot_samples
     # test_translation(...)
     # test_multiresolution(...)
@@ -76,7 +76,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     #     models,
     #     era5_main,
     #     overrides + era5_overrides,
-    #     "NeurIPS TNP-KR - ERA5",
+    #     "NeurIPS TNP-KR - ERA5 - CNW",
     #     dry_run=dry_run,
     # )
     # era5_overrides = [
@@ -89,7 +89,7 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     #     models,
     #     era5_main,
     #     overrides + era5_overrides,
-    #     "NeurIPS TNP-KR - ERA5",
+    #     "NeurIPS TNP-KR - ERA5 - CWN",
     #     dry_run=dry_run,
     # )
 
@@ -108,24 +108,24 @@ def tnp_kr_paper(seeds: jax.Array, dry_run: bool = False):
     # )
 
     # NON-STATIONARY DISTRIBUTIONS
-    # img_benchmark(
-    #     seeds,
-    #     "configs/celeba",
-    #     models,
-    #     celeba_main,
-    #     overrides,
-    #     "NeurIPS TNP-KR - CelebA",
-    #     dry_run=dry_run,
-    # )
-    # img_benchmark(
-    #     seeds,
-    #     "configs/cifar_10",
-    #     models,
-    #     cifar_10_main,
-    #     overrides,
-    #     "NeurIPS TNP-KR - Cifar 10",
-    #     dry_run=dry_run,
-    # )
+    img_benchmark(
+        seeds,
+        "configs/celeba",
+        models,
+        celeba_main,
+        overrides,
+        "NeurIPS TNP-KR - CelebA",
+        dry_run=dry_run,
+    )
+    img_benchmark(
+        seeds,
+        "configs/cifar_10",
+        models,
+        cifar_10_main,
+        overrides,
+        "NeurIPS TNP-KR - Cifar 10",
+        dry_run=dry_run,
+    )
 
 
 def gp_benchmark(
