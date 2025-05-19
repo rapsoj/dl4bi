@@ -144,7 +144,6 @@ def so3_rotate(s, north: int = 0, east: int = 0, tilt: int = 0):
     3. Tilt the sphere by `tilt` degrees counterclockwise.
     """
     r = Rotation.from_euler("yzx", (-north, east, tilt), degrees=True)
-
     s = lonlat_to_xyz(s)
     s = r.apply(s)
     s = xyz_to_lonlat(s)
