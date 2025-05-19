@@ -107,7 +107,7 @@ def save_batches_for_tabpfn(
 
 # https://stackoverflow.com/a/1185413
 @partial(jit, static_argnames=["zyx"])
-def so3_rotate(s, zyx=list[int]):
+def so3_rotate(s, zyx=tuple[int, int, int]):
     """
     Performs a rotation of a sphere given a rotation matrix.
     Args:
