@@ -140,6 +140,13 @@ def scanned_exponential_network_bias(
     return exponential_network_bias(d, mask, a, b)
 
 
+def init_tisa_bias_params(mod: nn.Module, name: str, num_heads: int, num_basis: int):
+    a = mod.param(f"{name}_a", init.constant(1), (num_heads, num_basis))
+    b = mod.param(f"{name}_b", init.constant(1), (num_heads, num_basis))
+    c = mod.param(f"{name}_c", init.constant(0), (num_heads, num_basis))
+    return {"a": a, "b": b, "c": c}
+
+
 @jit
 def tisa_bias(
     d: jax.Array,  # [B, Q, K] or [E]
