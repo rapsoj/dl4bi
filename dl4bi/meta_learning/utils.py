@@ -14,8 +14,8 @@ from jax.scipy.spatial.transform import Rotation
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from dl4bi.core.train import TrainState, load_ckpt
-from dl4bi.meta_learning.data.spatial import SpatialBatch
+from ..core.train import TrainState, load_ckpt
+from .data.spatial import SpatialBatch
 
 
 def first_shape(arrays: Sequence[Union[jax.Array, None]]) -> tuple:
