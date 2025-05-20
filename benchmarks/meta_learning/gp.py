@@ -24,7 +24,6 @@ from dl4bi.core.train import (
 from dl4bi.meta_learning.data.spatial import SpatialBatch, SpatialData
 from dl4bi.meta_learning.utils import (
     cfg_to_run_name,
-    save_batches_for_tabpfn,
     so3_rotate,
 )
 
@@ -91,8 +90,6 @@ def main(cfg: DictConfig):
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
-    eval_path = path.parent / f"eval_data.npy"
-    save_batches_for_tabpfn(rng_test, valid_dataloader, cfg.valid_num_steps, eval_path)
 
 
 def build_dataloader(data: DictConfig, kernel: DictConfig, is_callback: bool = False):
