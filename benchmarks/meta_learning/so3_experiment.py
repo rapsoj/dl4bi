@@ -55,7 +55,7 @@ def so3_experiment(seeds: jax.Array, dry_run: bool = False):
             [
                 f"project_suffix=' - Rotated {rotation}'"
                 if rotation
-                else " - Not rotated",
+                else "project_suffix=' - Not rotated'",
                 "evaluate_only=True",
                 f"data.rotate=[{rotation}]",
             ],
