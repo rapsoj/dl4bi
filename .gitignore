@@ -3,7 +3,6 @@ cache
 **/ckpts/**
 *.code-workspace
 *.csv
-*.csv
 .DS_Store
 .env
 *.gif
