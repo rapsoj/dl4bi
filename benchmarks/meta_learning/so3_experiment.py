@@ -53,7 +53,9 @@ def so3_experiment(seeds: jax.Array, dry_run: bool = False):
             models,
             gp_main,
             [
-                f"project_suffix=' - Rotated {rotation}'",
+                f"project_suffix=' - Rotated {rotation}'"
+                if rotation
+                else " - Not rotated",
                 "evaluate_only=True",
                 f"data.rotate=[{rotation}]",
             ],
