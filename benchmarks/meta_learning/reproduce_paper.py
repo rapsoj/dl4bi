@@ -212,7 +212,7 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         rot_models,
         gp_main,
         overrides,
-        "Neurips BSA-TNP - Gaussian Processes",
+        "Neurips BSA-TNP - Gaussian Processes - Rotated",
         dry_run=dry_run,
     )
     for rot in rots:
@@ -224,11 +224,11 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
             gp_main,
             overrides
             + [
-                f"project_suffix=' - Rotated {rot}'",
+                f"project_suffix=' - {rot}'",
                 "evaluate_only=True",
                 f"data.rotate=[{rot}]",
             ],
-            "Neurips BSA-TNP - Gaussian Processes",
+            "Neurips BSA-TNP - Gaussian Processes - Rotated",
             dry_run=dry_run,
         )
 
