@@ -26,10 +26,7 @@ def first_shape(arrays: Sequence[Union[jax.Array, None]]) -> tuple:
 
 
 def cfg_to_run_name(cfg: DictConfig):
-    if cfg.model.get("name", None) is not None:
-        return cfg.model.name
-    else:
-        return cfg.model._target_.split(".")[-1]
+    return cfg.model.get("name") or cfg.model._target_.split(".")[-1]
 
 
 def load_ckpts(
@@ -115,7 +112,6 @@ def lonlat_to_xyz(lonlat: jax.Array):
     """
     lonlat = jnp.deg2rad(lonlat)
     lon, lat = jnp.rollaxis(lonlat, -1)
-
     x = jnp.cos(lat) * jnp.cos(lon)
     y = jnp.cos(lat) * jnp.sin(lon)
     z = jnp.sin(lat)
@@ -129,7 +125,6 @@ def xyz_to_lonlat(xyz: jax.Array):
     """
     r = jnp.linalg.norm(xyz, axis=-1)
     x, y, z = jnp.rollaxis(xyz, -1)
-
     lon = jnp.arctan2(y, x)
     lat = jnp.arcsin(z / r)
     return jnp.rad2deg(jnp.stack((lon, lat), axis=-1))
@@ -149,7 +144,6 @@ def so3_rotate(s, north: int = 0, east: int = 0, tilt: int = 0):
     3. Tilt the sphere by `tilt` degrees counterclockwise.
     """
     r = Rotation.from_euler("yzx", (-north, east, tilt), degrees=True)
-
     s = lonlat_to_xyz(s)
     s = r.apply(s)
     s = xyz_to_lonlat(s)
