@@ -201,7 +201,6 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
     rot_models = ["2d/bsa_tnp", "2d/geo_bsa_tnp", "2d/sa_tnp"]
     rot_kernels = ["geo"]
     rots = [  # north, east, tilt
-        "",
         "60, 30, 0",
         "60, 30, 20",
     ]
