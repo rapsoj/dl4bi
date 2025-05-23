@@ -1,28 +1,6 @@
 # Reproduce all BSA-TNP Paper Results
 `python reproduce_paper.py [--dry_run]`
 
-# Gaussian Processes
-`python gp.py data=1d kernel=rbf model=1d/bsa_tnp seed=7 [wandb=False] [+name="Experiment name"]`
-
-# Bayesian Optimization
-`python bayes_opt.py data=1d kernel=rbf model=1d/bsa_tnp seed=7 [wandb=False] [+name="Experiment name"]`
-
-# Population Genetics
-`python popgen.py model=bsa_tnp seed=7 [wandb=False] [+name="Experiment name"]`
-
-# Outbreaks
-`python outbreaks.py model=bsa_tnp seed=7 [wandb=False] [+name="Experiment name"]`
-
-# MNIST
-`python mnist.py model=bsa_tnp seed=7 [wandb=False] [+name="Experiment name"]`
-
-# CelebA
-`python celeba.py model=bsa_tnp seed=7 [wandb=False] [+name="Experiment name"]`
-
-# TabPFN
-To run `hier_bayes_pfn.py`, you need to use a PyTorch (not JAX) environment. If you use pyenv, you can do this with:
-`PYENEV_VERSION=torch python hier_bayes_pfn.py`
-
 NOTE: The Tensorflow Dataset `celeb_a` is broken (invalid checksum), so this script downloads the files directly from the [source](https://drive.google.com/drive/folders/0B7EVK8r0v71pWEZsZE9oNnFzTm8?resourcekey=0-5BR16BdXnb8hVj6CNHKzLg) on Google Drive. However, sometimes this also fails due to Google Drive limits (many people download this dataset from scripts). If this happens, you can download the images directly [here](https://drive.google.com/file/d/0B7EVK8r0v71pZjFTYXZWM3FlRnM/view?usp=drive_link&resourcekey=0-dYn9z10tMJOBAkviAcfdyQ) and the dataset partition list [here](https://drive.google.com/file/d/0B7EVK8r0v71pY0NSMzRuSXJEVkk/view?usp=drive_link&resourcekey=0-i4TGCi_51OtQ5K9FSp4EDg). You will need to put these in the `dl4bi/benchmarks/meta_learning/cache/celeba` directory and rerun the `celeba.py` script.
 
 # Heaton
@@ -36,33 +14,4 @@ load("AllSatelliteTemps.RData")
 path <- "~/dl4bi/benchmarks/meta_learning/cache/heaton/"
 all.sim.data %>% write_csv(str_c(path, "sim.csv"))
 all.sat.temps %>% write_csv(str_c(path, "sat.csv"))
-```
-
-# Plotting Samples
-To compare models after running `python reproduce_paper.py b_tnp`:
-```bash
-# GP 1D on [-2, 2]
-python plot_samples.py --config-path=configs/gp project="BSA-TNP - Gaussian Processes" data=1d kernel=rbf seed=20 +num_ctx=16
-python plot_samples.py --config-path=configs/gp project="BSA-TNP - Gaussian Processes" data=1d kernel=periodic seed=20 +num_ctx=16
-python plot_samples.py --config-path=configs/gp project="BSA-TNP - Gaussian Processes" data=1d kernel=matern_3_2 seed=20 +num_ctx=16
-# GP 2D
-python plot_samples.py --config-path=configs/gp project="BSA-TNP - Gaussian Processes" data=2d kernel=rbf seed=20 +num_ctx=128
-# CelebA
-python plot_samples.py --config-path=configs/celeba project="BSA-TNP - CelebA" seed=20 +num_ctx=128
-# MNIST
-python plot_samples.py --config-path=configs/mnist project="BSA-TNP - MNIST" seed=20 +num_ctx=128
-# Cifar 10
-python plot_samples.py --config-path=configs/cifar_10 project="BSA-TNP - Cifar 10" seed=20 +num_ctx=128
-# SIR
-python plot_samples.py --config-path=configs/sir project="BSA-TNP - SIR" seed=20 +num_ctx=128
-# SIR with larger image size
-python plot_samples.py --config-path=configs/sir project="BSA-TNP - SIR" seed=20 +num_ctx=128 data=space_128x128
-```
-
-Examples with options:
-```bash
-python plot_samples.py --config-path=configs/gp seed=20 +exclude='.*RFF.*' +num_samples=3
-python plot_samples.py --config-path=configs/gp project="Gaussian Processes" data=2d kernel=periodic seed=20 +only='.*TNP.*' +num_samples=3
-python plot_samples.py --config-path=configs/gp data=1d_long kernel=periodic seed=20 +exclude='.*B.NP.*' +num_samples=3
-python plot_samples.py --config-path=configs/mnist seed=20 +exclude='.*B.NP.*' +num_samples=3
 ```
