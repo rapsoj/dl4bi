@@ -109,7 +109,6 @@ def load_data(
     pct_valid: float = 0.1,
     pct_test: float = 0.1,
 ):
-    df = pd.read_csv("")
     rng_valid, rng_test = random.split(rng)
     path = Path("cache/denge.csv")
     df = pd.read_csv(path)
