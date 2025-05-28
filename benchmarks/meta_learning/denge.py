@@ -113,7 +113,7 @@ def load_data(
     path = Path("cache/denge.csv")
     df = pd.read_csv(path)
     df = df.sort_values(by="date").reset_index(drop=True)
-    df['date'] = pd.to_datetime(df['date'])
+    df["date"] = pd.to_datetime(df["date"])
     df["day_of_week"] = df.date.dt.day_of_week
     df["is_weekend"] = (df.date.dt.day_of_week >= 6).astype(int)
     df["date"] = (df.date - df.date.min()).dt.total_seconds()
@@ -130,7 +130,9 @@ def load_data(
     df_train, df_valid = df_train[:-num_valid], df_train[-num_valid:]
     df_train = df_train[:num_train]
     df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
-    split_xstf = lambda df: [df[c].values for c in [x_cols, s_cols, t_cols, f_cols]]
+    split_xstf = lambda df: [
+        jnp.array(df[c].values) for c in [x_cols, s_cols, t_cols, f_cols]
+    ]
     return split_xstf(df_train), split_xstf(df_valid), split_xstf(df_test)
 
 
