@@ -141,8 +141,8 @@ def standardize_by_train(
     df_valid: pd.DataFrame,
     df_test: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    cat_feats = {"district"}
-    num_feats = list(set(df_train.columns) - cat_feats)
+    cat_feats = ["district"]
+    num_feats = list(set(df_train.columns) - set(cat_feats))
     tx = ColumnTransformer(
         transformers=[
             ("num", MinMaxScaler(), num_feats),
