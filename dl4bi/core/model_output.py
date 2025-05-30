@@ -173,6 +173,39 @@ jax.tree_util.register_pytree_node(
 
 
 @dataclass(frozen=True)
+class PoissonOutput(DistributionOutput):
+    lam: jax.Array
+
+    @classmethod
+    def from_activations(cls, act: jax.Array, **kwargs):
+        return PoissonOutput(softplus(act))
+
+    @classmethod
+    def from_latent_activations(cls, act: jax.Array, min_std: float = 0.0, **kwargs):
+        act = act.mean(axis=1)  # average latent samples
+        return PoissonOutput(softplus(act))
+
+    @property
+    def std(self):
+        return jnp.sqrt(self.lam)
+
+    def nll(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
+        mask = None if mask is None else mask[..., 0]
+        return -stats.poisson.logpmf(x, self.lam).mean(where=mask)
+
+    def metrics(self, x: jax.Array, mask: Optional[jax.Array] = None, **kwargs):
+        return {"NLL": self.nll(x, mask)}
+
+
+# register to use in jitted functions
+jax.tree_util.register_pytree_node(
+    PoissonOutput,
+    lambda d: ((d.lam,), None),
+    lambda _aux, children: PoissonOutput(*children),
+)
+
+
+@dataclass(frozen=True)
 class MDNOutput(DistributionOutput):
     pi_logits: jax.Array  # [B, K]
     mu: jax.Array  # [B, K]
@@ -197,6 +230,14 @@ class MDNOutput(DistributionOutput):
 
     def metrics(self, x: jax.Array, **kwargs):
         return {"NLL": self.nll(x)}
+
+
+# register to use in jitted functions
+jax.tree_util.register_pytree_node(
+    MDNOutput,
+    lambda d: ((d.pi_logits, d.mu, d.std), None),
+    lambda _aux, children: MDNOutput(*children),
+)
 
 
 @dataclass(frozen=True)
@@ -232,3 +273,11 @@ class VAEOutput(DistributionOutput):
 
     def metrics(self, f: jax.Array, var: Optional[float] = None, **kwargs):
         return {"NLL": self.nll(f, var), "MSE": self.mse(f)}
+
+
+# register to use in jitted functions
+jax.tree_util.register_pytree_node(
+    VAEOutput,
+    lambda d: ((d.f_hat, d.encoder_outputs), None),
+    lambda _aux, children: VAEOutput(*children),
+)

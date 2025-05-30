@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import pickle
 from pathlib import Path
 
 import hydra
@@ -15,6 +16,7 @@ from sklearn.preprocessing import MinMaxScaler, OrdinalEncoder
 
 from dl4bi.core.train import (
     evaluate,
+    infer,
     save_ckpt,
     train,
 )
@@ -62,6 +64,15 @@ def main(cfg: DictConfig):
         test_dataloader,
         cfg.test_num_steps,
     )
+    results = []
+    batches = test_dataloader(rng_test)
+    for _ in range(cfg.infer_num_batches):
+        rng_i, rng = random.split(rng)
+        batch = next(batches)
+        output = infer(rng_i, state, batch)
+        results += [(batch, output)]
+    with open("/tmp/results.pkl", "wb") as fp:
+        pickle.dump(results, fp)
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
@@ -141,13 +152,12 @@ def standardize_by_train(
     df_valid: pd.DataFrame,
     df_test: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    cat_feats = ["district"]
-    num_feats = list(set(df_train.columns) - set(cat_feats))
+    ord_feats = ["district"]
+    num_feats = list(set(df_train.columns) - set(ord_feats))
     tx = ColumnTransformer(
         transformers=[
+            ("ord", OrdinalEncoder(), ord_feats),
             ("num", MinMaxScaler(), num_feats),
-            # NOTE: probably want to embed districs as IDs instead of binarize
-            ("cat", OrdinalEncoder(), cat_feats),
         ],
         remainder="passthrough",
         verbose_feature_names_out=False,
