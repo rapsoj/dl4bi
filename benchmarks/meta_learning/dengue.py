@@ -81,15 +81,19 @@ def main(cfg: DictConfig):
         rng_i, rng = random.split(rng)
         batch = next(batches)
         output = infer(rng_i, state, batch)
-        district, t_ctx, t_test, f_ctx, f_test = (
+        d_ctx, d_test, t_ctx, t_test, f_ctx, f_test = (
+            batch.ctx["x_ctx"][..., 0],
             batch.test["x_test"][..., 0],
             batch.ctx["t_ctx"],
             batch.test["t_test"],
             batch.ctx["f_ctx"],
             batch.test["f_test"],
         )
-        districts += [
-            np.array([invert_district(d.reshape(-1, 1)).flatten() for d in district])
+        ds_ctx += [
+            np.array([invert_district(d.reshape(-1, 1)).flatten() for d in d_ctx])
+        ]
+        ds_test += [
+            np.array([invert_district(d.reshape(-1, 1)).flatten() for d in d_test])
         ]
         lambdas += [np.array(output.lam)]
         ts_ctx += [np.array([invert_t(t_i.flatten()) for t_i in t_ctx])]
@@ -104,7 +108,8 @@ def main(cfg: DictConfig):
                 "t_test": stack(ts_test),
                 "f_ctx": stack(fs_ctx),
                 "f_test": stack(fs_test),
-                "district": stack(districts),
+                "district_ctx": stack(districts_ctx),
+                "district_test": stack(districts_test),
             },
             fp,
         )
