@@ -4,9 +4,9 @@ defaults:
 seed: 42
 wandb: True
 project: Dengue Fever
-train_num_steps: 1000
+train_num_steps: 500
 valid_num_steps: 100
-valid_interval: 100
+valid_interval: 50
 test_num_steps: 100
 infer_num_steps: 100
 data:
