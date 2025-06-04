@@ -5,6 +5,7 @@ from pathlib import Path
 import hydra
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pandas as pd
 import wandb
 from flax.core.frozen_dict import FrozenDict
@@ -39,7 +40,9 @@ def main(cfg: DictConfig):
     path.parent.mkdir(parents=True, exist_ok=True)
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader, valid_dataloader, test_dataloader = build_dataloaders(**cfg.data)
+    train_dataloader, valid_dataloader, test_dataloader, tx = build_dataloaders(
+        **cfg.data
+    )
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
     state = train(
@@ -64,15 +67,52 @@ def main(cfg: DictConfig):
     )
     wandb.log({f"Test {m}": v for m, v in metrics.items()})
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
-    results = []
     batches = test_dataloader(rng_test)
-    for _ in range(cfg.infer_num_batches):
+    invert_district = tx.transformers_[0][1].inverse_transform
+    t_min = tx.transformers_[1][1].data_min_[-1]
+    t_max = tx.transformers_[1][1].data_max_[-1]
+    t_diff = t_max - t_min
+    start_date = pd.Timestamp("1999-12-31", tz="UTC")
+    invert_t = lambda t: start_date + pd.to_timedelta(
+        np.array(t) * t_diff + t_min, unit="s"
+    )
+    lambdas, districts, ts_ctx, ts_test, fs_ctx, fs_test = [], [], [], [], [], []
+    for _ in range(cfg.infer_num_steps):
         rng_i, rng = random.split(rng)
         batch = next(batches)
         output = infer(rng_i, state, batch)
-        results += [(batch, output)]
+        district, t_ctx, t_test, f_ctx, f_test = (
+            batch.test["x_test"][..., 0],
+            batch.ctx["t_ctx"],
+            batch.test["t_test"],
+            batch.ctx["f_ctx"],
+            batch.test["f_test"],
+        )
+        districts += [
+            np.array([invert_district(d.reshape(-1, 1)).flatten() for d in district])
+        ]
+        lambdas += [np.array(output.lam)]
+        ts_ctx += [np.array([invert_t(t_i.flatten()) for t_i in t_ctx])]
+        ts_test += [np.array([invert_t(t_i.flatten()) for t_i in t_test])]
+        fs_ctx += [np.array(f_ctx)]
+        fs_test += [np.array(f_test)]
     with open("/tmp/results.pkl", "wb") as fp:
-        pickle.dump(results, fp)
+        pickle.dump(
+            {
+                "lambda": stack(lambdas),
+                "t_ctx": stack(ts_ctx),
+                "t_test": stack(ts_test),
+                "f_ctx": stack(fs_ctx),
+                "f_test": stack(fs_test),
+                "district": stack(districts),
+            },
+            fp,
+        )
+
+
+def stack(x):
+    x = np.array(x)
+    return x.reshape(-1, *x.shape[2:])
 
 
 def build_dataloaders(
@@ -85,7 +125,7 @@ def build_dataloaders(
     pct_test: float = 0.1,
 ):
     B = batch_size
-    train, valid, test = load_data(pct_train, pct_valid, pct_test)
+    train, valid, test, tx = load_data(pct_train, pct_valid, pct_test)
 
     def build_dataloader(x: jax.Array, s: jax.Array, t: jax.Array, f: jax.Array):
         N, L = x.shape[0], num_ctx_max + num_test
@@ -108,7 +148,12 @@ def build_dataloaders(
 
         return dataloader
 
-    return build_dataloader(*train), build_dataloader(*valid), build_dataloader(*test)
+    return (
+        build_dataloader(*train),
+        build_dataloader(*valid),
+        build_dataloader(*test),
+        tx,
+    )
 
 
 def load_data(
@@ -116,12 +161,15 @@ def load_data(
     pct_valid: float = 0.1,
     pct_test: float = 0.1,
 ):
+    start_date = pd.Timestamp("12-31-1999", tz="UTC")
     path = Path("cache/dengue.parquet")
     df = pd.read_parquet(path)
     df = df.sort_values(by="date").reset_index(drop=True)
     df["date"] = pd.to_datetime(df["date"])
+    df["day_of_year"] = df.date.dt.day_of_year
+    df["year"] = df.date.dt.year
     df["is_weekend"] = (df.date.dt.day_of_week >= 6).astype(int)
-    df["date"] = (df.date - df.date.min()).dt.total_seconds()
+    df["date"] = (df.date - start_date).dt.total_seconds()
     s_cols = ["lat", "long"]
     t_cols = ["date"]
     f_cols = ["n"]  # target columns
@@ -136,20 +184,21 @@ def load_data(
     df_train, df_test = df[:-num_test], df[-num_test:]
     df_train, df_valid = df_train[:-num_valid], df_train[-num_valid:]
     df_train = df_train[:num_train]
-    df_train, df_valid, df_test = standardize_by_train(df_train, df_valid, df_test)
+    df_train, df_valid, df_test, tx = standardize_by_train(df_train, df_valid, df_test)
     split_xstf = lambda df: [
         jnp.array(df[c].values) for c in [x_cols, s_cols, t_cols, f_cols]
     ]
-    return split_xstf(df_train), split_xstf(df_valid), split_xstf(df_test)
+    return split_xstf(df_train), split_xstf(df_valid), split_xstf(df_test), tx
 
 
 def standardize_by_train(
     df_train: pd.DataFrame,
     df_valid: pd.DataFrame,
     df_test: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, ColumnTransformer]:
     num_feats = list(df_train.columns)
     num_feats.remove("district")
+    num_feats.remove("n")
     ord_feats = ["district"]
     tx = ColumnTransformer(
         transformers=[
@@ -166,7 +215,7 @@ def standardize_by_train(
     df_train = pd.DataFrame(x_train, columns=cols).infer_objects()
     df_valid = pd.DataFrame(x_valid, columns=cols).infer_objects()
     df_test = pd.DataFrame(x_test, columns=cols).infer_objects()
-    return df_train, df_valid, df_test
+    return df_train, df_valid, df_test, tx
 
 
 if __name__ == "__main__":
