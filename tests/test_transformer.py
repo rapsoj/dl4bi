@@ -74,4 +74,4 @@ def test_set_transformer_block():
     rng_data, rng_init = random.split(rng)
     x = random.normal(rng_data, (B, L, D))
     x_enc, _ = SetTransformerBlock().init_with_output(rng_init, x)
-    assert x_enc.shape == (1, 1, D)
+    assert x_enc.shape == (4, 1, D)

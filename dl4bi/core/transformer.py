@@ -321,6 +321,17 @@ class KRBlock(nn.Module):
 
 
 class AttentivePooler(nn.Module):
+    """An Attentive Pooler.
+
+    Args:
+        num_seeds: Number of prototype embeddings to reduce to by pooling.
+        pool: The pooling function, typically multihead attention.
+        mix: A mixing function, typically a transformer encoder.
+
+    Returns:
+        An instance of the `AttentivePooler`.
+    """
+
     num_seeds: int = 1
     pool: nn.Module = MultiHeadAttention()
     mix: nn.Module = TransformerEncoder(num_blks=1)
@@ -335,12 +346,23 @@ class AttentivePooler(nn.Module):
         B, L, D = x.shape
         seeds = self.param("seeds", init.truncated_normal(), (1, self.num_seeds, D))
         seeds = jnp.repeat(seeds, B, axis=0)
-        return self.mix(self.pool(seeds, x, x, mask))
+        x, _ = self.pool(seeds, x, x, mask)
+        return self.mix(x)
 
 
 class SetTransformerBlock(nn.Module):
+    """A Set Transformer Block.
+
+    Args:
+        mix: A mixing function, typically a transformer encoder.
+        pool: The pooling function or module.
+
+    Returns:
+        An instance of the `AttentivePooler`.
+    """
+
     mix: nn.Module = TransformerEncoder(num_blks=2)
-    distill: nn.Module = AttentivePooler()
+    pool: nn.Module = AttentivePooler()
 
     @nn.compact
     def __call__(
@@ -349,4 +371,4 @@ class SetTransformerBlock(nn.Module):
         mask: Optional[jax.Array] = None,
         training: bool = False,
     ):
-        return self.distill(self.mix(x, mask, training), mask, training)
+        return self.pool(self.mix(x, mask, training), mask, training)
