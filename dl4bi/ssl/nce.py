@@ -17,13 +17,15 @@ from jax.nn import sigmoid
 from jax.scipy import stats
 from tqdm import tqdm
 
+from dl4bi.core.mlp import MLP
+
 
 def main():
     num_steps, batch_size = 1000, 512
     rng = random.key(42)
     optimizer = optax.adamw(1e-3)
     x = sample_gmm(rng, batch_size)
-    model = MLP()
+    model = MLP([128, 128, 128], nn.gelu)
     params = model.init(rng, x)["params"]
     state = TrainState.create(apply_fn=model.apply, params=params, tx=optimizer)
     pbar = tqdm(range(num_steps), unit="batches")
@@ -37,22 +39,6 @@ def main():
     plt.plot(np.array(x).flatten(), np.array(gmm_density(x)).flatten())
     plt.plot(np.array(x).flatten(), np.exp(log_pm).flatten())
     plt.savefig("nce.png")
-
-
-class MLP(nn.Module):
-    @nn.compact
-    def __call__(self, x: jax.Array):
-        return nn.Sequential(
-            [
-                nn.Dense(128),
-                nn.gelu,
-                nn.Dense(128),
-                nn.gelu,
-                nn.Dense(128),
-                nn.gelu,
-                nn.Dense(1),
-            ]
-        )(x)
 
 
 @partial(jit, static_argnames=("n",))
