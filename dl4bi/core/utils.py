@@ -1,7 +1,10 @@
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import jit, lax
+from jax.lax import conv_general_dilated
 from jax.tree_util import Partial
 
 
@@ -22,6 +25,48 @@ def safe_stack(*arrays):
 @jit
 def to_none(x: jax.Array):
     return None
+
+
+@partial(jit, static_argnames=("last_n",))
+def causal_moving_average(x: jax.Array, last_n: int) -> jax.Array:
+    """
+    Args:
+        x: An array of shape [B, L].
+
+    Returns:
+        An array of shape [B, L-last_n+1].
+    """
+    kernel = jnp.ones((last_n, 1, 1)) / last_n  # [last_n]
+    y = conv_general_dilated(
+        x[..., None],  # [B, L, C=1]
+        kernel,
+        window_strides=(1,),
+        padding="VALID",
+        dimension_numbers=("NWC", "WIO", "NWC"),
+    )
+    return y[..., 0]  # [B, L-last_n]
+
+
+@partial(jit, static_argnames=("n",))
+def edge_filled_centered_moving_average(x: jax.Array, n: int) -> jax.Array:
+    """
+    Args:
+        x: An array of shape [B, L].
+
+    Returns:
+        An array of shape [B, L].
+    """
+    pad = (n - 1) // 2
+    x_pad = jnp.pad(x, ((0, 0), (pad, pad)), mode="edge")
+    y = lax.reduce_window(
+        x_pad,
+        init_value=0.0,
+        computation=lax.add,
+        window_dimensions=(1, n),
+        window_strides=(1, 1),
+        padding="VALID",
+    )
+    return y / n
 
 
 def pad_concat(x: jax.Array, y: jax.Array):

@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jax.tree_util import Partial
 
-from ..core import ResNetBlock
+from ..core.conv import ResNetBlock
 
 
 class ResNet(nn.Module):
