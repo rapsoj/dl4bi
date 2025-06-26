@@ -67,7 +67,7 @@ def main(cfg: DictConfig):
 
 def build_dataloaders(
     batch_size: int = 64,
-    num_ctx: int = 365 * 2,
+    num_ctx: int = 384,
     num_test: int = 30,
     pct_train: float = 0.8,
     pct_valid: float = 0.1,
@@ -107,13 +107,17 @@ def load_data(
     features = ["date", "district", "n"]
     df = pd.read_parquet(path)[features]
     df = df.set_index("date").sort_index()
+    # TODO(danj): separate model for later years?
+    # df = df[df.index < "2017-01-01"]
     idx = pd.date_range(df.index.min(), df.index.max())
-    df = df.groupby("district").apply(forward_fill, idx, include_groups=True)
+    df = df.groupby("district").apply(forward_fill, idx)
+    df.index = df.index.droplevel(0)
+    # index: date, columns: districts, values: n
+    df = df.pivot(columns="district", values="n")
     N = df.shape[0]
     num_train, num_valid, num_test = map(
         lambda pct: int(N * pct), (pct_train, pct_valid, pct_test)
     )
-    # TODO(danj): fix indexing when using multiindex
     df_train, df_test = df[:-num_test], df[-num_test:]
     df_train, df_valid = df_train[:-num_valid], df_train[-num_valid:]
     df_train = df_train[:num_train]
@@ -122,10 +126,14 @@ def load_data(
     # return standardize_by_train(df_train, df_valid, df_test)
 
 
+# TODO(danj): think of a better filling strategy
 def forward_fill(df, idx):
+    district = df["district"].iloc[0]
     df = df.reindex(idx)
-    df["district"] = df["district"].iloc[0]
+    num_na = df["n"].isna().sum()
+    df["district"] = district
     df["n"] = df["n"].ffill()
+    print(f"forward filled {num_na} 'n' values for {district}")
     return df
 
 
