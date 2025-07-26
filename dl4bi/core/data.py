@@ -113,8 +113,9 @@ class Batch(Mapping):
 
 
 # TODO(danj): this copies CUDA state which reserved memory
-# for dataloaders that don't require CUDA
-ctx = mp.get_context("spawn")
+# for dataloaders that don't require CUDA, but is required
+# for multiprocessing with JAX...
+# ctx = mp.get_context("spawn")
 
 
 def dataloader_worker(

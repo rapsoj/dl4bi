@@ -48,13 +48,13 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    df_train, df_valid, df_test, revert = load_data(**cfg.data.splits)
-    train_dataloader = partial(dataloader, df=df_train, **cfg.data.train_dataloader)
-    valid_dataloader = partial(dataloader, df=df_valid, **cfg.data.valid_dataloader)
-    test_dataloader = partial(dataloader, df=df_test, **cfg.data.test_dataloader)
+    ds_train, ds_valid, ds_test, revert = load_data(**cfg.data.splits)
+    train_dataloader = partial(dataloader, ds=ds_train, **cfg.data.train_dataloader)
+    valid_dataloader = partial(dataloader, ds=ds_valid, **cfg.data.valid_dataloader)
+    test_dataloader = partial(dataloader, ds=ds_test, **cfg.data.test_dataloader)
     callback_dataloader = partial(
         dataloader,
-        df=df_valid,
+        ds=ds_valid,
         is_callback=True,
         revert=revert,
         **cfg.data.valid_dataloader,
@@ -92,7 +92,7 @@ def main(cfg: DictConfig):
 
 def dataloader(
     rng: jax.Array,
-    df: pd.DataFrame,
+    ds: xr.Dataset,
     batch_size: int = 16,
     num_ctx_min_per_t: int = 45,
     num_ctx_max_per_t: int = 225,
@@ -105,37 +105,44 @@ def dataloader(
     is_callback: bool = False,
     revert: Optional[Callable] = None,
 ):
-    grid_res = 0.25
-    H, W = int(H_deg / grid_res), int(W_deg / grid_res)
-    x_cols = ["elev_std", "hour_of_day_norm"]
-    s_cols = ["lat_std", "lng_std"]
-    t_cols = ["hour_std"]
-    f_cols = ["temp_std"]
-    data_cols = x_cols + s_cols + t_cols + f_cols
-    lat_uniq, lng_uniq = df.latitude.unique(), df.longitude.unique()
+    lat_uniq, lng_uniq = ds.latitude.data, ds.longitude.data
     lat_choices = lat_uniq[lat_uniq <= lat_uniq.max() - H_deg]
     lng_choices = lng_uniq[lng_uniq <= lng_uniq.max() - W_deg]
     while True:
-        # 1. Select random start time and filter times to every T_hrs_delta
+        # filter to random starting time and lat/lng block
         rng_t, rng_lat, rng_lng, rng_b, rng = random.split(rng, 5)
         hr_start = random.choice(rng_t, T_hrs_delta, (1,)).item()
-        dft = df[(df.valid_time.dt.hour + hr_start) % T_hrs_delta == 0]
-        # 2. Select a random lat/lng region that is H_deg x W_deg
         lat_start = random.choice(rng_lat, lat_choices, (1,)).item()
         lng_start = random.choice(rng_lng, lng_choices, (1,)).item()
-        dft = dft[(dft.latitude >= lat_start) & (dft.latitude < lat_start + H_deg)]
-        dft = dft[(dft.longitude >= lng_start) & (dft.longitude < lng_start + W_deg)]
-        # 3. Reshape data to [T, H, W, D]
-        shape = (dft.valid_time.nunique(), H, W, -1)
-        values = dft[data_cols].values.reshape(shape)
-        # 4. Separate out x, s, t, and f
-        subset = SpatiotemporalData(
-            x=values[..., :2],  # [T, H, W, 2]
-            s=values[..., 2:4],  # [T, H, W, 2]
-            t=values[:, 0, 0, 4],  # [T]
-            f=values[..., [5]],  # [T, H, W, 1]
+        time_idx = (ds.hour_of_day + hr_start) % T_hrs_delta == 0
+        ds_subset = ds.sel(
+            time=ds.time[time_idx],
+            # add or subtract 1e-6 because upper bounds are exclusive
+            latitude=slice(lat_start + H_deg, lat_start + 1e-6),  # lats are decreasing
+            longitude=slice(lng_start, lng_start + W_deg - 1e-6),  # lngs are increasing
         )
-        # 5. Create a number of batches from this filtered subset
+        elev_std = ds_subset.elevation_standardized
+        subset = SpatiotemporalData(
+            x=jnp.stack(
+                [
+                    elev_std.values,
+                    ds_subset.hour_of_day_normalized.broadcast_like(elev_std).values,
+                ],
+                axis=-1,
+            ),
+            s=jnp.stack(
+                [
+                    ds_subset.latitude_standardized.broadcast_like(elev_std).values,
+                    ds_subset.longitude_standardized.broadcast_like(elev_std).values,
+                ],
+                axis=-1,
+            ),
+            t=ds_subset.hour_since_start_standardized.values,
+            f=ds_subset.temperature_standardized.broadcast_like(elev_std).values[
+                ..., None
+            ],
+        )
+        # create a number of batches from this filtered subset
         for _ in range(num_batches_per_subset):
             rng_b, rng = random.split(rng)
             batch = subset.batch(
@@ -157,17 +164,17 @@ def load_data(
     valid_region: str = "northern_europe",
     test_region: str = "western_europe",
 ):
-    df_train = load_cached(train_region)
-    df_valid = load_cached(valid_region)
-    df_test = load_cached(test_region)
-    return standardize_using_train(df_train, df_valid, df_test)
+    ds_train = load_cached(train_region)
+    ds_valid = load_cached(valid_region)
+    ds_test = load_cached(test_region)
+    return standardize_using_train(ds_train, ds_valid, ds_test)
 
 
-def load_cached(region: str = "central_europe"):
-    download_if_not_cached()
+def load_cached(region: str = "central_europe") -> xr.Dataset:
     ds = xr.open_mfdataset(f"cache/era5/{region}/2019_*.nc", combine="by_coords")
-    df = ds.to_dataframe()[["t2m", "z"]].reset_index()
-    return df
+    ds = ds.rename({"valid_time": "time", "z": "elevation", "t2m": "temperature"})
+    ds = ds.assign_coords({"hour_of_day": ("time", ds.time.dt.hour.data)})
+    return ds.load()
 
 
 def download_if_not_cached():
@@ -215,32 +222,56 @@ def download_if_not_cached():
 
 
 def standardize_using_train(
-    df_train: pd.DataFrame,
-    df_valid: pd.DataFrame,
-    df_test: pd.DataFrame,
+    ds_train: xr.Dataset,
+    ds_valid: xr.Dataset,
+    ds_test: xr.Dataset,
 ):
-    t_min = df_train.valid_time.min()
-    df_train["hour"] = (df_train.valid_time - t_min) / pd.Timedelta(hours=1)
-    hour_mu, hour_std = df_train.hour.mean(), df_train.hour.std()
-    lat_mu, lat_std = df_train.latitude.mean(), df_train.latitude.std()
-    lng_mu, lng_std = df_train.longitude.mean(), df_train.longitude.std()
-    elev_mu, elev_std = df_train.z.mean(), df_train.z.std()
-    temp_mu, temp_std = df_train.t2m.mean(), df_train.t2m.std()
+    t_min = ds_train.time.min()
 
-    def standardize(df: pd.DataFrame):
-        df["hour_of_day_norm"] = df.valid_time.dt.hour / 23.0
-        df["hour"] = (df.valid_time - t_min) / pd.Timedelta(hours=1)
-        df["hour_std"] = (df.hour - hour_mu) / hour_std
-        df["lat_std"] = (df.latitude - lat_mu) / lat_std
-        df["lng_std"] = (df.longitude - lng_mu) / lng_std
-        df["elev_std"] = (df.z - elev_mu) / elev_std
-        df["temp_std"] = (df.t2m - temp_mu) / temp_std
-        df.rename(columns={"t2m": "temp"}, inplace=True)
-        # sort values this way so they can be reshaped into images of shape (T, H, W)
-        df = df.sort_values(
-            by=["hour_std", "lat_std", "lng_std"], ascending=[True, False, True]
+    def _hour(ds: xr.Dataset):
+        return (ds.time - t_min) / np.timedelta64(1, "h")
+
+    def _mu_std(arr: xr.DataArray):
+        return arr.mean().item(), arr.std().item()
+
+    def _stdize(arr, mu, std):
+        return ((arr - mu) / std).data.astype("float32")
+
+    hour_mu, hour_std = _mu_std(_hour(ds_train))
+    lat_mu, lat_std = _mu_std(ds_train.latitude)
+    lng_mu, lng_std = _mu_std(ds_train.longitude)
+    elev_mu, elev_std = _mu_std(ds_train.elevation)
+    temp_mu, temp_std = _mu_std(ds_train.temperature)
+
+    def standardize(ds: xr.Dataset):
+        return ds.assign(
+            {
+                "hour_since_start_standardized": (
+                    "time",
+                    _stdize(_hour(ds), hour_mu, hour_std),
+                ),
+                "hour_of_day_normalized": (
+                    "time",
+                    (ds.time.dt.hour / 23.0).data.astype("float32"),
+                ),
+                "latitude_standardized": (
+                    "latitude",
+                    _stdize(ds.latitude, lat_mu, lat_std),
+                ),
+                "longitude_standardized": (
+                    "longitude",
+                    _stdize(ds.longitude, lng_mu, lng_std),
+                ),
+                "elevation_standardized": (
+                    ("time", "latitude", "longitude"),
+                    _stdize(ds.elevation, elev_mu, elev_std),
+                ),
+                "temperature_standardized": (
+                    ("time", "latitude", "longitude"),
+                    _stdize(ds.temperature, temp_mu, temp_std),
+                ),
+            }
         )
-        return df.drop(columns=["z", "hour"]).reset_index(drop=True)
 
     def revert_t(t: jax.Array):
         hours = np.rint(t * hour_std + hour_mu).astype(int).astype("timedelta64[h]")
@@ -252,9 +283,9 @@ def standardize_using_train(
         return jnp.round(s * std + mu, decimals=1)
 
     return (
-        standardize(df_train),
-        standardize(df_valid),
-        standardize(df_test),
+        standardize(ds_train),
+        standardize(ds_valid),
+        standardize(ds_test),
         {"t": revert_t, "s": revert_s},
     )
 
