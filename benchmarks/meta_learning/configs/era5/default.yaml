@@ -5,9 +5,6 @@ defaults:
 seed: 42
 wandb: True
 project: ERA5
-train_num_steps: 250000
-valid_num_steps: 5000 # exhaust valid dataloader
-valid_interval: 5000
 plot_interval: 50000
 optimizer:
   _target_: optax.chain

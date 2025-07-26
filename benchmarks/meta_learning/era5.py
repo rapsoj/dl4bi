@@ -2,7 +2,9 @@
 import os
 from dataclasses import replace
 from datetime import datetime
+from functools import partial
 from pathlib import Path
+from typing import Callable, Optional
 
 import cdsapi
 import hydra
@@ -19,7 +21,6 @@ from jax import random
 from matplotlib.colors import Normalize
 from omegaconf import DictConfig, OmegaConf
 
-from dl4bi.core.data import multiprocess_wrapper
 from dl4bi.core.train import (
     Callback,
     TrainState,
@@ -47,8 +48,16 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     rng = random.key(cfg.seed)
     rng_train, rng_test = random.split(rng)
-    train_dataloader, valid_dataloader, test_dataloader, callback_dataloader = (
-        build_dataloaders(**cfg.data)
+    df_train, df_valid, df_test, revert = load_data(**cfg.data.splits)
+    train_dataloader = partial(dataloader, df=df_train, **cfg.data.train_dataloader)
+    valid_dataloader = partial(dataloader, df=df_valid, **cfg.data.valid_dataloader)
+    test_dataloader = partial(dataloader, df=df_test, **cfg.data.test_dataloader)
+    callback_dataloader = partial(
+        dataloader,
+        df=df_valid,
+        is_callback=True,
+        revert=revert,
+        **cfg.data.valid_dataloader,
     )
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
@@ -58,11 +67,11 @@ def main(cfg: DictConfig):
         model,
         optimizer,
         model.train_step,
-        cfg.train_num_steps,
+        cfg.data.train_num_steps,
         train_dataloader,
         model.valid_step,
-        cfg.valid_interval,
-        cfg.valid_num_steps,
+        cfg.data.valid_interval,
+        cfg.data.valid_num_steps,
         valid_dataloader,
         callbacks=[clbk],
         callback_dataloader=callback_dataloader,
@@ -81,7 +90,9 @@ def main(cfg: DictConfig):
     save_ckpt(state, cfg, path.with_suffix(".ckpt"))
 
 
-def build_dataloaders(
+def dataloader(
+    rng: jax.Array,
+    df: pd.DataFrame,
     batch_size: int = 16,
     num_ctx_min_per_t: int = 45,
     num_ctx_max_per_t: int = 225,
@@ -90,76 +101,55 @@ def build_dataloaders(
     W_deg: float = 7.5,
     T_hrs: int = 30,
     T_hrs_delta: int = 6,
-    train_region: str = "central_europe",
-    valid_region: str = "northern_europe",
-    test_region: str = "western_europe",
     num_batches_per_subset: int = 50,
+    is_callback: bool = False,
+    revert: Optional[Callable] = None,
 ):
     grid_res = 0.25
     H, W = int(H_deg / grid_res), int(W_deg / grid_res)
-    df_train, df_valid, df_test, revert = load_data(
-        train_region, valid_region, test_region
-    )
     x_cols = ["elev_std", "hour_of_day_norm"]
     s_cols = ["lat_std", "lng_std"]
     t_cols = ["hour_std"]
     f_cols = ["temp_std"]
     data_cols = x_cols + s_cols + t_cols + f_cols
-
-    def build_dataloader(df: pd.DataFrame, is_callback: bool = False):
-        lat_uniq, lng_uniq = df.latitude.unique(), df.longitude.unique()
-        lat_choices = lat_uniq[lat_uniq <= lat_uniq.max() - H_deg]
-        lng_choices = lng_uniq[lng_uniq <= lng_uniq.max() - W_deg]
-
-        def dataloader(rng: jax.Array):
-            while True:
-                # 1. Select random start time and filter times to every T_hrs_delta
-                rng_t, rng_lat, rng_lng, rng_b, rng = random.split(rng, 5)
-                hr_start = random.choice(rng_t, T_hrs_delta, (1,)).item()
-                dft = df[(df.valid_time.dt.hour + hr_start) % T_hrs_delta == 0]
-                # 2. Select a random lat/lng region that is H_deg x W_deg
-                lat_start = random.choice(rng_lat, lat_choices, (1,)).item()
-                lng_start = random.choice(rng_lng, lng_choices, (1,)).item()
-                dft = dft[
-                    (dft.latitude >= lat_start) & (dft.latitude < lat_start + H_deg)
-                ]
-                dft = dft[
-                    (dft.longitude >= lng_start) & (dft.longitude < lng_start + W_deg)
-                ]
-                # 3. Reshape data to [T, H, W, D]
-                shape = (dft.valid_time.nunique(), H, W, -1)
-                values = dft[data_cols].values.reshape(shape)
-                # 4. Separate out x, s, t, and f
-                subset = SpatiotemporalData(
-                    x=values[..., :2],  # [T, H, W, 2]
-                    s=values[..., 2:4],  # [T, H, W, 2]
-                    t=values[:, 0, 0, 4],  # [T]
-                    f=values[..., [5]],  # [T, H, W, 1]
-                )
-                # 5. Create a number of batches from this filtered subset
-                for _ in range(num_batches_per_subset):
-                    rng_b, rng = random.split(rng)
-                    batch = subset.batch(
-                        rng=rng_b,
-                        num_t=T_hrs // T_hrs_delta,
-                        random_t=False,
-                        num_ctx_min_per_t=num_ctx_min_per_t,
-                        num_ctx_max_per_t=num_ctx_max_per_t,
-                        independent_t_masks=True,
-                        num_test=num_test,
-                        forecast=True,
-                        batch_size=batch_size,
-                    )
-                    yield (batch, revert) if is_callback else batch
-
-        return dataloader
-
-    return (
-        build_dataloader(df_train),  # train
-        build_dataloader(df_valid),  # valid
-        build_dataloader(df_test),  # test
-        build_dataloader(df_valid, is_callback=True),  # callback
-    )
+    lat_uniq, lng_uniq = df.latitude.unique(), df.longitude.unique()
+    lat_choices = lat_uniq[lat_uniq <= lat_uniq.max() - H_deg]
+    lng_choices = lng_uniq[lng_uniq <= lng_uniq.max() - W_deg]
+    while True:
+        # 1. Select random start time and filter times to every T_hrs_delta
+        rng_t, rng_lat, rng_lng, rng_b, rng = random.split(rng, 5)
+        hr_start = random.choice(rng_t, T_hrs_delta, (1,)).item()
+        dft = df[(df.valid_time.dt.hour + hr_start) % T_hrs_delta == 0]
+        # 2. Select a random lat/lng region that is H_deg x W_deg
+        lat_start = random.choice(rng_lat, lat_choices, (1,)).item()
+        lng_start = random.choice(rng_lng, lng_choices, (1,)).item()
+        dft = dft[(dft.latitude >= lat_start) & (dft.latitude < lat_start + H_deg)]
+        dft = dft[(dft.longitude >= lng_start) & (dft.longitude < lng_start + W_deg)]
+        # 3. Reshape data to [T, H, W, D]
+        shape = (dft.valid_time.nunique(), H, W, -1)
+        values = dft[data_cols].values.reshape(shape)
+        # 4. Separate out x, s, t, and f
+        subset = SpatiotemporalData(
+            x=values[..., :2],  # [T, H, W, 2]
+            s=values[..., 2:4],  # [T, H, W, 2]
+            t=values[:, 0, 0, 4],  # [T]
+            f=values[..., [5]],  # [T, H, W, 1]
+        )
+        # 5. Create a number of batches from this filtered subset
+        for _ in range(num_batches_per_subset):
+            rng_b, rng = random.split(rng)
+            batch = subset.batch(
+                rng=rng_b,
+                num_t=T_hrs // T_hrs_delta,
+                random_t=False,
+                num_ctx_min_per_t=num_ctx_min_per_t,
+                num_ctx_max_per_t=num_ctx_max_per_t,
+                independent_t_masks=True,
+                num_test=num_test,
+                forecast=True,
+                batch_size=batch_size,
+            )
+            yield (batch, revert) if is_callback else batch
 
 
 def load_data(

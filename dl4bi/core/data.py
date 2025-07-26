@@ -112,6 +112,8 @@ class Batch(Mapping):
         return len(asdict(self))
 
 
+# TODO(danj): this copies CUDA state which reserved memory
+# for dataloaders that don't require CUDA
 ctx = mp.get_context("spawn")
 
 
