@@ -16,7 +16,7 @@ dataloader:
   W_deg: 7.5
   T_hrs: 30
   T_hrs_delta: 6
-  num_batches_per_subset: 50
+  num_batches_per_subset: 32
 train_dataloader: ${.dataloader}
 valid_dataloader: ${.dataloader}
 test_dataloader: ${.dataloader}
