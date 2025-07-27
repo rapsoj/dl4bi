@@ -13,7 +13,6 @@ import jax.numpy as jnp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import wandb
 import xarray as xr
 from hydra.utils import instantiate
@@ -226,7 +225,7 @@ def standardize_using_train(
     ds_valid: xr.Dataset,
     ds_test: xr.Dataset,
 ):
-    t_min = ds_train.time.min().item()
+    t_min = ds_train.time.min().values
 
     def _hour(ds: xr.Dataset):
         return (ds.time - t_min) / np.timedelta64(1, "h")
