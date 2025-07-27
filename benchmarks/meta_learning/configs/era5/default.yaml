@@ -5,7 +5,6 @@ defaults:
 seed: 42
 wandb: True
 project: ERA5
-plot_interval: 50000
 optimizer:
   _target_: optax.chain
   _args_:

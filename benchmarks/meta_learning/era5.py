@@ -61,7 +61,7 @@ def main(cfg: DictConfig):
     )
     optimizer = instantiate(cfg.optimizer)
     model = instantiate(cfg.model)
-    clbk = Callback(plot, cfg.plot_interval)
+    clbk = Callback(plot, cfg.data.plot_interval)
     state = train(
         rng_train,
         model,
@@ -226,7 +226,7 @@ def standardize_using_train(
     ds_valid: xr.Dataset,
     ds_test: xr.Dataset,
 ):
-    t_min = ds_train.time.min()
+    t_min = ds_train.time.min().item()
 
     def _hour(ds: xr.Dataset):
         return (ds.time - t_min) / np.timedelta64(1, "h")
