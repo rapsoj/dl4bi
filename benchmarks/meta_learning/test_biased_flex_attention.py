@@ -9,13 +9,44 @@ from torch.nn.attention.flex_attention import flex_attention
 
 torch.set_default_device("cuda:0")
 
-# NOTE: cannot get this to scale past ~L=1600
-# issue: https://github.com/pytorch/pytorch/issues/152593
+
+# NOTE (2025-09-02): while FlexAttention can be up to 40% faster in the forward
+# pass, it is typically 12-50x slower in the backward pass (on 4090), with N=100:
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=128
+# BFA: 0.000259±0.000093s, 0.010199±0.036357s
+# BSA: 0.000094±0.000023s, 0.000185±0.000025s
+# BFA / BSA: (2.75, 55.13)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=256 (16x16 images)
+# BFA: 0.000445±0.000020s, 0.024496±0.036699s
+# BSA: 0.000190±0.000033s, 0.000530±0.000032s
+# BFA / BSA: (2.34, 46.22)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=512
+# BFA: 0.001134±0.000024s, 0.085772±0.041085s
+# BSA: 0.001411±0.000055s, 0.003376±0.000091s
+# BFA / BSA: (0.80, 25.41)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=1024 (32x32 images)
+# BFA: 0.003763±0.000032s, 0.389202±0.025157s
+# BSA: 0.005366±0.000076s, 0.016974±0.000072s
+# BFA / BSA: (0.70, 22.93)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=2048
+# BFA: 0.013576±0.000095s, 1.087017±0.036390s
+# BSA: 0.022570±0.000194s, 0.089909±0.000107s
+# BFA / BSA: (0.60, 12.09)
+#
+# B=32, H=4, D=64, D_s=2, D_t=1, L=4096 (64x64 images)
+# BFA: 0.052779±0.000342s, 4.291944±0.037363s
+# BSA: 0.086497±0.000157s, 0.342182±0.000353s
+# BFA / BSA: (0.61, 12.54)
 
 
 def main(seed: int, N: int, B: int, H: int, L: int, D: int, D_s: int):
     torch.manual_seed(seed)
-    bias = RBFBias(num_heads=4, num_s=5, num_t=3)
+    bias = RBFBias(num_heads=H, num_s=5, num_t=3)
     kernel_options = {}
     # kernel_options = { # NOTE: doesn't help
     #     "BLOCK_M": 64,
@@ -27,6 +58,7 @@ def main(seed: int, N: int, B: int, H: int, L: int, D: int, D_s: int):
     # }  # https://github.com/pytorch/pytorch/issues/133254
     attn = BiasedFlexAttention(bias, kernel_options)
     # NOTE: doesn't support dynamic=True, max-autotune, or reductions in bias
+    # issue: https://github.com/pytorch/pytorch/issues/152593
     attn = torch.compile(attn)
     b = sample_batch(B, H, L, D, D_s)
     attn(**b)  # precompile flex_attention (?)
@@ -52,37 +84,6 @@ def main(seed: int, N: int, B: int, H: int, L: int, D: int, D_s: int):
     )
 
 
-# NOTE: while FlexAttention can be up to ~2x faster in the forward pass, it is
-# typically 12-50x slower in the backward pass (on 4090), with N=100 for each:
-#
-# B=32, H=4, D=64, D_s=2, D_t=1, L=128
-# BFA: 0.000268±0.000081s, 0.010269±0.035988s
-# BSA: 0.000090±0.000007s, 0.000182±0.000009s
-# BFA / BSA: (2.98, 56.42)
-#
-# B=32, H=4, D=64, D_s=2, D_t=1, L=256
-# BFA: 0.000443±0.000018s, 0.024941±0.040403s
-# BSA: 0.000177±0.000017s, 0.000500±0.000022s
-# BFA / BSA: (2.50, 49.89)
-#
-# B=32, H=4, D=64, D_s=2, D_t=1, L=512
-# BFA: 0.001138±0.000025s, 0.086045±0.042373s
-# BSA: 0.001447±0.000049s, 0.003369±0.000077s
-# BFA / BSA: (0.79, 25.54)
-#
-# B=32, H=4, D=64, D_s=2, D_t=1, L=1024
-# BFA: 0.003752±0.000031s, 0.394077±0.073106s
-# BSA: 0.005365±0.000078s, 0.016964±0.000079s
-# BFA / BSA: (0.70, 23.23)
-#
-# B=32, H=4, D=64, D_s=2, D_t=1, L=2048
-# BFA: 0.013611±0.000095s, 1.091492±0.087978s
-# BSA: 0.022590±0.000165s, 0.089980±0.000110s
-# BFA / BSA: (0.60, 12.13)
-#
-# B=32, H=4, D=64, D_s=2, D_t=1, L=4096
-#
-# BFA / BSA: ()
 class RBFBias(nn.Module):
     def __init__(self, num_heads: int, num_s: int, num_t: int):
         super().__init__()
@@ -135,9 +136,9 @@ class BiasedFlexAttention(nn.Module):
 
 
 def sample_batch(B: int, H: int, L: int, D: int, D_s: int):
-    qs, ks, vs = torch.randn(3, B, H, L, D)
-    qs_s, ks_s = torch.randn(2, B, L, D_s)
-    qs_t, ks_t = torch.randn(2, B, L, 1)
+    qs, ks, vs = torch.randn(3, B, H, L, D, dtype=torch.bfloat16)
+    qs_s, ks_s = torch.randn(2, B, L, D_s, dtype=torch.bfloat16)
+    qs_t, ks_t = torch.randn(2, B, L, 1, dtype=torch.bfloat16)
     return {
         "qs": qs,
         "ks": ks,
