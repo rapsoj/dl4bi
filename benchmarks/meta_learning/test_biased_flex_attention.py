@@ -15,7 +15,7 @@ torch.set_default_device("cuda:0")
 
 def main(seed: int, N: int, B: int, H: int, L: int, D: int, D_s: int):
     torch.manual_seed(seed)
-    bias = RBFBias(num_heads=4, num_basis=5)
+    bias = RBFBias(num_heads=4, num_s=5, num_t=3)
     kernel_options = {}
     # kernel_options = { # NOTE: doesn't help
     #     "BLOCK_M": 64,
@@ -26,41 +26,70 @@ def main(seed: int, N: int, B: int, H: int, L: int, D: int, D_s: int):
     #     "BLOCK_N2": 32,
     # }  # https://github.com/pytorch/pytorch/issues/133254
     attn = BiasedFlexAttention(bias, kernel_options)
-    # attn = torch.compile(attn, dynamic=False)  # NOTE: cannot reduce over num_basis > 1
+    # NOTE: doesn't support dynamic=True, max-autotune, or reductions in bias
+    attn = torch.compile(attn)
     b = sample_batch(B, H, L, D, D_s)
     attn(**b)  # precompile flex_attention (?)
     torch.cuda.synchronize()
-    times = torch.zeros(N)
+    times_fwd = torch.zeros(N)
+    times_bwd = torch.zeros(N)
     for i in range(N):
         b = sample_batch(B, H, L, D, D_s)
         torch.cuda.synchronize()
-        start = time.perf_counter()
-        attn(**b)
+        start_fwd = time.perf_counter()
+        q = attn(**b)
         torch.cuda.synchronize()
-        stop = time.perf_counter()
-        times[i] = stop - start
+        stop_fwd = time.perf_counter()
+        torch.cuda.synchronize()
+        start_bwd = time.perf_counter()
+        q.mean().backward()
+        torch.cuda.synchronize()
+        stop_bwd = time.perf_counter()
+        times_fwd[i] = stop_fwd - start_fwd
+        times_bwd[i] = stop_bwd - start_bwd
     print(
-        f"[B={B} H={H} L={L} D={D} D_s={D_s}]: {times.mean():0.6f}±{times.std():0.6f}s"
+        f"[B={B} H={H} L={L} D={D} D_s={D_s}]: {times_fwd.mean():0.6f}±{times_fwd.std():0.6f}s, {times_bwd.mean():0.6f}±{times_bwd.std():0.6f}s"
     )
 
 
+# NOTE: this seems to have trouble with the backward pass, even without
+# reductions; performance for biased flex attention and biased scan attention
+# for N=100, and various L:
+# L=256 BFA: (0.000252, 0.024034), BSA: (0.000169, 0.000492), BFA / BSA: (1.49, 48.8)
+# L=512 BFA: (0.000395, 0.089612), BSA: (0.001139, 0.00391), BFA / BSA: (0.35, 22.92)
+# L=1024 BFA: (0.001151, 0.386958), BSA: (0.005063, 0.016702), BFA / BSA: (0.23, 23.2)
+# L=2048 BFA: (0.003596, 1.050770), BSA: (0.020340, 0.086891), BFA / BSA: (0.18, 12.1)
+# L=4096 BFA: (0.013071, 4.199244), BSA: (0.080129, 0.329538), BFA / BSA: (0.16, 12.7)
 class RBFBias(nn.Module):
-    def __init__(self, num_heads, num_basis):
+    def __init__(self, num_heads: int, num_s: int, num_t: int):
         super().__init__()
-        # torch.compile cannot reduce over num_basis
-        self.alpha = nn.Parameter(torch.randn(num_heads, num_basis))
-        self.beta = nn.Parameter(torch.randn(num_heads, num_basis))
-        # self.alpha = nn.Parameter(torch.randn(num_heads))
-        # self.beta = nn.Parameter(torch.randn(num_heads))
+        # reductions like .sum() and higher order params aren't
+        # supported by torch.compile in FlexAttention, so specify
+        # each var here
+        self.num_s = num_s
+        self.num_t = num_t
+        for dim, num in [("s", num_s), ("t", num_t)]:
+            for i in range(num):
+                alpha = nn.Parameter(torch.randn(num_heads))
+                beta = nn.Parameter(torch.randn(num_heads))
+                self.register_parameter(f"{dim}_alpha_{i}", alpha)
+                self.register_parameter(f"{dim}_beta_{i}", beta)
 
-    def forward(self, score, b, h, q_idx, kv_idx, qs_s, ks_s):
-        q_s = qs_s[b, q_idx]
-        k_s = ks_s[b, kv_idx]
-        d_sq = torch.square(q_s - k_s).sum()
-        alpha, beta = self.alpha[h], self.beta[h]
-        d_rbf = alpha * torch.exp(-beta * d_sq)
-        # return score + d_rbf.sum()
-        return score + d_rbf  # when num_basis = 1
+    def forward(self, score, b, h, q_idx, kv_idx, qs_s, ks_s, qs_t, ks_t):
+        q_s, k_s = qs_s[b, q_idx], ks_s[b, kv_idx]
+        q_t, k_t = qs_t[b, q_idx], ks_t[b, kv_idx]
+        d_s_sq = torch.square(q_s - k_s).sum()
+        d_t_sq = torch.square(q_t - k_t).sum()
+        b_rbf = 0.0
+        for i in range(self.num_s):
+            alpha = getattr(self, f"s_alpha_{i}")[h]
+            beta = getattr(self, f"s_beta_{i}")[h]
+            b_rbf += alpha * torch.exp(-beta * d_s_sq)
+        for i in range(self.num_t):
+            alpha = getattr(self, f"t_alpha_{i}")[h]
+            beta = getattr(self, f"t_beta_{i}")[h]
+            b_rbf += alpha * torch.exp(-beta * d_t_sq)
+        return score + b_rbf
 
 
 class BiasedFlexAttention(nn.Module):
@@ -69,9 +98,9 @@ class BiasedFlexAttention(nn.Module):
         self.bias = bias
         self.kernel_options = kernel_options
 
-    def forward(self, qs, ks, vs, qs_s, ks_s):
+    def forward(self, qs, ks, vs, qs_s, ks_s, qs_t, ks_t):
         def score_mod(score, b, h, q_idx, kv_idx):
-            return self.bias(score, b, h, q_idx, kv_idx, qs_s, ks_s)
+            return self.bias(score, b, h, q_idx, kv_idx, qs_s, ks_s, qs_t, ks_t)
 
         return flex_attention(
             qs,
@@ -85,7 +114,16 @@ class BiasedFlexAttention(nn.Module):
 def sample_batch(B: int, H: int, L: int, D: int, D_s: int):
     qs, ks, vs = torch.randn(3, B, H, L, D)
     qs_s, ks_s = torch.randn(2, B, L, D_s)
-    return {"qs": qs, "ks": ks, "vs": vs, "qs_s": qs_s, "ks_s": ks_s}
+    qs_t, ks_t = torch.randn(2, B, L, 1)
+    return {
+        "qs": qs,
+        "ks": ks,
+        "vs": vs,
+        "qs_s": qs_s,
+        "ks_s": ks_s,
+        "qs_t": qs_t,
+        "ks_t": ks_t,
+    }
 
 
 def parse_args(argv):
@@ -102,7 +140,7 @@ def parse_args(argv):
     parser.add_argument(
         "-N",
         type=int,
-        default=1000,
+        default=100,
         help="Number of trials.",
     )
     parser.add_argument(
@@ -126,7 +164,7 @@ def parse_args(argv):
     parser.add_argument(
         "-D",
         type=int,
-        default=16,
+        default=64,
         help="Embedding dim per head.",
     )
     parser.add_argument(
