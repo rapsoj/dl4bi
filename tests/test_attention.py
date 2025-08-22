@@ -7,6 +7,7 @@ from jraph import GraphsTuple
 from sps.utils import build_grid
 
 from dl4bi.core.attention import (
+    AdaptiveMultiHeadSelfAttention,
     Attention,
     BiasedScanAttention,
     DeepKernelAttention,
@@ -16,6 +17,7 @@ from dl4bi.core.attention import (
     ScanAttention,
 )
 from dl4bi.core.bias import Bias
+from dl4bi.core.hyper import HyperLoRA, HyperLoRAqkv
 from dl4bi.core.utils import mask_from_valid_lens
 
 
@@ -61,6 +63,24 @@ def test_multihead_attention_impl():
     (ctx, attn), _ = MultiHeadAttention(attn=Attention(), num_heads=H).init_with_output(
         rng_init, qs, ks, vs, mask, bias=bias
     )
+    assert ctx.shape == (B, L, D), "Incorrect context output shape!"
+    assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
+
+
+def test_adaptive_multihead_self_attention_impl():
+    B, H, L, D = 4, 4, 32, 64
+    key = random.key(42)
+    rng_x, rng_bias, rng_init = random.split(key, 3)
+    x = random.normal(rng_x, (B, L, D))
+    bias = random.normal(rng_bias, (B, H, L, L))
+    valid_lens = jnp.array([2, 4, 6, 3])
+    mask = mask_from_valid_lens(L, valid_lens)
+    (ctx, attn), _ = AdaptiveMultiHeadSelfAttention(
+        attn=Attention(),
+        num_heads=H,
+        proj_qkv=HyperLoRAqkv(),
+        proj_out=HyperLoRA(D),
+    ).init_with_output(rng_init, x, mask, bias=bias)
     assert ctx.shape == (B, L, D), "Incorrect context output shape!"
     assert attn.shape == (B, H, L, L), "Incorrect attention output shape!"
 

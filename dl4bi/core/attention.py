@@ -12,6 +12,8 @@ from flax.core import FrozenDict
 from jax import jit, lax, random
 from jax.lax import scan
 
+from dl4bi.core.hyper import HyperLoRA, HyperLoRAqkv
+
 from .bias import Bias
 from .mlp import MLP
 
@@ -814,6 +816,52 @@ class MultiHeadAttention(nn.Module):
         ctx, attn = self.attn(qs, ks, vs, mask, training, **kwargs)
         ctx = rearrange(ctx, "B H L D -> B L (H D)")
         return self.proj_out(ctx), attn
+
+
+class AdaptiveMultiHeadSelfAttention(nn.Module):
+    r"""Performs adaptive multihead self attention.
+
+    Args:
+        attn: An attention module.
+        num_heads: Number of heads for attention module.
+
+    Returns:
+        A `MultiHeadAttention` module.
+    """
+
+    attn: nn.Module = Attention()
+    num_heads: int = 4
+    proj_qkv: nn.Module = HyperLoRAqkv()
+    proj_out: nn.Module = HyperLoRA(64)
+
+    @nn.compact
+    def __call__(
+        self,
+        x: jax.Array,  # [B, L, D]
+        mask: Optional[jax.Array] = None,  # [B, K]
+        training: bool = False,
+        **kwargs,
+    ):
+        r"""Performs forward pass of network.
+
+        Args:
+            qs: Queries of shape [B, Q, D_q].
+            ks: Keys of shape [B, K, D_k].
+            vs: Values of shape [B, K, D_v].
+            mask: Mask for keys and values of shape [B, K].
+            training: Boolean indicating whether currently training.
+            kwargs: Additional kwargs passed on to attention module.
+
+        Returns:
+            `ctx` and `attn`, the updated values and attention weights.
+        """
+        H = self.num_heads
+        qs, ks, vs = self.proj_qkv(x, x)  # x is condition
+        reshape = jit(lambda x: rearrange(x, "B L (H D) -> B H L D", H=H))
+        qs, ks, vs = map(reshape, (qs, ks, vs))
+        ctx, attn = self.attn(qs, ks, vs, mask, training, **kwargs)
+        ctx = rearrange(ctx, "B H L D -> B L (H D)")
+        return self.proj_out(ctx, ctx), attn  # ctx is condition
 
 
 class TEMultiHeadAttention(nn.Module):
