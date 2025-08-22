@@ -24,15 +24,19 @@ blk:
     proj_qs:
       _target_: dl4bi.hyper.HyperLoRA
       out_dim: 128
+      rank: 32
     proj_ks:
       _target_: dl4bi.hyper.HyperLoRA
       out_dim: 128
+      rank: 32
     proj_vs:
       _target_: dl4bi.hyper.HyperLoRA
       out_dim: 128
+      rank: 32
     proj_out:
       _target_: dl4bi.hyper.HyperLoRA
       out_dim: 64
+      rank: 32
   ffn:
     _target_: dl4bi.mlp.MLP
     dims: [256, 64]
