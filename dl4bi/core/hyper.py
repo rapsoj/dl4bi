@@ -1,5 +1,3 @@
-from functools import partial
-
 import flax.linen.initializers as init
 import jax
 import jax.numpy as jnp
