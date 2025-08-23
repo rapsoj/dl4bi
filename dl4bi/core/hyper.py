@@ -6,7 +6,6 @@ from flax import linen as nn
 
 class HyperLoRAqkv(nn.Module):
     rank: int = 16
-    alpha: float = 16
     dtype: jnp.dtype = jnp.float32
 
     @nn.compact
@@ -30,10 +29,9 @@ class HyperLoRAqkv(nn.Module):
         U_q = self.param("U_q", init.zeros, (D, R), self.dtype)
         U_k = self.param("U_k", init.zeros, (D, R), self.dtype)
         U_v = self.param("U_v", init.zeros, (D, R), self.dtype)
-        r = self.alpha / self.rank
-        delta_q = jnp.einsum("B L R, R D -> B L D", xV * s_q, U_q.T) * r
-        delta_k = jnp.einsum("B L R, R D -> B L D", xV * s_k, U_k.T) * r
-        delta_v = jnp.einsum("B L R, R D -> B L D", xV * s_v, U_v.T) * r
+        delta_q = jnp.einsum("B L R, R D -> B L D", xV * s_q, U_q.T)
+        delta_k = jnp.einsum("B L R, R D -> B L D", xV * s_k, U_k.T)
+        delta_v = jnp.einsum("B L R, R D -> B L D", xV * s_v, U_v.T)
         return q + delta_q, k + delta_k, v + delta_v
 
 
@@ -41,12 +39,11 @@ class HyperLoRA(nn.Module):
     """
     Generic Dense(x) + conditional low-rank ΔW(z) using LoRA factorization.
 
-    y = base(x) + scale * U @ ( (V @ x) ⊙ s(z) )
+    y = base(x) + U @ ( (V @ x) ⊙ s(z) )
     """
 
     out_dim: int = 128
     rank: int = 16
-    alpha: float = 16
     dtype: jnp.dtype = jnp.float32
 
     @nn.compact
@@ -61,6 +58,5 @@ class HyperLoRA(nn.Module):
             s = scale(z.reshape(B * L, D_z)).reshape(B, L, R)
         else:  # per batch element condition
             s = scale(z).reshape(B, 1, R)
-        r = self.alpha / self.rank
-        delta = jnp.einsum("B L R, R D -> B L D", xV * s, U.T) * r
+        delta = jnp.einsum("B L R, R D -> B L D", xV * s, U.T)
         return h + delta

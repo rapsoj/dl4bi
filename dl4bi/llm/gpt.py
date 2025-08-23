@@ -5,6 +5,8 @@ import jax.numpy as jnp
 from jax.nn import dot_product_attention
 from jax.tree_util import Partial
 
+from dl4bi.core.hyper import HyperLoRA, HyperLoRAqkv
+
 resid_init = init.normal(0.02 / jnp.sqrt(2 * 12))  # 2 resid for each of 12 layers
 Embed = Partial(nn.Embed, dtype=jnp.bfloat16, embedding_init=init.normal(0.02))
 Dense = Partial(nn.Dense, dtype=jnp.bfloat16, kernel_init=init.normal(0.02))
@@ -26,6 +28,20 @@ class MultiheadCausalAttention(nn.Module):
         return DenseResid(D)(ctx.reshape(B, L, D))
 
 
+class AdaptiveMultiheadCausalAttention(nn.Module):
+    num_heads: int = 4
+    d_model: int = 128
+
+    @nn.compact
+    def __call__(self, x: jax.Array):
+        (B, L, _), D, H = x.shape, self.d_model, self.num_heads
+        qs, ks, vs = HyperLoRAqkv(D // 4)(x, x)  # x is condition
+        qs, ks, vs = map(lambda x: x.reshape(B, L, H, D // H), (qs, ks, vs))
+        ctx = dot_product_attention(qs, ks, vs, is_causal=True, implementation="cudnn")
+        ctx = ctx.reshape(B, L, D)
+        return HyperLoRA(D)(ctx, ctx)
+
+
 class FFN(nn.Module):
     d_model: int = 128
     p_dropout: float = 0.0
@@ -42,10 +58,16 @@ class Block(nn.Module):
     num_heads: int = 4
     d_model: int = 128
     p_dropout: float = 0.0
+    adaptive: bool = False
 
     @nn.compact
     def __call__(self, x: jax.Array, training: bool = False):
-        x += MultiheadCausalAttention(self.num_heads, self.d_model)(LayerNorm()(x))
+        attn = (
+            AdaptiveMultiheadCausalAttention
+            if self.adaptive
+            else MultiheadCausalAttention
+        )
+        x += attn(self.num_heads, self.d_model)(LayerNorm()(x))
         x += FFN(self.d_model, self.p_dropout)(LayerNorm()(x), training)
         return x
 
@@ -58,6 +80,7 @@ class GPT(nn.Module):
     num_vocab: int = 50304
     num_context_window: int = 1024
     p_dropout: float = 0.0
+    adaptive: bool = False
 
     @nn.compact
     def __call__(self, token_ids: jax.Array, training: bool = False):
@@ -66,7 +89,7 @@ class GPT(nn.Module):
         x = embed_tok(token_ids) + embed_pos(jnp.arange(self.num_context_window))
         x = nn.Dropout(self.p_dropout, deterministic=not training)(x)
         for _ in range(self.num_blks):
-            blk = Block(self.num_heads, self.d_model, self.p_dropout)
+            blk = Block(self.num_heads, self.d_model, self.p_dropout, self.adaptive)
             for _ in range(self.num_reps):
                 x = blk(x, training)
         x = LayerNorm()(x)
