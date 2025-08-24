@@ -1,3 +1,5 @@
+from functools import partial
+
 import flax.linen as nn
 import flax.linen.initializers as init
 import jax
@@ -31,15 +33,16 @@ class MultiheadCausalAttention(nn.Module):
 class AdaptiveMultiheadCausalAttention(nn.Module):
     num_heads: int = 4
     d_model: int = 128
+    d_rank: int = 32
 
     @nn.compact
     def __call__(self, x: jax.Array):
         (B, L, _), D, H = x.shape, self.d_model, self.num_heads
-        qs, ks, vs = HyperLoRAqkv(D // 4, jnp.bfloat16)(x, x)  # x is condition
+        qs, ks, vs = HyperLoRAqkv(self.d_rank, jnp.bfloat16)(x, x)  # x is condition
         qs, ks, vs = map(lambda x: x.reshape(B, L, H, D // H), (qs, ks, vs))
         ctx = dot_product_attention(qs, ks, vs, is_causal=True, implementation="cudnn")
         ctx = ctx.reshape(B, L, D)
-        return HyperLoRA(D, D // 4, jnp.bfloat16)(ctx, ctx)
+        return HyperLoRA(D, self.d_rank, jnp.bfloat16)(ctx, ctx)
 
 
 class FFN(nn.Module):
@@ -57,14 +60,14 @@ class FFN(nn.Module):
 class Block(nn.Module):
     num_heads: int = 4
     d_model: int = 128
+    d_rank: int = 0
     p_dropout: float = 0.0
-    adaptive: bool = False
 
     @nn.compact
     def __call__(self, x: jax.Array, training: bool = False):
         attn = (
-            AdaptiveMultiheadCausalAttention
-            if self.adaptive
+            partial(AdaptiveMultiheadCausalAttention, d_rank=self.d_rank)
+            if self.d_rank > 0
             else MultiheadCausalAttention
         )
         x += attn(self.num_heads, self.d_model)(LayerNorm()(x))
@@ -74,13 +77,13 @@ class Block(nn.Module):
 
 class GPT(nn.Module):
     d_model: int = 768
+    d_rank: int = 0
     num_blks: int = 12
     num_reps: int = 1
     num_heads: int = 12
     num_vocab: int = 50304
     num_context_window: int = 1024
     p_dropout: float = 0.0
-    adaptive: bool = False
 
     @nn.compact
     def __call__(self, token_ids: jax.Array, training: bool = False):
@@ -89,7 +92,7 @@ class GPT(nn.Module):
         x = embed_tok(token_ids) + embed_pos(jnp.arange(self.num_context_window))
         x = nn.Dropout(self.p_dropout, deterministic=not training)(x)
         for _ in range(self.num_blks):
-            blk = Block(self.num_heads, self.d_model, self.p_dropout, self.adaptive)
+            blk = Block(self.num_heads, self.d_model, self.d_rank, self.p_dropout)
             for _ in range(self.num_reps):
                 x = blk(x, training)
         x = LayerNorm()(x)
