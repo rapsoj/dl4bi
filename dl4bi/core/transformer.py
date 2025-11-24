@@ -233,6 +233,28 @@ class TEBlock(nn.Module):
         return qs_4, qs_s, *rest
 
 
+class TEEncoder(nn.Module):
+    """A TEEncoder from [Translation Equivariant Transformer Netural Processes](https://arxiv.org/abs/2406.12409)."""
+
+    num_blks: int = 5
+    blk: nn.Module = TEBlock()
+
+    @nn.compact
+    def __call__(
+        self,
+        qs: jax.Array,  # [B, Q, D_q]
+        ks: jax.Array,  # [B, K, D_k]
+        qs_s: jax.Array,  # [B, Q, D_s]
+        ks_s: jax.Array,  # [B, K, D_s]
+        mask: Optional[jax.Array] = None,
+        training: bool = False,
+        **kwargs,
+    ):
+        for _ in range(self.num_blks):
+            qs, qs_s, _ = self.blk.copy()(qs, ks, qs_s, ks_s, mask, training, **kwargs)
+        return qs
+
+
 class TEISTEncoder(nn.Module):
     """TEISTEncoder from [Translation Equivariant Transformer Netural Processes](https://arxiv.org/abs/2406.12409)."""
 
