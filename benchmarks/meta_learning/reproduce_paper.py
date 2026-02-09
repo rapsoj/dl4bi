@@ -62,6 +62,24 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "AISTATS BSA-TNP - Gaussian Processes",
         dry_run=dry_run,
     )
+    # ablation requested by reviewer
+    ablation_overrides = [
+        "model.blk.attn.attn.bias.s.num_basis=1",
+        "model.blk.attn.attn.bias.s.num_basis=3",
+        "model.blk.attn.attn.bias.s.num_basis=5",
+        "model.blk.attn.attn.bias.s.num_basis=10",
+    ]
+    for num_basis_override in ablation_overrides:
+        gp_benchmark(
+            seeds,
+            "2d",
+            gp_kernels_2d,
+            ["2d/bsa_tnp"],
+            gp_main,
+            overrides + [num_basis_override],
+            "AISTATS BSA-TNP - Gaussian Processes (Ablation)",
+            dry_run=dry_run,
+        )
     gp_benchmark(
         seeds,
         "2d_shifted_10",
