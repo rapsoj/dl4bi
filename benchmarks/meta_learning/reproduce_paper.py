@@ -51,6 +51,17 @@ def bsa_tnp_paper(seeds: jax.Array, dry_run: bool = False):
         "AISTATS BSA-TNP - Gaussian Processes",
         dry_run=dry_run,
     )
+    # as requested by reviewer
+    gp_benchmark(
+        seeds,
+        "2d",
+        gp_kernels_2d,
+        [f"2d/{m}" for m in ["te_tnp_128", "te_tnp_vanilla"]],
+        gp_main,
+        overrides,
+        "AISTATS BSA-TNP - Gaussian Processes",
+        dry_run=dry_run,
+    )
     gp_benchmark(
         seeds,
         "2d_shifted_10",
