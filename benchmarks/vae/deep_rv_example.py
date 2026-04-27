@@ -280,7 +280,7 @@ def inference_model(s: Array, priors: dict, u: float, kernel_family, T: int):
             )
         
         # Occurrence (global probability) prior on logit scale
-        # CHANGE:Mmake exceedance probability spatially varying
+        # CHANGE:Make exceedance probability spatially varying
         occ_bias = numpyro.sample("occ_bias", dist.Normal(0.0, 1.0))
         occ_scale = numpyro.sample("occ_scale", dist.Normal(0.0, 1.0))
         occ_logit = occ_bias + occ_scale * mu # location
