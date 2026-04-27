@@ -1,0 +1,15 @@
+_target_: sps.gp.GP
+kernel:
+  _target_: sps.kernels.matern_3_2
+  _partial_: true
+var:
+  _target_: sps.priors.Prior
+  dist: fixed
+  kwargs:
+    value: 1.0
+ls:
+  _target_: sps.priors.Prior
+  dist: beta
+  kwargs:
+    a: 3.0
+    b: 7.0
