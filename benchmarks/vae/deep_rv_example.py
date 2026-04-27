@@ -118,119 +118,31 @@ def save_comparison_gif(y_true, y_pred, grid_size, T, path):
         plt.close(fig)
 
     imageio.mimsave(path, frames, fps=3)
+    
+    
+#### CHANGE: Add persistence model for comparison
+def evaluate_persistence(y_obs, y_pred, u, save_dir, prefix="persistence"):
+    y_obs = np.array(y_obs)
+    y_pred = np.array(y_pred)
 
+    obs_exceed = (y_obs > u).astype(int)
+    pred_exceed = (y_pred > u).astype(int)
 
-### CHANGE: To accept custom k for defining threshold
-def main(seed=57, gt_ls=20, k: float = 3.0, kernel_family: str ='sep'):
-    # kernel_family = {sep, nonsep, advected}
-    if kernel_family == "sep":
-        kernel_family = separable_kernel_family
-    elif kernel_family == "nonsep":
-        kernel_family = nonsep_kernel_family
-    elif kernel_family == "advected":
-        kernel_family = advected_kernel_family
-    else:
-        raise ValueError("Unknown kernel_family")
-    # NOTE: generate seeds and directories.
-    rng = random.key(seed)
-    rng_train, rng_infer, rng_idxs, rng_obs, rng = random.split(rng, 5)
-    wandb.init(mode="disabled")
-    save_dir = Path("results/DeepRV_example/")
-    save_dir.mkdir(parents=True, exist_ok=True)
-    # NOTE: generates the spatial grid to train and infer on
-    s = build_grid([{"start": 0.0, "stop": 100.0, "num": 12}] * 2).reshape(-1, 2)
-    # CHANGE: generate spatio-temporal grid based on spatial grid
-    T = 6
-    t_vals = jnp.linspace(0, 1, T)
+    results = {
+        "exceedance_accuracy": float((obs_exceed == pred_exceed).mean()),
+        "exceedance_rate_true": float(obs_exceed.mean()),
+        "exceedance_rate_pred": float(pred_exceed.mean()),
+    }
 
-    s_rep = jnp.repeat(s, T, axis=0)
-    t_rep = jnp.tile(t_vals, s.shape[0]).reshape(-1, 1)
+    with open(save_dir / f"{prefix}_metrics.json", "w") as f:
+        json.dump(results, f, indent=2)
 
-    s_st = jnp.concatenate([s_rep, t_rep], axis=1)
-
-    # Create synthetic training data first (so we can derive threshold from training set)
-    # For demonstration we treat gen_y_obs output as the training data.
-    # Compute threshold from training data y (if you have a real training set, pass it here)
-    # Generate an initial dataset to compute u
-    rng_train_data, rng_obs_data = random.split(rng_obs)
-    y_train, mu_train, sigma_train = gen_y_obs(rng_train_data, s_st, gt_ls, u=10.0, p_exceed=0.15, kernel_family=kernel_family)
-    u = compute_threshold(y_train, k=k)
-
-    # NOTE: The observed outcome to perform inference on
-    # Generate final observed data using the computed threshold
-    y_obs, mu_true, sigma_true = gen_y_obs(rng_obs_data, s_st, gt_ls, u=u, p_exceed=0.15, kernel_family=kernel_family)
-    xi_true = 0.1
-    p_true = 0.15
-
-    # NOTE: Priors for training and inference
-    priors = {"ls": dist.Uniform(1.0, 100.0), "beta": dist.Normal()}
-    sqrt_N = int(jnp.sqrt(s.shape[0]))
-    # NOTE: Mask detailing which locations are observable
-    obs_mask_spatial = gen_spatial_obs_mask(rng_idxs, (sqrt_N, sqrt_N), obs_ratio=0.7)
-
-    # CHANGE: temporal dropout (e.g. 80% observed per timestep)
-    rng_idxs, rng_t = random.split(rng_idxs)
-    temporal_mask = random.bernoulli(rng_t, 0.8, (obs_mask_spatial.shape[0], T))
-
-    obs_mask = (obs_mask_spatial[:, None] & temporal_mask).reshape(-1)
-    infer_model = inference_model(s_st, priors, u=u, kernel_family=kernel_family) # CHANGE: make input spatio-temporal
-    # NOTE: surrogate training
-    nn_model = gMLPDeepRV(num_blks=2)
-    optimizer = optax.adamw(cosine_annealing_lr(100_000, 1e-3), weight_decay=1e-2)
-    optimizer = optax.chain(optax.clip_by_global_norm(3.0), optimizer)
-    loader = gen_train_dataloader(s_st, priors, kernel_family) # CHANGE: make input spatio-temporal
-    state = train(
-        rng_train,
-        nn_model,
-        optimizer,
-        deep_rv_train_step,
-        100_000,
-        loader,
-        valid_step,
-        25_000,
-        5_000,
-        loader,
-        return_state="best",
-        valid_monitor_metric="norm MSE",
+    np.savez(
+        save_dir / f"{prefix}_predictions.npz",
+        y_pred=y_pred,
+        obs_exceed=obs_exceed,
+        pred_exceed=pred_exceed,
     )
-    surrogate_decoder = generate_surrogate_decoder(state, nn_model)
-    # NOTE: Inference DeepRV
-    samples_drv, mcmc_drv, y_hat_drv = hmc(
-        rng_infer, infer_model, y_obs, obs_mask, surrogate_decoder
-    )
-    cond_names = list(priors.keys())
-    # NOTE: Plotting inference traces, and mean predictions
-    plot_infer_trace(
-        samples_drv, mcmc_drv, None, cond_names, save_dir / "infer_trace_drv.png"
-    )
-    plot_models_predictive_means(
-        sqrt_N, y_obs, [y_hat_drv], obs_mask, ["DeepRV"], save_dir / "obs_means.png", u
-    )
-
-    save_comparison_gif(
-        y_obs,
-        y_hat_drv["mu"],  # or use excess if preferred
-        sqrt_N,
-        T,
-        save_dir / "comparison.gif"
-    )
-    #### CHANGE: Evaluate performance on extreme data
-    evaluate_extremes(
-        samples_drv,
-        y_hat_drv,
-        y_obs,
-        u,
-        xi_true,
-        p_true,
-        sigma_true,
-        mcmc_drv,
-        save_dir,
-    )
-
-    #### CHANGE: Save model
-    with open(save_dir / "surrogate.pkl", "wb") as f:
-        pickle.dump(state.params, f)
-
 
 def hmc(
     rng: Array,
@@ -250,8 +162,8 @@ def hmc(
 
     return samples, mcmc, post
 
-# CHANGE: add kernel function argument, now can take different kernel functions
-def gen_train_dataloader(s: Array, priors: dict, kernel_family, batch_size=32):
+# CHANGE: Add kernel function argument, now can take different kernel functions
+def gen_train_dataloader(s: Array, priors: dict, kernel_family, T: int, batch_size: int = 32):
     jitter = 1e-3 * jnp.eye(s.shape[0])
 
     f_jit = jit(lambda L, z: jnp.einsum("ij,bj->bi", L, z))
@@ -270,7 +182,6 @@ def gen_train_dataloader(s: Array, priors: dict, kernel_family, batch_size=32):
             L = jnp.linalg.cholesky(K)
 
             # sample latent with random walk for temporal dynamics
-            T = jnp.unique(s[:, -1]).shape[0]
             N = s.shape[0] // T
 
             z_eps = dist.Normal().sample(rng_z, (batch_size, T, N))
@@ -287,7 +198,7 @@ def gen_train_dataloader(s: Array, priors: dict, kernel_family, batch_size=32):
     return dataloader
 
 ### CHANGE: Replace with POT model (Bernoulli + GPD for excesses)
-def inference_model(s: Array, priors: dict, u: float, kernel_family):
+def inference_model(s: Array, priors: dict, u: float, kernel_family, T: int):
     """
     Builds POT inference model:
      - Bernoulli for exceedance indicator (global probability)
@@ -295,33 +206,53 @@ def inference_model(s: Array, priors: dict, u: float, kernel_family):
      - constant xi (constrained)
     """
     surrogate_kwargs = {"s": s}
+    
+    def build_kernel_params(ls):
+        if kernel_family.name == "separable":
+            return {
+                "var": 1.0,
+                "ls_space": ls,
+                "ls_time": 1.0,
+            }
+        elif kernel_family.name == "nonseparable":
+            return {
+                "var": 1.0,
+                "ls_space": ls,
+                "a": numpyro.sample("a", dist.Uniform(0.1, 2.0)),
+                "alpha": numpyro.sample("alpha", dist.Uniform(0.3, 1.0)),
+                "beta": numpyro.sample("beta_k", dist.Uniform(0.0, 1.0)),
+            }
+        elif kernel_family.name == "advected":
+            return {
+                "var": 1.0,
+                "ls_space": ls,
+                "a": numpyro.sample("a", dist.Uniform(0.1, 2.0)),
+                "alpha": numpyro.sample("alpha", dist.Uniform(0.3, 1.0)),
+                "beta": numpyro.sample("beta_k", dist.Uniform(0.0, 1.0)),
+                "v": numpyro.sample("v", dist.Normal(0.0, 0.5).expand([2])),
+            }
+        else:
+            raise ValueError(f"Unknown kernel family: {kernel_family.name}")
+
 
     def gpd_pot(surrogate_decoder=None, obs_mask=True, y=None):
         # hyperpriors
-        var = 1.0
         ls = numpyro.sample("ls", priors["ls"])
         beta = numpyro.sample("beta", priors["beta"])
 
-        # Occurrence (global probability) prior on logit scale
-        pi_logit = numpyro.sample("pi_logit", dist.Normal(0.0, 1.0))
-        p = jnp.clip(sigmoid(pi_logit), 1e-6, 1 - 1e-6)
-
-        # CHANGE: moving from spatio-temporal smoothing to forecasting with latent state evolution
+        # CHANGE: Moving from spatio-temporal smoothing to forecasting with latent state evolution
         # latent z with temporal dynamics (random walk)
-        T = jnp.unique(s[:, -1]).shape[0] # inferred from input
         N = s.shape[0] // T
         z_eps = numpyro.sample("z_eps", dist.Normal(), sample_shape=(T, N))
         # random walk in time
         z_t = jnp.cumsum(z_eps, axis=0)  # shape (T, N)
         # flatten to match DeepRV input
         z = z_t.reshape(1, -1)
-        params = kernel_family.sample_params(random.key(0))
-        params["ls_space"] = ls
+        params = build_kernel_params(ls)
 
         if surrogate_decoder is None:
             # CHANGE: spatial structure from GP, temporal structure from random walk
             # aka apply GP per time slice
-            T = jnp.unique(s[:, -1]).shape[0]
             N = s.shape[0] // T
 
             mu_list = []
@@ -347,7 +278,14 @@ def inference_model(s: Array, priors: dict, u: float, kernel_family):
                     **surrogate_kwargs
                 ).squeeze()
             )
-
+        
+        # Occurrence (global probability) prior on logit scale
+        # CHANGE:Make exceedance probability spatially varying
+        occ_bias = numpyro.sample("occ_bias", dist.Normal(0.0, 1.0))
+        occ_scale = numpyro.sample("occ_scale", dist.Normal(0.0, 1.0))
+        occ_logit = occ_bias + occ_scale * mu # location
+        p = jnp.clip(sigmoid(occ_logit), 1e-6, 1 - 1e-6)
+        
         sigma = jnp.exp(beta + mu)  # scale (>0)
 
         # stable constrained xi: map raw to (-0.5, 0.5) for stability
@@ -395,9 +333,10 @@ def valid_step(rng, state, batch):
     metrics = output.metrics(batch["f"], 1.0)
     return {"norm MSE": metrics["MSE"]}
 
-### CHANGE: New function to evaluation performance on extreme values
+### CHANGE: New function to evaluation performance on extreme values, take spatial probability map
 def evaluate_extremes(samples, predictive, y_obs, u,
-                      xi_true, p_true, sigma_true,
+                      xi_true, p_true_map, sigma_true,
+                      occ_bias_true, occ_scale_true,
                       mcmc_obj, save_dir):
 
     results = {}
@@ -408,32 +347,45 @@ def evaluate_extremes(samples, predictive, y_obs, u,
 
     results["xi_bias"] = float(xi_mean - xi_true)
     results["xi_covered"] = bool(xi_ci[0] <= xi_true <= xi_ci[1])
+    
+    # CHANGE: enable spatial variation in exceedances
+    mu_samples = np.array(samples["mu"])              # (S, N)
+    occ_bias_samples = np.array(samples["occ_bias"])  # (S,)
+    occ_scale_samples = np.array(samples["occ_scale"])# (S,)
+    # downsample to avoid memory explosion
+    idx = np.random.choice(len(mu_samples), size=300, replace=False)
+    mu_samples = mu_samples[idx]
+    occ_bias_samples = occ_bias_samples[idx]
+    occ_scale_samples = occ_scale_samples[idx]
+    
+    
+    p_samples = sigmoid(
+        occ_bias_samples[:, None] + occ_scale_samples[:, None] * mu_samples
+    )  # (S, N)
 
-    pi_logit = np.array(samples["pi_logit"])
-    p_samples = 1 / (1 + np.exp(-pi_logit))
-    p_mean = p_samples.mean()
-    p_ci = np.percentile(p_samples, [2.5, 97.5])
+    p_mean = p_samples.mean(axis=0)
+    p_ci_lower = np.percentile(p_samples, 2.5, axis=0)
+    p_ci_upper = np.percentile(p_samples, 97.5, axis=0)
 
-    results["p_bias"] = float(p_mean - p_true)
-    results["p_covered"] = bool(p_ci[0] <= p_true <= p_ci[1])
+    results["p_rmse"] = float(np.sqrt(np.mean((p_mean - p_true_map) ** 2)))
+    results["p_coverage"] = float(np.mean((p_true_map >= p_ci_lower) & (p_true_map <= p_ci_upper)))
 
     # ----- Return levels -----
-    T = 100
+    return_period = 100 # horizon for return level estimation
 
-    beta_samples = np.array(samples["beta"])
-    mu_samples = np.array(samples["mu"])
-    xi_samples = np.array(samples["xi"])
+    beta_samples = np.array(samples["beta"])[idx]
+    xi_samples = np.array(samples["xi"])[idx]
 
     sigma_samples = np.exp(beta_samples[:, None] + mu_samples)
 
     zT_samples = u + (sigma_samples / xi_samples[:, None]) * (
-        (T * p_samples[:, None]) ** xi_samples[:, None] - 1
+        (return_period * p_samples[:, None]) ** xi_samples[:, None] - 1
     )
 
     zT_mean = zT_samples.mean(axis=0)
 
     zT_true = u + (sigma_true / xi_true) * (
-        (T * p_true) ** xi_true - 1
+        (return_period * p_true_map) ** xi_true - 1
     )
 
     rmse = np.sqrt(((zT_mean - zT_true) ** 2).mean())
@@ -448,6 +400,21 @@ def evaluate_extremes(samples, predictive, y_obs, u,
 
     results["num_divergences"] = int(
         mcmc_obj.get_extra_fields()["diverging"].sum()
+    )
+    
+    occ_bias_samples = np.array(samples["occ_bias"])
+    occ_scale_samples = np.array(samples["occ_scale"])
+    
+    results["occ_bias_mean"] = float(occ_bias_samples.mean())
+    results["occ_bias_bias"] = float(occ_bias_samples.mean() - occ_bias_true)
+    results["occ_bias_covered"] = bool(
+        np.percentile(occ_bias_samples, 2.5) <= occ_bias_true <= np.percentile(occ_bias_samples, 97.5)
+    )
+    
+    results["occ_scale_mean"] = float(occ_scale_samples.mean())
+    results["occ_scale_bias"] = float(occ_scale_samples.mean() - occ_scale_true)
+    results["occ_scale_covered"] = bool(
+        np.percentile(occ_scale_samples, 2.5) <= occ_scale_true <= np.percentile(occ_scale_samples, 97.5)
     )
 
     with open(save_dir / "metrics.json", "w") as f:
@@ -473,7 +440,7 @@ def gen_y_obs(rng: Array, s: Array, gt_ls: float, u: float, p_exceed: float = 0.
     params = kernel_family.sample_params(rng_params)
     params["ls_space"] = gt_ls  # keep ground truth control
 
-    # CHANGE: replace matern 1/2 with st kernel
+    # CHANGE: Replace matern 1/2 with st kernel
     K = kernel_family.compute(s, s, params)
     K = 0.5 * (K + K.T) + 1e-3 * jnp.eye(s.shape[0])
 
@@ -483,8 +450,14 @@ def gen_y_obs(rng: Array, s: Array, gt_ls: float, u: float, p_exceed: float = 0.
     sigma = jnp.exp(beta + mu)  # scale for GPD at each location
     xi_true = 0.1  # ground truth shape
 
-    # occurrence indicators
-    occ = dist.Bernoulli(probs=p_exceed).sample(rng_occ, (s.shape[0],))
+    # occurrence/exceedance indicator
+    # CHANGE: enable variation in spatial detection of extremes
+    occ_bias = -2.0   # tune this to get your target exceedance rate
+    occ_scale = 1.0
+    
+    occ_logit = occ_bias + occ_scale * mu
+    p = sigmoid(occ_logit)
+    occ = dist.Bernoulli(probs=p).sample(rng_occ) #### CHANGE: Sample shape to make y_obs.shape = (N,)
 
     # sample excesses where occ == 1, else sample baseline values < u
     # For baseline non-exceedances, use a simple Uniform(0, u) so they are < u
@@ -496,7 +469,7 @@ def gen_y_obs(rng: Array, s: Array, gt_ls: float, u: float, p_exceed: float = 0.
     base_samples = dist.Uniform(0.0, u * 0.9).sample(rng_base, sample_shape=(s.shape[0],))
 
     y = jnp.where(occ.astype(jnp.bool_), u + excess_samples, base_samples)
-    return y, mu, sigma
+    return y, mu, sigma, p, occ_bias, occ_scale
 
 
 def gen_spatial_obs_mask(rng: Array, grid_shape: tuple, obs_ratio: float = 0.15):
@@ -552,7 +525,7 @@ def gen_spatial_obs_mask(rng: Array, grid_shape: tuple, obs_ratio: float = 0.15)
 
 ### CHANGE: Plot POTS (observed exceedance map, posterior mean/median probability of exceedance)
 def plot_models_predictive_means(
-        grid_size, y_obs, predictive_list, obs_mask, model_names, save_path: Path, u: float):
+        grid_size, y_obs, predictive_list, obs_mask, model_names, save_path: Path, u: float, T: int):
     """
     predictive_list: list of posterior predictive dicts returned by Predictive(model, samples)
     Each predictive dict must contain keys "occ" and "excess".
@@ -567,7 +540,7 @@ def plot_models_predictive_means(
     occ_mean = jnp.mean(occ_samples, axis=0)[:N].reshape(grid_size, grid_size)
     excess_median = jnp.median(excess_samples, axis=0)[:N].reshape(grid_size, grid_size)
 
-    y_obs_t0 = y_obs[:N].reshape(grid_size, grid_size)
+    y_obs_t0 = y_obs[0::T].reshape(grid_size, grid_size)
     observed_exceed = (y_obs_t0 > u).astype(float)
 
     fig, axs = plt.subplots(1, 3, figsize=(18, 6))
@@ -584,6 +557,138 @@ def plot_models_predictive_means(
 
     fig.savefig(save_path, dpi=200)
     plt.close(fig)
+    
+    
+### CHANGE: To accept custom k for defining threshold, T is number of steps on spatio-temporal grid
+def main(seed=57, gt_ls=20, k: float = 3.0, kernel_family: str = "sep", T: int = 6):
+    # kernel_family = {sep, nonsep, advected}
+    if kernel_family == "sep":
+        kernel_family = separable_kernel_family
+    elif kernel_family == "nonsep":
+        kernel_family = nonsep_kernel_family
+    elif kernel_family == "advected":
+        kernel_family = advected_kernel_family
+    else:
+        raise ValueError("Unknown kernel_family")
+    # NOTE: generate seeds and directories.
+    rng = random.key(seed)
+    rng_train, rng_infer, rng_idxs, rng_obs, rng = random.split(rng, 5)
+    wandb.init(mode="disabled")
+    save_dir = Path("results/DeepRV_example/")
+    save_dir.mkdir(parents=True, exist_ok=True)
+    # NOTE: generates the spatial grid to train and infer on
+    s = build_grid([{"start": 0.0, "stop": 100.0, "num": 12}] * 2).reshape(-1, 2)
+    # CHANGE: generate spatio-temporal grid based on spatial grid
+    t_vals = jnp.linspace(0, 1, T)
+    s_rep = jnp.repeat(s, T, axis=0)
+    t_rep = jnp.tile(t_vals, s.shape[0]).reshape(-1, 1)
+    s_st = jnp.concatenate([s_rep, t_rep], axis=1)
+
+    # Create synthetic training data first (so we can derive threshold from training set)
+    # For demonstration we treat gen_y_obs output as the training data.
+    # Compute threshold from training data y (if you have a real training set, pass it here)
+    # Generate an initial dataset to compute u
+    rng_train_data, rng_obs_data = random.split(rng_obs)
+    y_train, mu_train, sigma_train, p_train_true, occ_bias_true, occ_scale_true = gen_y_obs(rng_train_data, s_st, gt_ls, u=10.0, p_exceed=0.15, kernel_family=kernel_family)
+    u = compute_threshold(y_train, k=k)
+
+    # NOTE: The observed outcome to perform inference on
+    # Generate final observed data using the computed threshold
+    y_obs, mu_true, sigma_true, p_true_map, occ_bias_true, occ_scale_true = gen_y_obs(rng_obs_data, s_st, gt_ls, u=u, p_exceed=0.15, kernel_family=kernel_family)
+    xi_true = 0.1
+
+    # NOTE: Priors for training and inference
+    priors = {"ls": dist.Uniform(1.0, 100.0), "beta": dist.Normal()}
+    sqrt_N = int(jnp.sqrt(s.shape[0]))
+    # NOTE: Mask detailing which locations are observable
+    obs_mask_spatial = gen_spatial_obs_mask(rng_idxs, (sqrt_N, sqrt_N), obs_ratio=0.7)
+
+    # CHANGE: temporal dropout (e.g. 80% observed per timestep)
+    rng_idxs, rng_t = random.split(rng_idxs)
+    temporal_mask = random.bernoulli(rng_t, 0.8, (obs_mask_spatial.shape[0], T))
+
+    obs_mask = (obs_mask_spatial[:, None] & temporal_mask).reshape(-1)
+    infer_model = inference_model(s_st, priors, u=u, kernel_family=kernel_family, T=T) # CHANGE: make input spatio-temporal
+    # NOTE: surrogate training
+    nn_model = gMLPDeepRV(num_blks=2)
+    optimizer = optax.adamw(cosine_annealing_lr(100_000, 1e-3), weight_decay=1e-2)
+    optimizer = optax.chain(optax.clip_by_global_norm(3.0), optimizer)
+    loader = gen_train_dataloader(s_st, priors, kernel_family, T=T) # CHANGE: make input spatio-temporal
+    state = train(
+        rng_train,
+        nn_model,
+        optimizer,
+        deep_rv_train_step,
+        100_000,
+        loader,
+        valid_step,
+        25_000,
+        5_000,
+        loader,
+        return_state="best",
+        valid_monitor_metric="norm MSE",
+    )
+    surrogate_decoder = generate_surrogate_decoder(state, nn_model)
+    
+    #### CHANGE: Save model
+    with open(save_dir / "surrogate.pkl", "wb") as f:
+        pickle.dump(state.params, f)
+        
+    # NOTE: Inference DeepRV
+    samples_drv, mcmc_drv, y_hat_drv = hmc(
+        rng_infer, infer_model, y_obs, obs_mask, surrogate_decoder
+    )
+    cond_names = list(priors.keys())
+    
+    #### CHANGE: Persistence calculation predicting t from t-1, evaluated only at t >= 1
+    n_space = s.shape[0] # y_obs is flattened as [x1_t1, x1_t2, ..., x1_tT, x2_t1, ..., xN_tT
+    y_obs_arr = np.array(y_obs).reshape(n_space, T)
+    
+    y_persist_arr = np.empty_like(y_obs_arr) # predict t from t-1
+    y_persist_arr[:, 0] = np.nan   # no prediction available at t=0
+    y_persist_arr[:, 1:] = y_obs_arr[:, :-1]
+    
+    obs_eval = y_obs_arr[:, 1:] # evaluate only t >= 1
+    pred_eval = y_persist_arr[:, 1:]
+    
+    # NOTE: Plotting inference traces, and mean predictions
+    plot_infer_trace(
+        samples_drv, mcmc_drv, None, cond_names, save_dir / "infer_trace_drv.png"
+    )
+    plot_models_predictive_means(
+        sqrt_N, y_obs, [y_hat_drv], obs_mask, ["DeepRV"], save_dir / "obs_means.png", u, T
+    )
+
+    save_comparison_gif(
+        y_obs,
+        y_hat_drv["mu"],  # or use excess if preferred
+        sqrt_N,
+        T,
+        save_dir / "comparison.gif"
+    )
+    #### CHANGE: Evaluate performance on extreme data
+    evaluate_extremes(
+        samples_drv,
+        y_hat_drv,
+        y_obs,
+        u,
+        p_true_map=p_true_map,
+        xi_true=xi_true,
+        sigma_true=sigma_true,
+        occ_bias_true=occ_bias_true,
+        occ_scale_true=occ_scale_true,
+        mcmc_obj=mcmc_drv,
+        save_dir=save_dir,
+    )
+    
+    #### CHANGE: Evaluate persistence
+    evaluate_persistence(
+        obs_eval.reshape(-1),
+        pred_eval.reshape(-1),
+        u,
+        save_dir,
+        prefix="persistence",
+    )
 
 
 if __name__ == "__main__":
